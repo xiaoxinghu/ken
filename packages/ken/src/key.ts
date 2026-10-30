@@ -16,7 +16,7 @@ const PART = /^[a-z0-9._-]+$/
 export function redact(text: string): string {
 	return text
 		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s]*@/gi, '$1')
-		.replace(/^[^/\s:]*@(?=[^@:/\s]+:)/, '')
+		.replace(/(^|\s)[^/\s:]*@(?=[^@:/\s]+:)/g, '$1')
 }
 
 /**

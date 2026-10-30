@@ -41,7 +41,7 @@ export function readKenYaml(root: string): KenYaml {
 		parsed = existsSync(file) ? parse(readFileSync(file, 'utf8')) : null
 	} catch (e) {
 		throw new Error(
-			`${file} is not valid YAML, so ken cannot read its settings: ${(e as Error).message.trimEnd()}\n` +
+			`${file} is not valid YAML, so ken cannot read its settings: ${redact((e as Error).message.trimEnd())}\n` +
 				`Fix it, then run \`ken config\` to check.`
 		)
 	}

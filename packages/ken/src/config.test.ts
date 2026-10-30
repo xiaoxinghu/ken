@@ -28,10 +28,17 @@ describe('readKenYaml', () => {
 		expect(() => readKenYaml(root)).toThrow(join(root, '.ken.yaml'))
 	})
 
-	it('never shows the userinfo of a URL given as a layer key', () => {
-		const root = rootWith(
-			'layers: [{ name: atlas, key: "https://user:s3cret@github.com/acme/atlas.git" }]'
-		)
+	it.each([
+		[
+			'layers: [{ name: atlas, key: "https://user:s3cret@github.com/acme/atlas.git" }]',
+			'layers[0].key must be'
+		],
+		[
+			'layers: [{ name: atlas, key: "https://user:s3cret@github.com/acme/atlas.git }]',
+			'is not valid YAML'
+		]
+	])('never shows the userinfo of a URL in %j', (text, refusal) => {
+		const root = rootWith(text)
 		const message = (() => {
 			try {
 				readKenYaml(root)
@@ -39,7 +46,7 @@ describe('readKenYaml', () => {
 				return (e as Error).message
 			}
 		})()
-		expect(message).toContain('layers[0].key must be')
+		expect(message).toContain(refusal)
 		expect(message).not.toContain('s3cret')
 	})
 

@@ -185,8 +185,11 @@ wraps no git command that carries none of its rules; it prevents at the one writ
 and detects everywhere else, in `repos`.
 
 **Collisions and guards.** A folder in the way of a clone or worktree is named in the
-refusal. A key is validated as `<host>/<owner>/<repo>` with one slash each; GitLab
-subgroups are out of scope.
+refusal. A key is validated as `<host>/<owner>/<repo>` with one slash each, each part
+letters, digits, `.`, `_` and `-` and neither `.` nor `..`; a URL's `.git` is dropped and
+its userinfo never printed. GitLab subgroups are out of scope. A branch must pass git's
+own rules (`git check-ref-format --branch`), and `@` is refused as `git branch` refuses
+it. A root that does not exist is an error naming the path and where it came from.
 
 **Deliberately not in `ken`:** tasks and branch naming policy; anything about Claude Code
 or another harness; anything about GitHub beyond git; git commands that carry no rule;

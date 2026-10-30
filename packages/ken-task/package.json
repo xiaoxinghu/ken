@@ -1,0 +1,29 @@
+{
+	"name": "@unclex/ken-task",
+	"version": "0.0.0",
+	"description": "Plain-text tasks in denote names, a git worktree per task. Reached as `ken task`.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/xiaoxinghu/ken.git",
+		"directory": "packages/ken-task"
+	},
+	"homepage": "https://unclex.net",
+	"bin": {
+		"ken-task": "./src/cli.ts"
+	},
+	"files": [
+		"src",
+		"!src/**/*.test.ts"
+	],
+	"engines": {
+		"node": ">=24"
+	},
+	"peerDependencies": {
+		"@unclex/ken": "workspace:*"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

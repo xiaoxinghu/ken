@@ -1,0 +1,30 @@
+{
+	"name": "create-ken",
+	"version": "0.0.0",
+	"description": "Scaffold a ken root or a ken layer: `npm create ken`.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/xiaoxinghu/ken.git",
+		"directory": "packages/create-ken"
+	},
+	"homepage": "https://unclex.net",
+	"bin": {
+		"create-ken": "./src/cli.ts"
+	},
+	"files": [
+		"src",
+		"templates",
+		"!src/**/*.test.ts"
+	],
+	"engines": {
+		"node": ">=24"
+	},
+	"dependencies": {
+		"@unclex/ken": "workspace:*"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

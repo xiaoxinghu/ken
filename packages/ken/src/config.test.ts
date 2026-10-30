@@ -28,6 +28,21 @@ describe('readKenYaml', () => {
 		expect(() => readKenYaml(root)).toThrow(join(root, '.ken.yaml'))
 	})
 
+	it('never shows the userinfo of a URL given as a layer key', () => {
+		const root = rootWith(
+			'layers: [{ name: atlas, key: "https://user:s3cret@github.com/acme/atlas.git" }]'
+		)
+		const message = (() => {
+			try {
+				readKenYaml(root)
+			} catch (e) {
+				return (e as Error).message
+			}
+		})()
+		expect(message).toContain('layers[0].key must be')
+		expect(message).not.toContain('s3cret')
+	})
+
 	it('reads an empty file, and an empty key, as the defaults', () => {
 		expect(readKenYaml(rootWith(''))).toEqual(readKenYaml(rootWith('orgs:\nclone:\nlayers:\n')))
 		expect(readKenYaml(rootWith(''))).toEqual({

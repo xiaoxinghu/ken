@@ -2,7 +2,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { parse, stringify } from 'yaml'
 import type { Command } from './command.ts'
-import { parseKey } from './key.ts'
+import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
 import { locateRoot } from './root.ts'
 
@@ -32,7 +32,7 @@ export function readKenYaml(root: string): KenYaml {
 	const file = join(root, '.ken.yaml')
 	function fail(key: string, expected: string, got: unknown): never {
 		throw new Error(
-			`${file}: ${key} must be ${expected}, got ${JSON.stringify(got)}, so ken cannot read its settings. ` +
+			`${file}: ${key} must be ${expected}, got ${redact(JSON.stringify(got) ?? 'nothing')}, so ken cannot read its settings. ` +
 				`Fix ${key} in ${file}, then run \`ken config\` to check.`
 		)
 	}

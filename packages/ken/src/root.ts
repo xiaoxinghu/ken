@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, realpathSync } from 'node:fs'
+import { existsSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, resolve } from 'node:path'
 
@@ -21,9 +21,10 @@ export function findRoot(env = process.env): string {
 			? [configured, `"root" in ${file}`]
 			: ['~/ken', 'the default']
 	const path = resolve(value.replace(/^~(?=$|\/)/, home(env)))
-	if (!existsSync(path)) {
+	const stat = statSync(path, { throwIfNoEntry: false })
+	if (!stat?.isDirectory()) {
 		throw new Error(
-			`the ken root ${path} (from ${from}) does not exist, and every ken command works inside one. ` +
+			`the ken root ${path} (from ${from}) ${stat ? 'is not a folder' : 'does not exist'}, and every ken command works inside one. ` +
 				`Create it with \`npm create ken ${path}\`, or point KEN_ROOT or "root" in ${file} at an existing root.`
 		)
 	}

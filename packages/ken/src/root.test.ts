@@ -64,6 +64,13 @@ describe('findRoot', () => {
 		expect(() => findRoot(env)).toThrow(`(from "root" in ${configPath(env)})`)
 	})
 
+	it('refuses a root that is a file, which no checkout can live under', () => {
+		writeFileSync(join(dir, 'file.txt'), '')
+		expect(() => findRoot({ ...env, KEN_ROOT: join(dir, 'file.txt') })).toThrow(
+			`the ken root ${join(dir, 'file.txt')} (from KEN_ROOT) is not a folder`
+		)
+	})
+
 	it.each([
 		['not JSON', '{root:', 'is not valid JSON'],
 		['not an object', '["~/ken"]', 'must be a JSON object'],

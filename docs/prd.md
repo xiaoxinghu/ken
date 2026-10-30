@@ -325,6 +325,13 @@ task: # ken-task's section; ken keeps it and prints it, nothing more
   branch: "{id}"
 ```
 
+Every key is optional; a missing file is all defaults. A key of the wrong type, or a YAML
+error, stops every command with the file, the key and what it expects. `root` is refused
+here, since the root is per machine. `ken config --json` prints one object: `root` and
+`clone.blobless` as `{ value, source }`, `orgs`, `layers` with `cloned` and `linked` (the
+clone and the root link exist, a hint), then every unknown section as written, so a tool
+reads its own with `ken config --json | jq .task`.
+
 Per repo, a committed `.ken.yaml` at the repo root, read by `get -b` from the new
 worktree:
 

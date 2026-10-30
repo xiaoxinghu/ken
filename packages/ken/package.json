@@ -22,5 +22,8 @@
 	},
 	"publishConfig": {
 		"access": "public"
+	},
+	"dependencies": {
+		"yaml": "^2.9.1"
 	}
 }

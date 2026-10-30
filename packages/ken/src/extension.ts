@@ -67,8 +67,11 @@ export async function runExternal(name: string, args: string[]): Promise<number>
 		)
 	}
 	const child = spawn(file, args, { stdio: 'inherit', env: { ...process.env, KEN_ROOT: root } })
-	// The terminal sends these to the child too; ken waits for it to decide.
-	for (const signal of ['SIGINT', 'SIGQUIT'] as const) process.on(signal, () => {})
+	// Passed on, as git does, so the child decides and ken reports how it ended; on Ctrl-C the
+	// child gets SIGINT from the terminal as well.
+	for (const signal of ['SIGINT', 'SIGQUIT', 'SIGTERM', 'SIGHUP'] as const) {
+		process.on(signal, () => child.kill(signal))
+	}
 	return new Promise((resolve, reject) => {
 		child.on('error', (e) =>
 			reject(

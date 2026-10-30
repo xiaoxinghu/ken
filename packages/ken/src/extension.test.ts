@@ -1,4 +1,4 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import { mkdirSync, mkdtempSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -37,6 +37,7 @@ beforeAll(() => {
 	script(join(root, '.bin/ken-path'), 'echo shadowed')
 	script(join(root, '.bin/ken-fail'), 'exit 3')
 	script(join(root, '.bin/ken-killed'), 'kill -TERM $$')
+	script(join(root, '.bin/ken-wait'), 'echo ready; exec sleep 30')
 	script(join(root, '.bin/ken-plain'), 'echo plain', 0o644)
 })
 
@@ -84,6 +85,16 @@ describe('ken <name>', () => {
 		expect(ken('killed').status).toBe(128 + 15)
 	})
 
+	it('passes a signal sent to ken alone on to the child, and exits as the child did', async () => {
+		const child = spawn(process.execPath, [join(import.meta.dirname, 'cli.ts'), 'wait'], {
+			env: { ...process.env, KEN_ROOT: link }
+		})
+		await new Promise((ready) => child.stdout.once('data', ready))
+		child.kill('SIGINT')
+		const code = await new Promise((exited) => child.on('exit', exited))
+		expect(code).toBe(128 + 2)
+	})
+
 	it('says where it looked, in order, and points at ken help when nothing is found', () => {
 		const r = ken('frobnicate')
 		expect(r.status).toBe(1)
@@ -105,7 +116,7 @@ describe('ken <name>', () => {
 describe('ken help', () => {
 	it('lists the external commands that would run, by where they were found', () => {
 		const out = ken('help').stdout
-		expect(out).toContain(`  the root, ${join(root, '.bin')}: both, fail, hello, killed\n`)
+		expect(out).toContain(`  the root, ${join(root, '.bin')}: both, fail, hello, killed, wait\n`)
 		expect(out).toContain(`  layer atlas, ${layerBin}: team\n`)
 		expect(out).toContain(`  PATH, ${onPath}: far\n`)
 	})

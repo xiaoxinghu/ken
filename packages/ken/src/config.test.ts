@@ -28,7 +28,8 @@ describe('readKenYaml', () => {
 		expect(() => readKenYaml(root)).toThrow(join(root, '.ken.yaml'))
 	})
 
-	it('reads an empty file as the defaults', () => {
+	it('reads an empty file, and an empty key, as the defaults', () => {
+		expect(readKenYaml(rootWith(''))).toEqual(readKenYaml(rootWith('orgs:\nclone:\nlayers:\n')))
 		expect(readKenYaml(rootWith(''))).toEqual({
 			orgs: {},
 			clone: { blobless: true },

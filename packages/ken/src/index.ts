@@ -131,14 +131,17 @@ function isKey(text: string): boolean {
 
 /** The map at `path`, made when missing or null; an empty one is written as a block from now on. */
 function mapAt(doc: Document, path: string[]): YAMLMap {
-	let node = path.length ? doc.getIn(path, true) : doc.contents
-	if (!isMap(node)) {
-		node = doc.createNode({})
-		if (path.length) doc.setIn(path, node)
-		else doc.contents = node as YAMLMap
+	const node = path.length ? doc.getIn(path, true) : doc.contents
+	if (isMap(node)) {
+		if (!node.items.length) node.flow = false
+		return node
 	}
-	const map = node as YAMLMap
-	if (!map.items.length) map.flow = false
+	const map = doc.createNode({}) as YAMLMap
+	// a comment on an empty entry, `join-web: # by sales`, goes first in the map that replaces it
+	if (isNode(node))
+		map.commentBefore = [node.commentBefore, node.comment].filter(Boolean).join('\n')
+	if (path.length) doc.setIn(path, map)
+	else doc.contents = map
 	return map
 }
 

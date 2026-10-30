@@ -129,6 +129,21 @@ describe('ken index set', () => {
 		}
 	)
 
+	it('keeps the comment on an entry left empty when it fills it in', () => {
+		write(['github.com/acme:', '  repos:', '    join-web: # by sales'])
+		ken('set', 'github.com/acme/join-web', 'desc=Front end')
+		expect(read()).toBe(
+			[
+				'github.com/acme:',
+				'  repos:',
+				'    join-web:',
+				'      # by sales',
+				'      desc: Front end',
+				''
+			].join('\n')
+		)
+	})
+
 	it('writes into an entry that is {} or empty as a block', () => {
 		write(['github.com/acme:', '  repos:', '    join-web: {}', '    join-api:'])
 		ken('set', 'github.com/acme/join-web', 'desc=Front end')

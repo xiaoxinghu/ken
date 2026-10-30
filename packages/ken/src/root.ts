@@ -13,6 +13,19 @@ export function configPath(env = process.env): string {
  * (PRD decision 15) and every later comparison is between real paths.
  */
 export function findRoot(env = process.env): string {
+	const { path, from } = configuredRoot(env)
+	const stat = statSync(path, { throwIfNoEntry: false })
+	if (!stat?.isDirectory()) {
+		throw new Error(
+			`the ken root ${path} (from ${from}) ${stat ? 'is not a folder' : 'does not exist'}, and every ken command works inside one. ` +
+				`Create it with \`npm create ken ${path}\`, or point KEN_ROOT or "root" in ${configPath(env)} at an existing root.`
+		)
+	}
+	return realpathSync.native(path)
+}
+
+/** Where the root is meant to be, existing or not, and which setting said so. */
+export function configuredRoot(env = process.env): { path: string; from: string } {
 	const file = configPath(env)
 	const configured = env.KEN_ROOT || !existsSync(file) ? undefined : readRoot(file)
 	const [value, from] = env.KEN_ROOT
@@ -20,15 +33,7 @@ export function findRoot(env = process.env): string {
 		: configured
 			? [configured, `"root" in ${file}`]
 			: ['~/ken', 'the default']
-	const path = resolve(value.replace(/^~(?=$|\/)/, home(env)))
-	const stat = statSync(path, { throwIfNoEntry: false })
-	if (!stat?.isDirectory()) {
-		throw new Error(
-			`the ken root ${path} (from ${from}) ${stat ? 'is not a folder' : 'does not exist'}, and every ken command works inside one. ` +
-				`Create it with \`npm create ken ${path}\`, or point KEN_ROOT or "root" in ${file} at an existing root.`
-		)
-	}
-	return realpathSync.native(path)
+	return { path: resolve(value.replace(/^~(?=$|\/)/, home(env))), from }
 }
 
 const home = (env: NodeJS.ProcessEnv): string => env.HOME || homedir()

@@ -75,10 +75,18 @@ function validate(
 			refuse(desc ?? map, `the desc of ${what} must be a non-empty string`)
 		}
 	}
+	// ken looks keys up by string, so a key YAML reads as a number or boolean would never be found
+	const textOf = (key: unknown): string => {
+		const value = isScalar(key) ? key.value : key
+		if (typeof value !== 'string') {
+			refuse(key, `the key ${String(value)} is not a string (quote it: "${String(value)}")`)
+		}
+		return value as string
+	}
 	const entries: Record<string, Entry> = {}
 	for (const owner of mapOf(doc.contents, 'the top level, owners like github.com/acme,')?.items ??
 		[]) {
-		const name = nameOf(owner.key)
+		const name = textOf(owner.key)
 		if (!isKey(`${name}/repo`)) {
 			refuse(
 				owner.key,
@@ -88,11 +96,12 @@ function validate(
 		const ownerMap = mapOf(owner.value, name)
 		checkDesc(ownerMap, name)
 		for (const repo of mapOf(ownerMap?.get('repos', true), `${name} repos`)?.items ?? []) {
-			const key = `${name}/${nameOf(repo.key)}`
+			const key = `${name}/${textOf(repo.key)}`
 			if (!isKey(key)) refuse(repo.key, `${JSON.stringify(key)} is not a lowercase repo key`)
 			const entry = mapOf(repo.value, key)
+			for (const field of entry?.items ?? []) textOf(field.key)
 			checkDesc(entry, key)
-			entries[key] = (entry?.toJSON() as Entry | undefined) ?? {}
+			entries[key] = (entry?.toJS(doc) as Entry | undefined) ?? {}
 		}
 	}
 	return entries

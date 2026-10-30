@@ -129,6 +129,18 @@ describe('ken index set', () => {
 		}
 	)
 
+	it('reads an alias as the value it names', () => {
+		write([
+			'github.com/acme:',
+			'  repos:',
+			'    a:',
+			'      tags: &t [sales]',
+			'    b:',
+			'      tags: *t'
+		])
+		expect(readIndex(file)['github.com/acme/b']).toEqual({ tags: ['sales'] })
+	})
+
 	it('writes into an entry that is {} or empty as a block', () => {
 		write(['github.com/acme:', '  repos:', '    join-web: {}', '    join-api:'])
 		ken('set', 'github.com/acme/join-web', 'desc=Front end')
@@ -171,6 +183,11 @@ describe('ken index set', () => {
 		[
 			['github.com/acme:', '  repos:', '    join-web:', '      desc: ""'],
 			'index.yaml:4: the desc of github.com/acme/join-web'
+		],
+		// YAML reads 123 as a number, which no string path finds: set would add a second '123'
+		[
+			['github.com/acme:', '  repos:', '    123:', '      desc: x'],
+			'index.yaml:3: the key 123 is not a string'
 		],
 		[
 			['GitHub.com/acme:', '  repos: {}'],

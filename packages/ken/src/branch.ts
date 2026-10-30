@@ -1,3 +1,5 @@
+import { redact } from './key.ts'
+
 /**
  * Whether git takes `branch` as a branch name: the rules of `git check-ref-format --branch`,
  * and not `@`, which `git branch` refuses too.
@@ -20,7 +22,7 @@ function isBranchName(branch: string): boolean {
 export function branchFolder(branch: string): string {
 	if (!isBranchName(branch)) {
 		throw new Error(
-			`${JSON.stringify(branch)} is not a branch name git accepts (git check-ref-format --branch), ` +
+			`${JSON.stringify(redact(branch))} is not a branch name git accepts (git check-ref-format --branch), ` +
 				'so no worktree can hold it. A branch name has no empty part between slashes, no part that ' +
 				'starts with "." or ends in ".lock", no "..", "@{", space, control character or any of ~^:?*[\\, ' +
 				'does not start with "-" or end with ".", and is not HEAD or @. Pick one such as feat/login.'

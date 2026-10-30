@@ -35,6 +35,13 @@ describe('ken path', () => {
 		expect(ken('path', 'bin').stdout).toBe(`${root}/.bin\n`)
 	})
 
+	it('never shows the userinfo of a URL given as the branch', () => {
+		const r = ken('path', 'code', 'github.com/acme/repo', 'https://user:s3cret@github.com/a/b.git')
+		expect(r.status).toBe(1)
+		expect(r.stderr).toContain('is not a branch name')
+		expect(r.stderr).not.toContain('s3cret')
+	})
+
 	it('fails on a form it does not resolve, pointing at its help', () => {
 		const r = ken('path', 'layer', 'x')
 		expect(r).toMatchObject({ status: 1, stdout: '' })

@@ -1,20 +1,12 @@
 # ken
 
-A workspace root that is a knowledge base, with every git checkout under its hidden
-`.repos/` and a kernel CLI that enforces the layout. Read `docs/prd.md` before changing
-behaviour, and change it in the same PR when the behaviour changes: it says what is true
-now, and git is its history.
+Read `docs/prd.md` before changing behaviour, and change it in the same PR when the
+behaviour changes: it says what is true now, and git is its history.
 
-Three packages, one pnpm workspace:
-
-- `packages/ken`: `@unclex/ken`, the kernel. Primitives only; the PRD says what is not in it.
-- `packages/ken-task`: `@unclex/ken-task`, the denote task system, reached as `ken task`.
-  Depends on `ken`; `ken` never depends on it.
-- `packages/create-ken`: `create-ken`, `npm create ken`: a template plus `ken init`.
-
-Implement the smallest solution that fully satisfies the request. Avoid speculative
-features and abstractions. Every message the CLIs print is a next step for an agent that
-sees nothing else: what is the case, why it matters, what to run.
+Keep the code as small as possible: implement the smallest solution that fully satisfies
+the request, no speculative features or abstractions. Every message the CLIs print is a
+next step for an agent that sees nothing else: what is the case, why it matters, what to
+run.
 
 ## Tools
 

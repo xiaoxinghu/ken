@@ -4,42 +4,41 @@
  */
 export type Repo = { key: string; url: string }
 
-const SCP = /^[^@/\s]+@([^:/\s]+):(.*)$/ // git@github.com:owner/repo.git
 const SCHEME = /^[a-z][a-z0-9+.-]*:\/\//i
+// the userinfo runs to the last @ before the host, and the path is taken as written, so no
+// part a URL parser would normalise away (`..`, `%2e`) escapes the checks below
+const URL_FORM = /^[a-z][a-z0-9+.-]*:\/\/(?:[^/\s]*@)?([^/:@\s]*)(?::\d*)?\/(.*)$/i
+const SCP = /^[^/\s:]*@([^@:/\s]+):(.*)$/ // git@github.com:owner/repo.git
 // a part is a folder name under .repos/: nothing a path, a shell or YAML would read twice
 const PART = /^[a-z0-9._-]+$/
 
 /** Strip the userinfo (`user:token@`) from URLs in `text`, so a message never shows a secret. */
 export function redact(text: string): string {
 	return text
-		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/@\s]+@/gi, '$1')
-		.replace(/^[^@/\s:]+@(?=[^:/\s]+:)/, '')
+		.replace(/([a-z][a-z0-9+.-]*:\/\/)[^/\s]*@/gi, '$1')
+		.replace(/^[^/\s:]*@(?=[^@:/\s]+:)/, '')
 }
 
 /**
  * Parse a key or a git URL (https, ssh, or scp-style) into its key and the URL to clone. A key
- * alone clones from `https://<key>.git`; a URL is kept as given, for git.
+ * alone clones from `https://<key>.git`; a URL is kept as given, for git, and loses its `.git`
+ * in the key. A key keeps a `.git` of its own: `<host>/<owner>/tools.git` is that repo.
  */
 export function parseKey(input: string): Repo {
 	const s = input.trim()
+	const scheme = SCHEME.test(s)
+	const url = scheme ? URL_FORM.exec(s) : SCP.exec(s)
 	let host = ''
 	let path = ''
-	const scp = SCP.exec(s)
-	if (scp) {
-		host = scp[1] ?? ''
-		path = scp[2] ?? ''
-	} else if (SCHEME.test(s)) {
-		try {
-			const url = new URL(s)
-			host = url.hostname
-			path = url.pathname.slice(1)
-		} catch {}
-	} else {
+	if (url) {
+		host = url[1] ?? ''
+		path = (url[2] ?? '').replace(/\.git$/, '')
+	} else if (!scheme) {
 		const i = s.indexOf('/')
 		host = i < 0 ? s : s.slice(0, i)
 		path = i < 0 ? '' : s.slice(i + 1)
 	}
-	const parts = [host, ...path.replace(/\.git$/, '').split('/')].map((p) => p.toLowerCase())
+	const parts = [host, ...path.split('/')].map((p) => p.toLowerCase())
 	const valid = parts.length === 3 && parts.every((p) => PART.test(p) && p !== '.' && p !== '..')
 	if (!valid) {
 		throw new Error(
@@ -50,5 +49,5 @@ export function parseKey(input: string): Repo {
 		)
 	}
 	const key = parts.join('/')
-	return { key, url: scp || SCHEME.test(s) ? s : `https://${key}.git` }
+	return { key, url: scheme || url ? s : `https://${key}.git` }
 }

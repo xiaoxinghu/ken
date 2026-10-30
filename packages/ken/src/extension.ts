@@ -1,7 +1,7 @@
 import { spawn } from 'node:child_process'
 import { accessSync, constants, readdirSync, statSync } from 'node:fs'
 import { constants as os } from 'node:os'
-import { delimiter, join } from 'node:path'
+import { delimiter, join, resolve } from 'node:path'
 import { readKenYaml } from './config.ts'
 import { redact } from './key.ts'
 import { codePath } from './path.ts'
@@ -17,10 +17,8 @@ function places(root: string): Place[] {
 			dir: join(codePath(root, key), '.bin'),
 			from: `layer ${name}`
 		})),
-		...(process.env.PATH ?? '')
-			.split(delimiter)
-			.filter(Boolean)
-			.map((dir) => ({ dir, from: 'PATH' }))
+		// an empty PATH entry is the current directory, as in any shell
+		...(process.env.PATH ?? '').split(delimiter).map((dir) => ({ dir: resolve(dir), from: 'PATH' }))
 	]
 }
 

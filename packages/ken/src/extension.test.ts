@@ -33,6 +33,7 @@ beforeAll(() => {
 	script(join(layerBin, 'ken-both'), 'echo layer')
 	script(join(layerBin, 'ken-team'), 'echo team')
 	script(join(onPath, 'ken-far'), 'echo far')
+	script(join(onPath, '../ken-here'), 'echo here')
 	script(join(root, '.bin/ken-path'), 'echo shadowed')
 	script(join(root, '.bin/ken-fail'), 'exit 3')
 	script(join(root, '.bin/ken-killed'), 'kill -TERM $$')
@@ -63,6 +64,15 @@ describe('ken <name>', () => {
 
 	it('runs one found only on PATH', () => {
 		expect(ken('far').stdout).toBe('far\n')
+	})
+
+	it('takes an empty PATH entry as the current directory, as a shell does', () => {
+		const r = spawnSync(process.execPath, [join(import.meta.dirname, 'cli.ts'), 'here'], {
+			cwd: join(onPath, '..'),
+			encoding: 'utf8',
+			env: { ...process.env, KEN_ROOT: link, PATH: `:${process.env.PATH}` }
+		})
+		expect(r.stdout).toBe('here\n')
 	})
 
 	it('never lets a ken-<builtin> shadow the builtin', () => {

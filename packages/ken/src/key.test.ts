@@ -54,7 +54,8 @@ describe('parseKey', () => {
 		'https://s3cret@gitlab.com/a/b/c.git',
 		's3cret@github.com:onlyowner',
 		'https://user:prefix@s3cret@github.com/onlyowner',
-		'user@s3cret@github.com:onlyowner'
+		'user@s3cret@github.com:onlyowner',
+		' s3cret@github.com:onlyowner'
 	])('never shows the userinfo of %s', (input) => {
 		expect(() => parseKey(input)).toThrow('is not a repo key')
 		expect(() => parseKey(input)).not.toThrow(/s3cret/)

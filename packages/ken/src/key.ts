@@ -42,7 +42,7 @@ export function parseKey(input: string): Repo {
 	const valid = parts.length === 3 && parts.every((p) => PART.test(p) && p !== '.' && p !== '..')
 	if (!valid) {
 		throw new Error(
-			`${JSON.stringify(redact(input))} is not a repo key or git URL, so it names no folder under .repos/. ` +
+			`${JSON.stringify(redact(s))} is not a repo key or git URL, so it names no folder under .repos/. ` +
 				'A key is <host>/<owner>/<repo> with one slash between each part, e.g. github.com/acme/join-web; ' +
 				'a URL is https://github.com/acme/join-web.git, ssh://git@github.com/acme/join-web.git ' +
 				'or git@github.com:acme/join-web.git. GitLab subgroups (an owner with slashes) are not supported.'

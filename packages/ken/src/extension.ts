@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process'
 import { accessSync, constants, readdirSync, statSync } from 'node:fs'
 import { constants as os } from 'node:os'
 import { delimiter, join, resolve } from 'node:path'
+import { shellWord } from './command.ts'
 import { readKenYaml } from './config.ts'
 import { redact } from './key.ts'
 import { codePath } from './path.ts'
@@ -53,7 +54,7 @@ export async function runExternal(name: string, args: string[]): Promise<number>
 		if (plain) {
 			throw new Error(
 				`${plain} would run as \`ken ${name}\`, but it is not executable. ` +
-					`Run \`chmod +x ${plain}\`, then \`ken ${name}\` again.`
+					`Run \`chmod +x ${shellWord(plain)}\`, then \`ken ${shellWord(name)}\` again.`
 			)
 		}
 		const shown = JSON.stringify(redact(name))

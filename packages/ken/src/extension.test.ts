@@ -113,6 +113,18 @@ describe('ken <name>', () => {
 	})
 })
 
+it('gives a chmod that works when copied, for a root whose path a shell would split', () => {
+	const odd = join(realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-ext-'))), "it's $(x) ken")
+	mkdirSync(join(odd, '.bin'), { recursive: true })
+	script(join(odd, '.bin/ken-plain'), 'echo plain', 0o644)
+	const env = { ...process.env, KEN_ROOT: odd }
+	const cli = [join(import.meta.dirname, 'cli.ts'), 'plain']
+	const told = spawnSync(process.execPath, cli, { encoding: 'utf8', env }).stderr
+	const chmod = told.match(/`(chmod \+x .*?)`, then/)?.[1] ?? ''
+	expect(spawnSync('sh', ['-c', chmod]).status).toBe(0)
+	expect(spawnSync(process.execPath, cli, { encoding: 'utf8', env }).stdout).toBe('plain\n')
+})
+
 describe('ken help', () => {
 	it('lists the external commands that would run, by where they were found', () => {
 		const out = ken('help').stdout

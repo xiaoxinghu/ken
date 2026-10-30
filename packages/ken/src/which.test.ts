@@ -66,10 +66,19 @@ describe('locate', () => {
 	})
 
 	it('takes a folder not made yet beside a clone as its worktree, not as a repo of that name', () => {
-		expect(locate(`${clone}.fix-1/src`, root)).toEqual({
+		const place = { key: 'github.com/a/b', kind: 'worktree', branch: null }
+		expect(locate(`${clone}.fix-1/src`, root)).toEqual(place)
+		// the worktree b.feat-login is beside it too, but is no clone to key b.feat-login.x by
+		expect(locate(`${worktree}.x/src`, root)).toEqual(place)
+	})
+
+	it("keys a worktree outside its clone's owner folder by the clone, host and owner included", () => {
+		const elsewhere = join(root, '.repos/github.com/z/b.fix')
+		git(clone, 'worktree', 'add', '-q', '-b', 'fix', elsewhere)
+		expect(locate(elsewhere, root)).toEqual({
 			key: 'github.com/a/b',
 			kind: 'worktree',
-			branch: null
+			branch: 'fix'
 		})
 	})
 

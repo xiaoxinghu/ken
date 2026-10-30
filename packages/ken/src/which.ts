@@ -43,10 +43,13 @@ export function locate(path: string, root: string): Place {
 	}
 	const keyOf = (repo: string) => parseKey(`${host}/${owner}/${repo}`).key
 	if (!existsSync(dir)) {
-		// not checked out yet: `<repo>.<anything>` beside an existing clone `<repo>` is its worktree
+		// not checked out yet: `<repo>.<anything>` beside a clone `<repo>` (a .git folder, not a
+		// worktree's .git file) is its worktree
 		const clone = [...folder.matchAll(/\./g)]
 			.map((m) => folder.slice(0, m.index))
-			.findLast((c) => c && existsSync(join(dir, '..', c)))
+			.findLast(
+				(c) => c && statSync(join(dir, '..', c, '.git'), { throwIfNoEntry: false })?.isDirectory()
+			)
 		return clone
 			? { key: keyOf(clone), kind: 'worktree', branch: null }
 			: { key: keyOf(folder), kind: 'clone', branch: null }
@@ -76,7 +79,7 @@ export function locate(path: string, root: string): Place {
 				'layout with `ken get <key> -b <branch>`.'
 		)
 	}
-	return { key: keyOf(parts[2] ?? ''), kind: 'worktree', branch }
+	return { key: parseKey(parts.join('/')).key, kind: 'worktree', branch }
 }
 
 export const which: Command = {

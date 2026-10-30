@@ -99,6 +99,36 @@ describe('ken index set', () => {
 	})
 
 	// `ken get` writes `{}`, flow style; the first field set into it must not keep that style
+	it('keeps the comments on a field it replaces', () => {
+		write([
+			'github.com/acme:',
+			'  repos:',
+			'    join-web:',
+			'      # one line',
+			'      desc: old # by sales'
+		])
+		ken('set', 'github.com/acme/join-web', 'desc=new')
+		expect(read()).toBe(
+			[
+				'github.com/acme:',
+				'  repos:',
+				'    join-web:',
+				'      # one line',
+				'      desc: new # by sales',
+				''
+			].join('\n')
+		)
+	})
+
+	it.each([[['github.com/acme:']], [['github.com/acme:', '  repos:']]])(
+		'fills in an owner or repos left empty in %j',
+		(lines) => {
+			write(lines)
+			ken('set', 'github.com/acme/join-web', 'desc=Front end')
+			expect(readIndex(file)).toEqual({ 'github.com/acme/join-web': { desc: 'Front end' } })
+		}
+	)
+
 	it('writes into an entry that is {} or empty as a block', () => {
 		write(['github.com/acme:', '  repos:', '    join-web: {}', '    join-api:'])
 		ken('set', 'github.com/acme/join-web', 'desc=Front end')

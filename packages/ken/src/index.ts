@@ -4,6 +4,7 @@ import {
 	type Document,
 	isCollection,
 	isMap,
+	isNode,
 	isScalar,
 	LineCounter,
 	type Node,
@@ -145,9 +146,17 @@ const pathOf = (key: string): string[] => {
 /** Write `fields` into the entry of `key`, creating it and its owner when missing. */
 export function setFields(file: string, key: string, fields: Record<string, unknown>): void {
 	edit(file, (doc) => {
-		mapAt(doc, [])
-		const entry = mapAt(doc, pathOf(key))
-		for (const [field, value] of Object.entries(fields)) entry.set(field, doc.createNode(value))
+		const path = pathOf(key)
+		// setIn cannot pass through a null owner or repos, so make each map on the way
+		for (let n = 0; n < path.length; n++) mapAt(doc, path.slice(0, n))
+		const entry = mapAt(doc, path)
+		for (const [field, value] of Object.entries(fields)) {
+			const old = entry.get(field, true)
+			const node = doc.createNode(value)
+			if (isNode(old))
+				Object.assign(node, { comment: old.comment, commentBefore: old.commentBefore })
+			entry.set(field, node)
+		}
 	})
 }
 

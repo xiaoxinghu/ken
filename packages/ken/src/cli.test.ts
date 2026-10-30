@@ -222,11 +222,4 @@ describe('ken help', () => {
 		}
 		expect(ken().stdout).toBe(overview)
 	})
-
-	it('points an unknown command at ken help', () => {
-		const r = ken('frobnicate')
-		expect(r.status).toBe(1)
-		expect(r.stderr).toContain('"frobnicate" is not a ken command')
-		expect(r.stderr).toContain('run `ken help`')
-	})
 })

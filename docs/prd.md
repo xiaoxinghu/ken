@@ -95,12 +95,13 @@ an existing section. Everything else at the root is a section of the knowledge b
    rule there would upload object stores and secrets.
 6. **`ken` is a kernel of primitives.** A command is a primitive when it enforces a rule
    that will not change, or is the only safe way to do a file operation under those rules.
-   Everything else, flows, hooks, lint, status, the lazy clone, the task system, is built
-   on top in scripts, skills and separate packages, and evolves without touching the
-   kernel.
+   A git command that carries no rule of ours is not wrapped: the agent runs git against
+   the path `ken path` prints. Everything else, flows, hooks, lint, status, the lazy clone,
+   the task system, is built on top in scripts, skills and separate packages, and evolves
+   without touching the kernel.
 7. **Registration is the tool's job.** `.repos/index.yaml` describes every repo the
-   workspace knows, cloned or not. `clone`, `new` and `adopt` write the entry, so a clone
-   made by `ken` always has one; the only writers are `index set` and `index unset`, and
+   workspace knows, cloned or not. `get` writes the entry, so a clone made by `ken` always has
+   one, and `repos` names a clone that lacks one; the only writers are `index set` and `index unset`, and
    writes are validated and atomic. Whether a repo exists is the remote's business; the
    index only describes it, so the key is inside the file, never in a file name.
 8. **A folder's `README.md` is its index, and is read first.** The root's is the front
@@ -109,7 +110,7 @@ an existing section. Everything else at the root is a section of the knowledge b
    Nothing derivable goes in: the repo list is `ken repos`, recent changes are `log.md`.
    The caps belong to a lint script, not to `ken`.
 9. **A code reference is `<key>:<path>#<symbol>`.** Never a line number, never an absolute
-   path. `ken open <ref>` resolves it to a local path when the repo is cloned, else to the
+   path. `ken path <ref>` resolves it to a local path when the repo is cloned, else to the
    remote URL.
 10. **External subcommands.** `ken <name> ...` runs `ken-<name>` from the root's `.bin/`,
     each layer's `.bin/` in order, then `PATH`, with `KEN_ROOT` set. A builtin cannot be
@@ -120,15 +121,15 @@ an existing section. Everything else at the root is a section of the knowledge b
     built on `ken` keep their settings in the one file. Per-repo, a committed `.ken.yaml`
     at a repo's root lists files to copy and a setup command for new worktrees.
 12. **Tasks are not the kernel's business.** `ken` knows what a branch is, not what a
-    task is. The seam with every task system is `ken worktree add <key> <branch>`: Jira
+    task is. The seam with every task system is `ken get <key> -b <branch>`: Jira
     passes `PROJ-123`, `ken-task` passes a denote ID, a human passes `feat/login`. The
     denote task system ships as its own package, `@unclex/ken-task`, reached as `ken task`.
     It depends on `ken`; `ken` never depends on it.
 13. **No harness, no GitHub.** `ken` ships no hooks, settings or skills and does not know
     which agent harness runs it. It speaks git only: no remote checks, no `gh`. Those are
     scripts.
-14. **Blobless, never shallow.** `clone --blobless` uses `--filter=blob:none`, which works
-    with worktrees and costs first-touch latency only. A shallow clone breaks the second
+14. **Blobless, never shallow.** `get` clones with `--filter=blob:none` by default, which
+    works with worktrees and costs first-touch latency only. A shallow clone breaks the second
     worktree and every fetch, so `ken` never makes one.
 15. **Real paths.** On a case-insensitive disk `~/ken` and `~/Ken` are one folder. `ken`
     resolves the root with realpath once and compares real paths, never strings. It
@@ -158,41 +159,40 @@ team layer runs the same kernel through `pnpm exec ken` or a direnv `PATH_add`.
 
 ## The kernel: `ken`
 
-Every listing has `--json`. Everything is offline except `clone`, `new` with a remote,
-`adopt` and `layer add`.
+Ten commands. Every listing has `--json`. Everything is offline except `get` when the
+clone is missing and `layer add`.
 
-| Group     | Command                                               | Does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| --------- | ----------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| root      | `init [<dir>]`                                        | Create the skeleton `ken` owns: `.repos/index.yaml` (empty), `.ken.yaml`, `.gitignore` with the depth-three rule, `.bin/`, and a front page `README.md` and `AGENTS.md` only if missing. Refuses a directory that is already inside a root. Does not `git init`: that is `create-ken`'s or the user's.                                                                                                                                                                                                                                                                  |
-|           | `config [--json]`                                     | Effective settings, where each came from (`.ken.yaml`, `~/.config/ken/config.json`, environment, default), and the unknown top-level sections verbatim.                                                                                                                                                                                                                                                                                                                                                                                                                 |
-|           | `path <what>`                                         | Forward resolution. `root`, `repos`, `bin`; `layer <name>`; `code <key> [<branch>]` for a clone or worktree path, whether or not it exists; `<file>` for its README chain, the `README.md` of each folder from the root down to the file's own, then the file.                                                                                                                                                                                                                                                                                                          |
-|           | `which [<path>]`                                      | Reverse resolution for a path, default the cwd: the key, the branch, and whether it is the clone or a worktree; or that it is outside `.repos/`.                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| layout    | `clone <url\|key> [--blobless]`                       | `git clone` to `.repos/<key>`, set `worktree.useRelativePaths`, write the index entry if none. A key alone resolves through the host: `https://<key>.git`. An empty remote leaves the clone on its unborn default branch.                                                                                                                                                                                                                                                                                                                                               |
-|           | `new <name> [--org <org>]`                            | `git init` at `.repos/<org>/<name>` on an unborn `main`, same setting, entry written. `orgs` comes from `.ken.yaml`; without `--org` the one org, or `orgs.me`. Nothing is published; it prints the `gh repo create` command to run after the first commit.                                                                                                                                                                                                                                                                                                             |
-|           | `adopt <path>`                                        | Move an existing clone to `.repos/<key>` as it is, so ignored files stay; set `worktree.useRelativePaths`, `git worktree repair` any worktrees it had, write the entry. Requires a clean tree, an `origin`, and the default branch checked out.                                                                                                                                                                                                                                                                                                                         |
-|           | `remove <key> [--force]`                              | Remove the clone and its worktrees. The entry stays: the repo is lazy again. Refuses a dirty tree or unpushed branch without `--force`. Never cleans at the root.                                                                                                                                                                                                                                                                                                                                                                                                       |
-|           | `worktree add <key> <branch> [--from <ref>]`          | The one way a branch gets a folder. Create `<branch>` from the clone's default branch as it stands (no fetch), or from `--from`, and its worktree at `.repos/<key>.<folder>`; copy the files `.ken.yaml` lists from the clone, run its `setup`; print the path. Branch creation is the lock: git's ref lock means two callers never get one branch. A failure after it, up to reading `.ken.yaml`, deletes the branch again; a failure in the copy or the setup keeps the worktree and says how to finish by hand. An existing branch gets a worktree without `--from`. |
-|           | `worktree remove <key> <branch> [--force]`            | `git worktree remove` then `git branch -d`; git's refusals pass through, `--force` goes to both.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-|           | `worktree ls [<key>]`                                 | Every worktree with its key, branch, path and a dirty flag.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
-| index     | `repos [<key>] [--layer <name>]`                      | The merged index times the disk: for every key, its `desc`, which workspace listed it, whether it is cloned, its worktrees. For one key: the merged entry, then the files under the root that mention the key. Offline.                                                                                                                                                                                                                                                                                                                                                 |
-|           | `index set <key> <field>=<value>... [--layer <name>]` | Write fields into the root's index, or a layer's. Creates the entry. Read, modify, validate, write beside, rename over.                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
-|           | `index unset <key> [<field>...] [--layer <name>]`     | Remove fields, or the whole entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
-|           | `open <ref>`                                          | Decision 9: print the local path of `<key>:<path>`, else the remote's URL for it.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
-| layers    | `layer add <url\|key> [--as <name>]`                  | `clone` into `.repos/`; symlink the clone at the root as `<name>`, default the repo name; symlink each of the layer's `.repos/<host>/<owner>/AGENTS.md` into the root's matching owner folder when the root has none there; record the layer in `.ken.yaml`; add its line to the front page. Refuses a reserved or taken name.                                                                                                                                                                                                                                          |
-|           | `layer ls`                                            | Name, key, path, and whether the clone is behind its remote only if already fetched; no network.                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-|           | `layer remove <name>`                                 | Reverse of `add`; the clone goes with `remove <key>`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-| extension | `ken <name> ...`                                      | Decision 10.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| Group     | Command                                               | Does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| --------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| root      | `init [<dir>]`                                        | Create the skeleton `ken` owns: `.repos/index.yaml` (empty), `.ken.yaml`, `.gitignore` with the depth-three rule, `.bin/`, and a front page `README.md` and `AGENTS.md` only if missing. Refuses a directory that is already inside a root. Does not `git init`: that is `create-ken`'s or the user's.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+|           | `config [--json]`                                     | Effective settings, where each came from (`.ken.yaml`, `~/.config/ken/config.json`, environment, default), the layers, and the unknown top-level sections verbatim.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                            |
+| resolve   | `path <what>`                                         | The one resolver, forward. `root`, `repos`, `bin`; `layer <name>`; `code <key> [<branch>]` for a clone or worktree path, whether or not it exists; `<key>:<path>` for a code reference, the local path when cloned, else the remote's URL for it; `<file>` for its README chain, the `README.md` of each folder from the root down to the file's own, then the file.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+|           | `which [<path>]`                                      | Reverse. For a path, default the cwd: the key, the branch, and whether it is the clone or a worktree; or that it is outside `.repos/`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
+| layout    | `get <url\|key> [-b <branch> [--from <ref>]]`         | The one write into the layout, idempotent: make `<key>` ready here and print its path. Clone to `.repos/<key>` if missing (blobless unless `.ken.yaml` says `clone.blobless: false`; a key alone resolves through the host as `https://<key>.git`; an empty remote leaves an unborn default branch); set `worktree.useRelativePaths` and `git worktree repair`; write the index entry if none. With `-b`: create `<branch>` from the clone's default branch as it stands (no fetch), or from `--from`, and its worktree at `.repos/<key>.<folder>`; copy the files the repo's `.ken.yaml` lists from the clone and run its `setup`; print the worktree path. An existing branch gets its worktree without `--from`; a branch that already has one prints the existing path. Branch creation is the lock: git's ref lock means two callers never get one branch. A failure after it, up to reading `.ken.yaml`, deletes the branch again; a failure in the copy or the setup keeps the worktree and says how to finish by hand. |
+| index     | `repos [<key>] [--layer <name>]`                      | The merged index times the disk: for every key, its `desc`, which workspace listed it, whether it is cloned, its worktrees, and any stray: a clone with no entry, a clone not on its default branch, a worktree whose folder does not match its branch, a worktree outside the layout. For one key: the merged entry, then the files under the root that mention the key. Offline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|           | `index set <key> <field>=<value>... [--layer <name>]` | Write fields into the root's index, or a layer's. Creates the entry. Read, modify, validate, write beside, rename over.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+|           | `index unset <key> [<field>...] [--layer <name>]`     | Remove fields, or the whole entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+| layers    | `layer add <url\|key> [--as <name>]`                  | `get` into `.repos/`; symlink the clone at the root as `<name>`, default the repo name; symlink each of the layer's `.repos/<host>/<owner>/AGENTS.md` into the root's matching owner folder when the root has none there; record the layer in `.ken.yaml`; add its line to the front page. Refuses a reserved or taken name.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+|           | `layer remove <name>`                                 | Reverse of `add`: the link, the owner links, the `.ken.yaml` entry, the front-page line. The clone stays until deleted by hand.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
+| extension | `ken <name> ...`                                      | Decision 10.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+
+**Everything else is git**, run by the agent or a script against the path `ken path`
+prints: `git worktree list`, `git worktree remove` and `git branch -d` to finish a branch,
+`rm -rf "$(ken path code <key>)"` and its worktrees to drop a clone (the entry stays, so
+the repo is lazy again), `git init "$(ken path code <key>)"` then `ken get <key>` for a
+new repo, `mv <old> "$(ken path code <key>)"` then `ken get <key>` to adopt one. `ken`
+wraps no git command that carries none of its rules; it prevents at the one write it owns
+and detects everywhere else, in `repos`.
 
 **Collisions and guards.** A folder in the way of a clone or worktree is named in the
-refusal. A worktree for a branch that already has one prints the existing path. A key is
-validated as `<host>/<owner>/<repo>` with one slash each; GitLab subgroups are out of
-scope.
+refusal. A key is validated as `<host>/<owner>/<repo>` with one slash each; GitLab
+subgroups are out of scope.
 
 **Deliberately not in `ken`:** tasks and branch naming policy; anything about Claude Code
-or another harness; anything about GitHub beyond git; knowledge commands beyond `path`
-and `open`, because the file system is the union and `rg -L`, `find -L` and the READMEs
-are the interface; lint rules, thresholds and flows; the lazy clone hook; status, doctor,
-grep, promote, ingest.
+or another harness; anything about GitHub beyond git; git commands that carry no rule;
+knowledge commands beyond `path`, because the file system is the union and `rg -L`,
+`find -L` and the READMEs are the interface; lint rules, thresholds and flows; the lazy
+clone hook; status, doctor, grep, promote, ingest.
 
 ## Layers
 
@@ -207,7 +207,7 @@ A layer is a root-shaped repo: a front page, sections, `.repos/index.yaml`,
 - Index entries: `ken repos` merges the root's `.repos/index.yaml` with each layer's, in
   `.ken.yaml` order, the root first; a whole entry wins by that order. One table, one
   `--json`. A layer contributes repos to your workspace just by being added: a team layer
-  lists the team's repos once, and everyone who adds it can `ken clone` any of them by
+  lists the team's repos once, and everyone who adds it can `ken get` any of them by
   key, with the description already there.
 
 **Update** is `git pull` in the layer's clone. **Contribute** is a move: a page from a
@@ -311,6 +311,8 @@ Per root, `.ken.yaml`, tracked:
 ```yaml
 orgs:
   me: github.com/xiaoxinghu
+clone:
+  blobless: true
 layers:
   - name: sales-atlas
     key: github.com/acme/sales-atlas
@@ -319,7 +321,7 @@ task: # ken-task's section; ken keeps it and prints it, nothing more
   branch: "{id}"
 ```
 
-Per repo, a committed `.ken.yaml` at the repo root, read by `worktree add` from the new
+Per repo, a committed `.ken.yaml` at the repo root, read by `get -b` from the new
 worktree:
 
 ```yaml
@@ -346,8 +348,8 @@ accepted.
 
 Tasks, notes and reports as plain text in a private volume, linked to code by data and
 pattern, never by path. Installed as `@unclex/ken-task`; its binary `ken-task` is found by
-dispatch, so it reads as `ken task <command>`. It depends on `ken` for `path code`,
-`worktree add|remove` and `which`, and reads the `task:` section of `.ken.yaml`.
+dispatch, so it reads as `ken task <command>`. It depends on `ken` for `path code`, `get -b`
+and `which`, runs git itself for the rest, and reads the `task:` section of `.ken.yaml`.
 
 **The volume** is a folder `ken-task` owns, by default the `me/` section of the root
 (`task.volume`, a path relative to the root or absolute, so it can also live on a file
@@ -395,7 +397,7 @@ heading, else `title:`, else the name's title, else the ID.
 
 **Branch.** `task.branch` in `.ken.yaml` is a template, default `{id}`; `{id}`, `{title}`
 and `{keywords}` are the fields. The ID must appear, since it is how the branch is found
-again. `claim` passes the rendered name to `ken worktree add`.
+again. `claim` passes the rendered name to `ken get -b`.
 
 **States**, in the order they are decided:
 
@@ -429,8 +431,8 @@ by ID fall through to it.
 | `ken task rename <id> <title>`                                                                 | New title in the name, heading and `title:`.                                                                                                                                                         |
 | `ken task archive [<id>...] [--closed]`                                                        | Move to `.archive/`. A todo task is refused.                                                                                                                                                         |
 | `ken task path [<id>]`                                                                         | The file, its folder, the READMEs above it top down, then the mentions.                                                                                                                              |
-| `ken task claim [<id>]`                                                                        | Render the branch, `ken worktree add <key> <branch>`, print the path. Without `<id>`, the first ready repo task; losing the race retries with the next. The repo must be cloned.                     |
-| `ken task finish [--force] <id>`                                                               | `ken worktree remove` for a done or wontfix task. Any other status is refused.                                                                                                                       |
+| `ken task claim [<id>]`                                                                        | Render the branch, `ken get <key> -b <branch>`, print the path. Without `<id>`, the first ready repo task; losing the race retries with the next. The repo must be cloned.                           |
+| `ken task finish [--force] <id>`                                                               | `git worktree remove` then `git branch -d` for a done or wontfix task, at the path `ken path code` prints; git's refusals pass through, `--force` goes to both. Any other status is refused.         |
 | `ken task context [<id>]`                                                                      | Body, READMEs above, the commits on the branch not on the default branch, the mentions; Markdown on stdout for a reviewer or a fresh agent.                                                          |
 
 `list` notes what needs you: malformed; overdue; todo for more than 90 days; landing;
@@ -470,18 +472,18 @@ are one line each. Skills are tested with golden questions: ten to twenty real p
 questions with known answers, run through a fresh session at the root and scored, rerun
 after a docs, skill or model change.
 
-| Piece                                                                  | Built from                                                                                                                                 |
-| ---------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------ |
-| `ken-status`, a session-start hook                                     | `repos`, `worktree ls`, `layer ls`, `ken task ready`: one screen so the agent never lists folders.                                         |
-| `ken-ensure`, a pre-tool hook on read, search and shell                | `which` then `repos --json`; `clone --blobless` when the key is listed and not cloned: the lazy clone.                                     |
-| deny rules in the root's `.claude/settings.json`                       | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                       |
-| `ken-doctor`                                                           | `repos` plus `gh` for remote states, the lint, `worktree ls` problems, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream. |
-| `ken-lint`                                                             | `find -L` over the sections, the READMEs, the caps, `open` for every reference.                                                            |
-| `ken-pull`                                                             | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                              |
-| `ken-grep`                                                             | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                              |
-| `ken-promote`                                                          | `git mv` plus `index unset` and `index set --layer`.                                                                                       |
-| `ken-jira`                                                             | Jira issue picker into `worktree add <key> <issue>`; no task file involved.                                                                |
-| skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote` | the flows above. A team's playbooks are skills in its layer.                                                                               |
+| Piece                                                                  | Built from                                                                                                                                   |
+| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ken-status`, a session-start hook                                     | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders.                                                            |
+| `ken-ensure`, a pre-tool hook on read, search and shell                | `which` then `repos --json`; `get <key>` when the key is listed and not cloned: the lazy clone.                                              |
+| deny rules in the root's `.claude/settings.json`                       | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                         |
+| `ken-doctor`                                                           | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream. |
+| `ken-lint`                                                             | `find -L` over the sections, the READMEs, the caps, `path` for every reference.                                                              |
+| `ken-pull`                                                             | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                |
+| `ken-grep`                                                             | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                |
+| `ken-promote`                                                          | `git mv` plus `index unset` and `index set --layer`.                                                                                         |
+| `ken-jira`                                                             | Jira issue picker into `get <key> -b <issue>`; no task file involved.                                                                        |
+| skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote` | the flows above. A team's playbooks are skills in its layer.                                                                                 |
 
 Sessions start at the root: that is where the hooks, skills and deny rules live, and the
 only layout a harness that walks down from the git root understands. A session that must
@@ -535,7 +537,12 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
 - **A `kb/` folder, a `layers/` folder, knowledge commands in the kernel.** Three folders
   for one job; the root is the knowledge base and the file system is the union.
 - **Tasks in the kernel.** A Jira user must be able to adopt `ken` without a task system;
-  the seam is `worktree add`.
+  the seam is `get -b`.
+- **Wrapping git: `clone`, `new`, `adopt`, `remove`, `worktree add|remove|ls`.** Seven
+  commands whose only rule was the path, which `path` already prints. Folded into one
+  idempotent `get`, the single write into the layout; the rest is git, and `repos`
+  detects strays.
+- **`open <ref>` beside `path`.** Two resolvers for one rule; `path` takes the reference.
 - **Code outside the root, linked in.** Through a symlink only the target's ancestors load
   context, so the cascade breaks; the clones are physically inside.
 - **A personal branch, a GitHub fork, or git-crypt for private content.** Private only
@@ -564,10 +571,10 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
 - git, cargo, gh, kubectl: `<tool>-<name>` external subcommands, a root variable for
   children.
 - GNU Stow: the symlink overlay, reduced to one link per layer.
-- ghq, gwq, worktrunk, git-repo-manager: `<root>/<host>/<owner>/<repo>` placement and
-  worktrees beside the clone.
+- ghq, gwq, worktrunk, git-repo-manager: `<root>/<host>/<owner>/<repo>` placement,
+  `ghq get` as the one verb that puts a repo in place, and worktrees beside the clone.
 - vibe-kanban, git-town, Linear, GitLab, `gh issue develop`: the identifier in the branch
-  name is the join key, so a task tool needs only `worktree add`.
+  name is the join key, so a task tool needs only `get -b`.
 - workmux, Conductor: files to copy and a setup command per worktree.
 - direnv `source_up_if_exists` and the whitelist prefix: cascading env without
   per-worktree allow.

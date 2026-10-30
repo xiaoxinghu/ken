@@ -90,7 +90,8 @@ export function init(dir: string, env = process.env): string {
 	)
 	const gitignore = join(target, '.gitignore')
 	const ignored = existsSync(gitignore) ? readFileSync(gitignore, 'utf8') : undefined
-	const lines = new Set(ignored?.split('\n').map((l) => l.trim()))
+	// git strips a line's trailing spaces but not its leading ones: ` .env` ignores no `.env`
+	const lines = new Set(ignored?.split('\n').map((l) => l.trimEnd()))
 	const missing = IGNORE.filter((rule) => !lines.has(rule))
 	if (ignored === undefined) create('.gitignore', `${IGNORE.join('\n')}\n`)
 	else if (missing.length) {
@@ -110,7 +111,7 @@ export function init(dir: string, env = process.env): string {
 			'',
 			`${target} is not the configured root, ${configured.path} (from ${configured.from}), ` +
 				'so ken commands will not find it. Point ken at it with',
-			`  export KEN_ROOT=${JSON.stringify(target)}`,
+			`  export KEN_ROOT='${target.replaceAll("'", "'\\''")}'`,
 			`or put {"root": ${JSON.stringify(target)}} in ${configPath(env)}.`
 		)
 	}

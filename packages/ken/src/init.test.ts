@@ -67,6 +67,14 @@ describe('ken init', () => {
 		expect(read('.gitignore')).toBe('node_modules/\n.env\n.repos/*/*/*/\n')
 	})
 
+	it('adds a rule an existing .gitignore has only with a leading space, which git reads as another', () => {
+		mkdirSync(root)
+		spawnSync('git', ['init', '-q', root])
+		writeFileSync(join(root, '.gitignore'), ' .env\n')
+		init(root, env)
+		expect(spawnSync('git', ['check-ignore', '-q', '.env'], { cwd: root }).status).toBe(0)
+	})
+
 	it('ignores the clones and worktrees, and tracks the index and owner context', () => {
 		mkdirSync(root)
 		spawnSync('git', ['init', '-q', root])
@@ -96,9 +104,18 @@ describe('ken init', () => {
 	it('gives the line that points ken at a root that is not the configured one', () => {
 		const out = init(root, { ...env, KEN_ROOT: undefined })
 		expect(out).toContain(`not the configured root, ${join(dir, 'home/ken')} (from the default)`)
-		expect(out).toContain(`export KEN_ROOT="${root}"`)
+		expect(out).toContain(`export KEN_ROOT='${root}'`)
 		expect(out).toContain(`{"root": "${root}"} in ${join(dir, 'config/ken/config.json')}`)
 		expect(init(root, env)).not.toContain('KEN_ROOT')
+	})
+
+	it('quotes the root in the export line so a shell reads the path as written', () => {
+		root = join(dir, "it's $HOME `x`")
+		const line = init(root, { ...env, KEN_ROOT: undefined })
+			.split('\n')
+			.find((l) => l.includes('export KEN_ROOT='))
+		const r = spawnSync('sh', ['-c', `${line}; printf %s "$KEN_ROOT"`], { encoding: 'utf8' })
+		expect(r.stdout).toBe(root)
 	})
 
 	it('initialises the current folder when given none', () => {

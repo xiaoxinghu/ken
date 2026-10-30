@@ -259,7 +259,8 @@ the repo, and `ken repos` flags it with the `ken index set <key> desc="..."` to 
 `tags`, `depends_on`, `lifecycle`, `owner` filter or link and keep a Backstage export
 possible; `doc` points at a page. Unknown fields are kept. Anything longer than a line is
 a page the entry points at. The file is real YAML; `ken` takes one dependency for it, the
-`yaml` package.
+`yaml` package. Anchors and aliases are refused: every entry stands on its own, so editing
+one never changes another.
 
 `ken repos` reconciles the merged index against the clones under `.repos/` and reports
 each key as listed (by which workspace) and cloned (with its worktrees). A script adds the

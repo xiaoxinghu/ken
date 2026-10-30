@@ -2,6 +2,7 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { dirname, join } from 'node:path'
 import {
 	type Document,
+	isAlias,
 	isCollection,
 	isMap,
 	isNode,
@@ -10,6 +11,7 @@ import {
 	type Node,
 	parseDocument,
 	Scalar,
+	visit,
 	type YAMLMap
 } from 'yaml'
 import type { Command } from './command.ts'
@@ -61,6 +63,15 @@ function validate(
 	const refuse = (node: unknown, what: string): never => {
 		throw new Error(fail(node, `${what}, so ken cannot read the index`))
 	}
+	// set and unset edit one entry at a time, which would cut a shared value off from its uses
+	visit(doc, (_, node) => {
+		if (isAlias(node) || (isNode(node) && node.anchor)) {
+			refuse(
+				node,
+				'a YAML anchor or alias (&name, *name) is not supported; write the value out in each place'
+			)
+		}
+	})
 	const mapOf = (node: unknown, what: string): YAMLMap | undefined => {
 		if (node == null || (isScalar(node) && node.value == null)) return undefined
 		if (!isMap(node)) return refuse(node, `${what} must be a mapping`)
@@ -101,7 +112,7 @@ function validate(
 			const entry = mapOf(repo.value, key)
 			for (const field of entry?.items ?? []) textOf(field.key)
 			checkDesc(entry, key)
-			entries[key] = (entry?.toJS(doc) as Entry | undefined) ?? {}
+			entries[key] = (entry?.toJSON() as Entry | undefined) ?? {}
 		}
 	}
 	return entries

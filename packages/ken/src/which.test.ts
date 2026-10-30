@@ -86,6 +86,12 @@ describe('locate', () => {
 		expect(locate(join(root, 'handbook/src'), root)).toMatchObject({ key: 'github.com/a/b' })
 	})
 
+	it('takes a `..` after a link to the parent of where the link points', () => {
+		symlinkSync(join(clone, 'src'), join(root, 'src-link'))
+		// not normalised by join: lexically this is <root>/new.ts, outside .repos/
+		expect(locate(`${root}/src-link/../new.ts`, root)).toMatchObject({ key: 'github.com/a/b' })
+	})
+
 	it.skipIf(!existsSync(tmpdir().toUpperCase()))('resolves a path in a different case', () => {
 		expect(locate(join(root, '.repos/GitHub.com/A/B.Feat-Login'), root)).toMatchObject({
 			key: 'github.com/a/b',

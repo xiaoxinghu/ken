@@ -1,5 +1,5 @@
 import { existsSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, join, relative, sep } from 'node:path'
 import type { Command } from './command.ts'
 import { git } from './git.ts'
 import { parseKey } from './key.ts'
@@ -24,7 +24,8 @@ function realPath(path: string): string {
  * (PRD decisions 2 and 15). Throws when the path is in no checkout under `root`.
  */
 export function locate(path: string, root: string): Place {
-	const real = realPath(resolve(path))
+	// absolute but not normalised: a `..` after a symlink is the target's parent, as for git
+	const real = realPath(isAbsolute(path) ? path : `${process.cwd()}${sep}${path}`)
 	const rel = relative(root, real)
 	if (rel === '..' || rel.startsWith(`..${sep}`) || isAbsolute(rel)) {
 		throw new Error(

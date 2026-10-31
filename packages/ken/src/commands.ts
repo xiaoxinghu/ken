@@ -1,6 +1,7 @@
 import { type Command, commandHelp, indent } from './command.ts'
 import { config } from './config.ts'
 import { externals } from './extension.ts'
+import { getCommand } from './get.ts'
 import { index } from './index.ts'
 import { initCommand } from './init.ts'
 import { redact } from './key.ts'
@@ -29,6 +30,7 @@ export const COMMANDS: Record<string, Command> = {
 	init: initCommand,
 	path,
 	which,
+	get: getCommand,
 	index,
 	config,
 	help

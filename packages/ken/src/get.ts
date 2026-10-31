@@ -11,7 +11,7 @@ import { basename, dirname, join } from 'node:path'
 import { branchFolder } from './branch.ts'
 import { type Command, shellWord } from './command.ts'
 import { type Layer, readKenYaml } from './config.ts'
-import { git, requireGit } from './git.ts'
+import { git, gitWith, requireGit } from './git.ts'
 import { indexFile, readIndex, setFields } from './index.ts'
 import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
@@ -22,9 +22,10 @@ import { worktree } from './worktree.ts'
  * Make the repo `input` names ready in `root` and return its clone, `.repos/<key>`: cloned when
  * missing, a clone already there used as it is (no fetch), anything else there refused. Then set
  * up for relative worktrees and repaired, so a clone moved in with `mv` works, and registered in
- * the root's index when no index lists it (PRD "The kernel", `get`).
+ * the root's index when no index lists it (PRD "The kernel", `get`). The clone runs with `env`; a
+ * clone that fails throws with git's error as the `cause`.
  */
-export function get(root: string, input: string): string {
+export function get(root: string, input: string, env = process.env): string {
 	const { key, url } = parseKey(input)
 	requireGit(git(root, '--version'))
 	const { clone, layers } = readKenYaml(root)
@@ -35,7 +36,7 @@ export function get(root: string, input: string): string {
 		try {
 			// never shallow (decision 14); `--` so a URL is never read as an option
 			const filter = clone.blobless ? ['--filter=blob:none'] : []
-			git(root, 'clone', '-q', ...filter, '--', url, dir)
+			gitWith(env, root, 'clone', '-q', ...filter, '--', url, dir)
 		} catch (e) {
 			rmSync(dir, { recursive: true, force: true })
 			const hint =
@@ -44,7 +45,8 @@ export function get(root: string, input: string): string {
 					: ''
 			throw new Error(
 				`could not clone ${redact(url)} into ${dir}, so ${key} is not here; nothing was left behind. ` +
-					`${(e as Error).message}\nFix the cause, then ${rerun(input.trim())}.${hint}`
+					`${(e as Error).message}\nFix the cause, then ${rerun(input.trim())}.${hint}`,
+				{ cause: e }
 			)
 		}
 	} else {

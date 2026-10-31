@@ -1,6 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, resolve } from 'node:path'
-import type { Command } from './command.ts'
+import { type Command, shellWord } from './command.ts'
+import { readKenYaml } from './config.ts'
+import { get } from './get.ts'
+import { gitWith } from './git.ts'
+import { codePath } from './path.ts'
 import { configPath, configuredRoot } from './root.ts'
 
 /** The root `.gitignore` rules: the clones and worktrees at depth three, and secrets. */
@@ -52,7 +56,54 @@ function realPath(path: string): string {
 	return join(realpathSync.native(p), ...missing)
 }
 
-/** Create in `dir` the skeleton ken owns, only what is missing; say what was made and what next. */
+/**
+ * The environment for the clones `init` makes unasked, one per layer: git may neither prompt nor
+ * wait forever. A user's own ssh command is kept, the options added to it.
+ */
+export function unattended(root: string, env = process.env): NodeJS.ProcessEnv {
+	// git's own order: GIT_SSH_COMMAND, core.sshCommand, then GIT_SSH, a program that may take no -o
+	const ssh =
+		env.GIT_SSH_COMMAND ||
+		gitWith(env, root, 'config', '--default=', 'core.sshCommand') ||
+		(env.GIT_SSH ? undefined : 'ssh')
+	return {
+		...env,
+		GIT_TERMINAL_PROMPT: '0',
+		// empty, so git asks no GIT_ASKPASS, core.askPass or SSH_ASKPASS program either
+		GIT_ASKPASS: '',
+		GIT_HTTP_LOW_SPEED_LIMIT: '1000',
+		GIT_HTTP_LOW_SPEED_TIME: '30',
+		...(ssh && { GIT_SSH_COMMAND: `${ssh} -o BatchMode=yes -o ConnectTimeout=15` })
+	}
+}
+
+/**
+ * Get each layer `.ken.yaml` lists whose clone is missing, in order; say which. One that cannot be
+ * cloned is offline on this machine, said on stderr: nothing is written, so a later run gets it.
+ */
+function getLayers(root: string): string[] {
+	const got: string[] = []
+	let env: NodeJS.ProcessEnv | undefined
+	for (const { name, key } of readKenYaml(root).layers) {
+		if (existsSync(codePath(root, key))) continue
+		env ??= unattended(root)
+		try {
+			get(root, key, env)
+			got.push(`  ${name}: cloned .repos/${key}, so its section and owner links resolve`)
+		} catch (e) {
+			// only a failed clone has a cause; anything else is wrong here, not unreachable
+			if (!(e instanceof Error && e.cause instanceof Error)) throw e
+			process.stderr.write(
+				`ken: the layer ${name} (${key}) is offline on this machine: it could not be cloned. ${e.cause.message}\n` +
+					`The rest of the root works without it: its section ${name} and owner links stay dangling, and its ` +
+					`index and scripts are left out. Once it can be reached, run \`ken init ${shellWord(root)}\` again.\n`
+			)
+		}
+	}
+	return got.length ? ['', 'Got the layers .ken.yaml lists:', ...got] : []
+}
+
+/** Create in `dir` the skeleton ken owns, only what is missing, then get the missing layers; say what was made and what next. */
 export function init(dir: string, env = process.env): string {
 	const target = realPath(dir)
 	for (let a = dirname(target); a !== dirname(a); a = dirname(a)) {
@@ -105,6 +156,7 @@ export function init(dir: string, env = process.env): string {
 	const out = created.length
 		? [`Created in ${target}:`, ...created.map((c) => `  ${c}`)]
 		: [`Nothing to create: ${target} already has every file ken init makes, and none was changed.`]
+	out.push(...getLayers(target))
 	const configured = configuredRoot(env)
 	if (!existsSync(configured.path) || realpathSync.native(configured.path) !== target) {
 		out.push(
@@ -121,14 +173,25 @@ export function init(dir: string, env = process.env): string {
 export const initCommand: Command = {
 	usage: 'init [<dir>]',
 	summary:
-		'Create the skeleton ken owns in <dir>, default the current folder, only what is missing.',
+		'Create the skeleton ken owns in <dir>, default the current folder, only what is missing, and install its layers.',
 	details: [
 		'  .repos/index.yaml, .ken.yaml, .bin/, a .gitignore holding .repos/*/*/*/ and .env (only',
 		'  the lines it lacks), and a front page README.md and AGENTS.md. Never overwrites a file,',
 		'  so a second run creates nothing. Refuses a <dir> inside another root (a folder holding',
-		'  .ken.yaml). Does not git init.'
+		'  .ken.yaml). Does not git init.',
+		'',
+		'Then installs the layers: clones each layer .ken.yaml lists whose clone is missing, as',
+		'`ken get` does, so its tracked root link and owner links resolve; a clone already there is',
+		'left alone, no fetch. These clones never prompt or wait forever. A layer that cannot be',
+		'cloned is offline on this machine: said on stderr with the reason, init still exits 0, and',
+		'nothing is written, so running ken init again once it can be reached gets it.'
 	].join('\n'),
-	examples: ['ken init', 'ken init ~/ken', 'git init ~/work && ken init ~/work'],
+	examples: [
+		'ken init',
+		'ken init ~/ken',
+		'git init ~/work && ken init ~/work',
+		'git clone <root url> ~/ken && ken init ~/ken   # the root and every layer it lists'
+	],
 	run(args) {
 		if (args.length > 1) {
 			throw new Error(

@@ -290,9 +290,9 @@ describe('ken index --layer', () => {
 		)
 	})
 
-	it('refuses a layer that is not cloned, with the command that clones it', () => {
-		expect(refusal('set', 'github.com/acme/x', 'desc=x', '--layer', 'sales-atlas')).toContain(
-			'Run `ken get github.com/acme/sales-atlas` to clone it again'
-		)
+	it('refuses a layer that is not cloned as offline, with the ken init that clones it', () => {
+		const message = refusal('set', 'github.com/acme/x', 'desc=x', '--layer', 'sales-atlas')
+		expect(message).toContain('the layer sales-atlas is offline on this machine')
+		expect(message).toContain(`run \`ken init ${root}\` to clone it`)
 	})
 })

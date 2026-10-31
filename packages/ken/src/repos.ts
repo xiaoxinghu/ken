@@ -36,8 +36,8 @@ function indexes(root: string, layers: Layer[]): Index[] {
 		if (existsSync(dir)) dirs.push({ by: name, dir })
 		else {
 			process.stderr.write(
-				`ken: the layer ${name} is not cloned at ${dir}, so the repos its index lists are left out. ` +
-					`Run \`ken get ${key}\`.\n`
+				`ken: the layer ${name} (${key}) is offline on this machine, with no clone at ${dir}, so the repos ` +
+					`its index lists are left out. Once it can be reached, run \`ken init ${shellWord(root)}\` to clone it.\n`
 			)
 		}
 	}

@@ -39,7 +39,7 @@ hidden name.
   log.md                           append-only, one dated line per change
   systems/  flows/  playbooks/  decisions/     sections, made as needed, each with a README.md
   sales-atlas -> .repos/github.com/acme/sales-atlas    a layer: its clone, as a section
-  me/                              a section one tool owns: the task volume (ken-task)
+  tasks/                           ken-task's folder, when installed; one file per task
   .ken.yaml                        layers by name and key, orgs, a section per tool
   .gitignore                       .repos/*/*/*/   .env
   .envrc                           direnv root: dotenv_if_exists; socket paths to $TMPDIR
@@ -122,9 +122,9 @@ an existing section. Everything else at the root is a section of the knowledge b
     at a repo's root lists files to copy and a setup command for new worktrees.
 12. **Tasks are not the kernel's business.** `ken` knows what a branch is, not what a
     task is. The seam with every task system is `ken get <key> -b <branch>`: Jira
-    passes `PROJ-123`, `ken-task` passes a denote ID, a human passes `feat/login`. The
-    denote task system ships as its own package, `@unclex/ken-task`, reached as `ken task`.
-    It depends on `ken`; `ken` never depends on it.
+    passes `PROJ-123`, `ken-task` passes a task's path, a human passes `feat/login`. The
+    task system ships as its own package, `@unclex/ken-task`, reached as `ken task`, with
+    its own PRD, `docs/ken-task.md`. It depends on `ken`; `ken` never depends on it.
 13. **No harness, no GitHub.** `ken` ships no hooks, settings or skills and does not know
     which agent harness runs it. It speaks git only: no remote checks, no `gh`. Those are
     scripts.
@@ -146,11 +146,11 @@ an existing section. Everything else at the root is a section of the knowledge b
 
 ## Packages
 
-| Package            | Command          | Owns                                                    |
-| ------------------ | ---------------- | ------------------------------------------------------- |
-| `@unclex/ken`      | `ken`            | the kernel: root, layout, index, layers, dispatch       |
-| `@unclex/ken-task` | `ken task`       | the task volume, denote names, states, claim and finish |
-| `create-ken`       | `npm create ken` | templates and the scaffolding prompt; calls `ken init`  |
+| Package            | Command          | Owns                                                   |
+| ------------------ | ---------------- | ------------------------------------------------------ |
+| `@unclex/ken`      | `ken`            | the kernel: root, layout, index, layers, dispatch      |
+| `@unclex/ken-task` | `ken task`       | plain-text tasks in one folder; `docs/ken-task.md`     |
+| `create-ken`       | `npm create ken` | templates and the scaffolding prompt; calls `ken init` |
 
 Published under the `@unclex` npm scope; the source lives at `github.com/xiaoxinghu/ken`
 and each package's `repository` field says so. `create-ken` is unscoped so the command is
@@ -203,8 +203,8 @@ clone hook; status, doctor, grep, promote, ingest.
 A layer is a root someone else adds: a front page, sections, `.repos/index.yaml`,
 `.repos/<host>/<owner>/` context files, `.bin/`, optionally `.claude/`. Any root is one, so
 there is no layer template: make a root, push it, and `ken layer add <key>` it from another;
-its clones stay behind, ignored. What it should hold is what its readers should receive, so
-no `me/` and nothing private. Layers are one level deep: `ken` reads only the root's
+its clones stay behind, ignored. What it should hold is what its readers should receive:
+the root is private because it is yours, a layer is public because it is shared. Layers are one level deep: `ken` reads only the root's
 `.ken.yaml`, so a layer's own `layers:`, `orgs` and `clone` do nothing for the root that adds
 it, and a layer added inside a layer is a dangling link there. Installing one is `ken layer
 add <key>`. Installing a root installs its layers, the
@@ -322,7 +322,7 @@ repo and where it bites is knowledge about our use of it, and belongs here.
   concerns by key; add its line to the section README, and to the front page only if a
   section was added; revise related pages; log it. The source is cited, not copied.
 - **Query**: front page, section, page, code; cite; file a good answer back; log it.
-- **Promote**: a settled note moves from `me/` to a section, or from the root to a layer.
+- **Promote**: a settled note moves from a task to a page, or from the root to a layer.
 
 ## Configuration
 
@@ -342,8 +342,7 @@ layers:
   - name: sales-atlas
     key: github.com/acme/sales-atlas
 task: # ken-task's section; ken keeps it and prints it, nothing more
-  volume: me
-  branch: "{id}"
+  folder: tasks
 ```
 
 Every key is optional, and one left empty is its default; a missing file is all defaults.
@@ -381,109 +380,12 @@ accepted.
 
 ## `ken-task`
 
-Tasks, notes and reports as plain text in a private volume, linked to code by data and
-pattern, never by path. Installed as `@unclex/ken-task`; its binary `ken-task` is found by
-dispatch, so it reads as `ken task <command>`. It depends on `ken` for `path code`, `get -b`
-and `which`, runs git itself for the rest, and reads the `task:` section of `.ken.yaml`.
-
-**The volume** is a folder `ken-task` owns, by default the `me/` section of the root
-(`task.volume`, a path relative to the root or absolute, so it can also live on a file
-share). `ken-task` scans all of it for identified files, skipping dot entries and
-symlinks, so `.archive` is never walked. An editor backup ending in `~` is not an
-identified file. Everything that is not an identified file belongs to the humans and
-agents who put it there.
-
-**Names** are denote's, exactly: `<id>[==<signature>]--<title>__<keywords>.<ext>`, at any
-depth. Only the ID is required. A file that starts with an ID is an **identified file**: a
-task or a note, by its keywords. A folder is a group and nothing more: no status, no
-metadata, no ID; renaming or moving a folder changes no file. Every other file is an
-asset: a `README.md` of shared context, a script, an image. Sluggification is denote's:
-the title lowercased with words joined by `-`; a keyword lowercased with denote's
-punctuation and all whitespace removed; keywords joined by `_` and sorted. Reserved
-tokens: `--`, `__`, `==`.
-
-**ID.** `YYYYMMDDTHHMMSS`, the creation time to the second, local time. It is the
-identity, the default branch name, the link target and the one unambiguous token:
-`[0-9]{8}T[0-9]{6}` finds references in the volume, commit messages and branch names.
-`add` takes the first second no file starts with and reserves it before creating the file.
-
-**Kind** comes from the keywords. `todo`, `done` and `wontfix` are reserved: exactly one
-makes the file a task; none makes a note; more than one is malformed, named by `list` and
-never ready. Any other keyword is a topic.
-
-**Front matter**, YAML in `.md` files only, holds what the name cannot:
-
-```markdown
----
-
-scheduled: 2026-10-20 # optional: not ready before this day
-due: 2026-10-31 # optional: deadline
-repo: github.com/acme/join-web # optional: the code link, a repo key
-blocked-by: [20261015T143012] # tasks only
----
-
-# Remember the milk
-```
-
-Unknown fields are kept; an edit changes only the line of the field it sets. Denote's own
-`title:`, `date:`, `tags:` and `identifier:` are never added; when present, `rename` and
-`done` rewrite `title:` and `tags:` to match the name. The title is the first `# `
-heading, else `title:`, else the name's title, else the ID.
-
-**Branch.** `task.branch` in `.ken.yaml` is a template, default `{id}`; `{id}`, `{title}`
-and `{keywords}` are the fields. The ID must appear, since it is how the branch is found
-again. `claim` passes the rendered name to `ken get -b`.
-
-**States**, in the order they are decided:
-
-| State         | Meaning                                                                             |
-| ------------- | ----------------------------------------------------------------------------------- |
-| malformed     | more than one status keyword                                                        |
-| landing       | done, but the task's branch exists in its repo and is not on the default branch yet |
-| done, wontfix | the keyword says so                                                                 |
-| claimed       | repo task whose branch exists in its repo on this machine                           |
-| blocked       | todo, waiting on a blocker that is missing, open, or landing                        |
-| later         | todo, `scheduled` for a day after today                                             |
-| ready         | todo, none of the above                                                             |
-
-A blocker holds a task back until it is landed, not merely marked done. Nothing is
-inferred from git history: `done` on a repo task whose branch exists asks whether that
-branch is an ancestor of the default branch and refuses if not; a squash merge hides a
-merge, so landing is a rebase and a merge that keeps the commits. A note's state comes
-from the tasks that mention it: open, planned, done. A task sees the `README.md` of its
-folder and every folder above it as shared context. **Mentions** are by grep for the ID;
-there is no link field. **Order** comes from dependencies alone; among ready tasks `next`
-picks the earliest `due`, then the lowest ID. **Archive**: `<volume>/.archive/` holds
-closed tasks and retired notes at their relative paths; listings never see it, lookups
-by ID fall through to it.
-
-| Command                                                                                        | Does                                                                                                                                                                                                 |
-| ---------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ken task list [--kind task\|note\|all] [-k <kw>]... [--json]`                                 | Every task with its state, unmet blockers, and a note on what may need you.                                                                                                                          |
-| `ken task ready`, `ken task next`                                                              | IDs of all ready tasks; the first.                                                                                                                                                                   |
-| `ken task add [-p <folder>] [-k <kw>]... [-b <id>]... [-r <key>] [--note] [-F <file>] <title>` | Create the file and print its path. `-r` is a repo key, cloned or not. Without `-r`, inside a clone or worktree (`ken which`), its repo is the default. Interactive with no arguments on a terminal. |
-| `ken task done [<id>]`                                                                         | Rename `todo` to `done`. Without `<id>`, the task of the current branch (`ken which`). Refuses a repo task whose branch is not landed.                                                               |
-| `ken task rename <id> <title>`                                                                 | New title in the name, heading and `title:`.                                                                                                                                                         |
-| `ken task archive [<id>...] [--closed]`                                                        | Move to `.archive/`. A todo task is refused.                                                                                                                                                         |
-| `ken task path [<id>]`                                                                         | The file, its folder, the READMEs above it top down, then the mentions.                                                                                                                              |
-| `ken task claim [<id>]`                                                                        | Render the branch, `ken get <key> -b <branch>`, print the path. Without `<id>`, the first ready repo task; losing the race retries with the next. The repo must be cloned.                           |
-| `ken task finish [--force] <id>`                                                               | `git worktree remove` then `git branch -d` for a done or wontfix task, at the path `ken path code` prints; git's refusals pass through, `--force` goes to both. Any other status is refused.         |
-| `ken task context [<id>]`                                                                      | Body, READMEs above, the commits on the branch not on the default branch, the mentions; Markdown on stdout for a reviewer or a fresh agent.                                                          |
-
-`list` notes what needs you: malformed; overdue; todo for more than 90 days; landing;
-done but branch remains; claimed but the worktree is missing or not the branch's;
-uncommitted changes in a worktree; how many closed tasks `archive --closed` could move.
-
-**Concurrency**, several agents on one machine, atomic operations, no lock files: claim is
-atomic through git's ref lock; create reserves an ID with an exclusive-create file
-`<volume>/.<id>.add`, and a held or stale reservation moves the writer on one second;
-update writes beside and renames over; a status change is a rename of the file itself;
-two writers to one file, last wins.
-
-**The agent workflow:** `cd "$(ken task claim)"`; read what `ken task path` prints; work
-and commit on the branch with a `Task: <id>` trailer; `ken task done`; after the merge,
-from outside the worktree, `ken task finish <id>`. A thought becomes work the same way:
-`ken task add --note`, a session over `ken task context <id>`, tasks that mention the note.
+Plain-text tasks in one folder of the root, one file per task, the file's path as its
+identity, tied to code by repo key and branch name. Its own package, `@unclex/ken-task`,
+reached as `ken task`; its PRD is `docs/ken-task.md`. It depends on `ken` for `config`,
+`which`, `path code` and `get -b`, and `ken` never depends on it. The kernel knows two
+things of it: the `task:` section of `.ken.yaml`, kept and printed, and a branch named
+after a task, passed to `get -b` like any other.
 
 ## `create-ken`
 
@@ -542,12 +444,12 @@ auto-memory is keyed on the git repo, so every session at the root shares one me
 
 ## Path length
 
-|                                                                                | chars       |
-| ------------------------------------------------------------------------------ | ----------- |
-| `/Users/me/ken/.repos/github.com/acme/join-api-step-functions.20261019T101500` | 78          |
-| `PATH_MAX` macOS / Linux                                                       | 1024 / 4096 |
-| Unix socket path (`sun_path`) macOS / Linux                                    | 104 / 108   |
-| Windows `MAX_PATH`                                                             | 260         |
+|                                                                                              | chars       |
+| -------------------------------------------------------------------------------------------- | ----------- |
+| `/Users/me/ken/.repos/github.com/acme/join-api-step-functions.portal-print-web-views-to-pdf` | 90          |
+| `PATH_MAX` macOS / Linux                                                                     | 1024 / 4096 |
+| Unix socket path (`sun_path`) macOS / Linux                                                  | 104 / 108   |
+| Windows `MAX_PATH`                                                                           | 260         |
 
 Not a problem on macOS or Linux. The one wall is a Unix socket created inside the tree,
 handled by the root `.envrc`. If it ever bites: a host alias (`gh/` for `github.com/`) or
@@ -555,10 +457,8 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
 
 ## Out of scope for now
 
-- Syncing the volume and more than one machine: `claimed` is read from this machine.
 - Windows.
-- Priority and effort on tasks; dependencies order the work.
-- `.org` pages and org-agenda; pages and tasks are Markdown.
+- `.org` pages and org-agenda; pages are Markdown.
 - GitLab subgroups: an owner with slashes.
 - Repos with submodules: the clone at `<repo>` and no worktrees until git recommends them.
 - A union file system for layers; a symlink per layer is the overlay.
@@ -599,12 +499,9 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
 
 ## Prior art
 
-- The `ws` CLI and the sales-atlas design, the two halves this merges: denote-named tasks
-  with a worktree per task and the `<host>/<owner>/<repo>.<branch>` layout from one; a
-  manifest, curated docs, tiny `AGENTS.md`, skills, hooks and lazily cloned repos from the
-  other.
-- denote: the file-name scheme, timestamp identifier, sorted keywords, front matter
-  optional, backlinks by grep.
+- The `ws` CLI and the sales-atlas design, the two halves this merges: a worktree per
+  task and the `<host>/<owner>/<repo>.<branch>` layout from one; a manifest, curated docs,
+  tiny `AGENTS.md`, skills, hooks and lazily cloned repos from the other.
 - A code-free bootstrap repo with gitignored clones beside tracked context files, and
   "point to the manifest, don't copy it".
 - Google `repo` manifests and Zephyr `west`: listed but not synced is the lazy state.

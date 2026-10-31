@@ -171,8 +171,7 @@ describe('ken config', () => {
 				'  - name: sales-atlas',
 				'    key: github.com/acme/sales-atlas',
 				"task: # ken-task's section; ken keeps it and prints it, nothing more",
-				'  volume: me',
-				'  branch: "{id}"'
+				'  folder: tasks'
 			].join('\n')
 		)
 		symlinkSync(join(root, 'elsewhere'), join(root, 'sales-atlas'))
@@ -185,7 +184,7 @@ describe('ken config', () => {
 			layers: [
 				{ name: 'sales-atlas', key: 'github.com/acme/sales-atlas', cloned: false, linked: true }
 			],
-			task: { volume: 'me', branch: '{id}' }
+			task: { folder: 'tasks' }
 		})
 	})
 

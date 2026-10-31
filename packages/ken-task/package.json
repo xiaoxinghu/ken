@@ -1,7 +1,7 @@
 {
 	"name": "@unclex/ken-task",
 	"version": "0.0.0",
-	"description": "Plain-text tasks in denote names, a git worktree per task. Reached as `ken task`.",
+	"description": "Plain-text tasks in one folder, one file per task, a git worktree per task. Reached as `ken task`.",
 	"type": "module",
 	"license": "MIT",
 	"repository": {

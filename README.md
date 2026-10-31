@@ -8,10 +8,10 @@ worktree per branch beside the clone. Shared knowledge arrives as layers: other 
 the same shape, cloned in and linked at the top as sections. A kernel CLI enforces the
 few fixed rules; everything else is scripts and skills built on it.
 
-| Package            | Command          | What                                                  |
-| ------------------ | ---------------- | ----------------------------------------------------- |
-| `@unclex/ken`      | `ken`            | the kernel: layout, index, layers, dispatch           |
-| `@unclex/ken-task` | `ken task`       | plain-text tasks in denote names, a worktree per task |
-| `create-ken`       | `npm create ken` | scaffold a root from a template; any root is a layer  |
+| Package            | Command          | What                                                 |
+| ------------------ | ---------------- | ---------------------------------------------------- |
+| `@unclex/ken`      | `ken`            | the kernel: layout, index, layers, dispatch          |
+| `@unclex/ken-task` | `ken task`       | plain-text tasks in one folder, a worktree per task  |
+| `create-ken`       | `npm create ken` | scaffold a root from a template; any root is a layer |
 
 The design is `docs/prd.md`. Nothing is implemented yet.

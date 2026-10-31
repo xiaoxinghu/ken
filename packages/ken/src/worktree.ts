@@ -75,8 +75,9 @@ export function worktree(clone: string, key: string, branch: string, from?: stri
 		git(clone, 'worktree', 'add', '-q', path, branch)
 		repo = readRepoYaml(path)
 	} catch (e) {
-		const undone = release(clone, branch, path, made, !exists)
+		// a lost folder hands the branch on to the caller that made it, worktree or not yet
 		const lost = !made && (e as NodeJS.ErrnoException).code === 'EEXIST'
+		const undone = release(clone, branch, path, made, !exists && !lost)
 		const why = lost
 			? `${path} appeared meanwhile: another caller is giving ${branch} its worktree`
 			: (e as Error).message
@@ -152,7 +153,7 @@ function requireFree(clone: string, path: string): void {
 
 /**
  * Undo a worktree that failed, only what this caller made: the folder, and the worktree in it if
- * git got that far; the branch if it made it and no other caller's worktree holds it. Says what.
+ * git got that far; the branch if it is to go and no worktree holds it. Says what.
  */
 function release(
 	clone: string,

@@ -187,6 +187,19 @@ describe('ken get -b', () => {
 		expect(git(tree('race'), 'branch', '--show-current')).toBe('race')
 	})
 
+	it('keeps the branch for the caller that claimed the folder before git lists its worktree', () => {
+		// right after this caller creates the branch, a second one claims the folder, not yet a worktree
+		writeFileSync(
+			join(clone(), '.git/hooks/reference-transaction'),
+			`#!/bin/sh\n[ "$1" = committed ] && mkdir "${tree('race')}"\nexit 0\n`,
+			{ mode: 0o755 }
+		)
+		const r = ken(KEY, '-b', 'race')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('another caller is giving race its worktree')
+		expect(exists('race')).toBe(true)
+	})
+
 	it('lets exactly one of two parallel callers create a new branch', async () => {
 		const run = () =>
 			new Promise<{ status: number | null; stdout: string }>((done) => {

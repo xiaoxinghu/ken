@@ -80,16 +80,24 @@ function clones(root: string): string[] {
 	)
 }
 
-/** `git worktree list` of a clone, the clone first; a worktree whose folder is gone is left out. */
+/**
+ * `git worktree list` of a clone, the clone first; a worktree whose folder is gone is left out.
+ * NUL-delimited, since git prints a newline in a path as it is.
+ */
 const checkouts = (clone: string): Worktree[] =>
-	git(clone, 'worktree', 'list', '--porcelain')
-		.split('\n\n')
-		.filter((record) => !/^prunable/m.test(record))
-		.map((record) => {
-			const path = /^worktree (.*)$/m.exec(record)?.[1] ?? ''
+	git(clone, 'worktree', 'list', '--porcelain', '-z')
+		.split('\0\0')
+		.map((record) => record.split('\0'))
+		.filter(
+			(fields) =>
+				fields[0]?.startsWith('worktree ') && !fields.some((f) => f.startsWith('prunable'))
+		)
+		.map((fields) => {
+			const field = (name: string) => fields.find((f) => f.startsWith(name))?.slice(name.length)
+			const path = field('worktree ') ?? ''
 			return {
 				path: existsSync(path) ? realpathSync.native(path) : path,
-				branch: /^branch refs\/heads\/(.*)$/m.exec(record)?.[1] ?? null
+				branch: field('branch refs/heads/') ?? null
 			}
 		})
 

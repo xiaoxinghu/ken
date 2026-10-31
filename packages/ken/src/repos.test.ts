@@ -65,7 +65,7 @@ beforeAll(() => {
 	git(code('web'), 'worktree', 'add', '-q', '-b', 'feat/ok', `${code('web')}.feat-ok`)
 	git(code('web'), 'worktree', 'add', '-q', '-b', 'feat/x', `${code('web')}.feat-x`)
 	git(code('web'), 'worktree', 'move', `${code('web')}.feat-x`, `${code('web')}.renamed`)
-	git(code('web'), 'worktree', 'add', '-q', '-b', 'out', join(tmp, 'out'))
+	git(code('web'), 'worktree', 'add', '-q', '-b', 'out', join(tmp, 'out\nside'))
 
 	// mentions of web: two pages, and copies where repos <key> must not look
 	const mention = `See ${OWNER}/web.\n`
@@ -126,7 +126,7 @@ describe('ken repos', () => {
 		expect(web?.worktrees).toEqual([
 			{ path: `${code('web')}.feat-ok`, branch: 'feat/ok' },
 			{ path: `${code('web')}.renamed`, branch: 'feat/x' },
-			{ path: join(tmp, 'out'), branch: 'out' }
+			{ path: join(tmp, 'out\nside'), branch: 'out' }
 		])
 		expect(web?.strays).toEqual([
 			expect.stringContaining(

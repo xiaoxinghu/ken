@@ -195,7 +195,7 @@ function show(r: Row): string {
 }
 
 export const repos: Command = {
-	usage: 'repos [<key>] [--layer <name>] [--json]',
+	usage: 'repos [<key> | --layer <name>] [--json]',
 	summary:
 		'The merged index times the disk: every repo with its desc, who listed it, its clone and worktrees, and every stray.',
 	details: [
@@ -231,7 +231,7 @@ export const repos: Command = {
 			(i >= 0 && (!layerName || input !== undefined))
 		) {
 			throw new Error(
-				`ken repos takes a <key>, or --layer <name>, and --json, got ${JSON.stringify(redact(args.join(' ')))}. ` +
+				`ken repos takes a <key> or --layer <name>, not both (the row of a key says which workspace listed it), and --json; got ${JSON.stringify(redact(args.join(' ')))}. ` +
 					'Run e.g. `ken repos`, `ken repos --layer root`, `ken repos github.com/acme/join-web`, or `ken repos --help`.'
 			)
 		}

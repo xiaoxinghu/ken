@@ -157,6 +157,7 @@ describe('ken repos', () => {
 			`${OWNER}/atlas`,
 			`${OWNER}/web`
 		])
+		expect(ken('repos', `${OWNER}/web`, '--layer', 'atlas').stderr).toContain('not both')
 		const r = ken('repos', '--layer', 'nope')
 		expect(r.status).toBe(1)
 		expect(r.stderr).toContain('one of the layers in')

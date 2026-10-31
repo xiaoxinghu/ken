@@ -1,4 +1,12 @@
-import { lstatSync, mkdirSync, rmSync, statSync } from 'node:fs'
+import {
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readlinkSync,
+	realpathSync,
+	rmSync,
+	statSync
+} from 'node:fs'
 import { basename, dirname, join } from 'node:path'
 import { type Command, shellWord } from './command.ts'
 import { type Layer, readKenYaml } from './config.ts'
@@ -19,6 +27,7 @@ export function get(root: string, input: string): string {
 	requireGit(git(root, '--version'))
 	const { clone, layers } = readKenYaml(root)
 	const dir = codePath(root, key)
+	requireFolders(root, key)
 	mkdirSync(dirname(dir), { recursive: true })
 	if (claim(dir)) {
 		try {
@@ -43,6 +52,27 @@ export function get(root: string, input: string): string {
 	git(dir, 'worktree', 'repair')
 	register(root, key, layers)
 	return dir
+}
+
+/**
+ * Throw if `.repos`, the host or the owner folder is a link: a clone under it would be outside the
+ * root, where no session in it loads the root's context (decision 3). The root itself is real.
+ */
+function requireFolders(root: string, key: string): void {
+	const [host = '', owner = ''] = key.split('/')
+	for (const parts of [['.repos'], ['.repos', host], ['.repos', host, owner]]) {
+		const path = join(root, ...parts)
+		if (!lstatSync(path, { throwIfNoEntry: false })?.isSymbolicLink()) continue
+		const target = existsSync(path) ? realpathSync.native(path) : undefined
+		const fix = target
+			? `replace the link with what it points to, \`rm ${shellWord(path)} && mv ${shellWord(target)} ${shellWord(path)}\``
+			: `the link points nowhere (${readlinkSync(path)}): remove it, \`rm ${shellWord(path)}\``
+		throw new Error(
+			`${path} is a symlink, so a clone of ${key} under it would be outside the root ${root}, ` +
+				"where no session in it loads the root's context. Checkouts live physically inside the root: " +
+				`${fix}, then run \`ken get ${key}\`.`
+		)
+	}
 }
 
 /** Make `dir`, failing on anything already there, so of two gets at once only one clones. */

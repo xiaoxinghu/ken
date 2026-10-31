@@ -6,6 +6,7 @@ import {
 	readFileSync,
 	realpathSync,
 	renameSync,
+	symlinkSync,
 	writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -104,6 +105,17 @@ describe('ken get', () => {
 		expect(r.stderr).toContain(`\`mv ${clone()} ~/web.aside\``)
 		expect(readFileSync(join(clone(), 'notes.md'), 'utf8')).toBe('mine')
 		expect(existsSync(join(clone(), '.git'))).toBe(false)
+		expect(existsSync(indexFile(root))).toBe(false)
+	})
+
+	it('refuses an owner folder that links outside the root, cloning nothing', () => {
+		const outside = mkdtempSync(join(tmp, 'outside-'))
+		mkdirSync(join(root, '.repos/example.com'), { recursive: true })
+		symlinkSync(outside, join(root, '.repos/example.com/acme'))
+		const r = ken(KEY)
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`${join(root, '.repos/example.com/acme')} is a symlink`)
+		expect(existsSync(join(outside, 'web'))).toBe(false)
 		expect(existsSync(indexFile(root))).toBe(false)
 	})
 

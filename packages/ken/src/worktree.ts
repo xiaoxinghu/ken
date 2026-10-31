@@ -1,5 +1,13 @@
 import { spawnSync } from 'node:child_process'
-import { cpSync, existsSync, lstatSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import {
+	cpSync,
+	existsSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync
+} from 'node:fs'
 import { basename, dirname, isAbsolute, join, normalize, sep } from 'node:path'
 import { parse } from 'yaml'
 import { branchFolder } from './branch.ts'
@@ -58,17 +66,25 @@ export function worktree(clone: string, key: string, branch: string, from?: stri
 		}
 	}
 	let repo: RepoYaml
+	let made = false
 	try {
+		// the folder is the worktree's lock, as the branch is the branch's: of two callers that
+		// both found it free, only one makes it, and a failure removes only what this one made
+		mkdirSync(path) // fails on anything there; git adds a worktree into an empty folder
+		made = true
 		git(clone, 'worktree', 'add', '-q', path, branch)
 		repo = readRepoYaml(path)
 	} catch (e) {
-		release(clone, branch, path, !exists)
-		const undone = exists
-			? 'removed the worktree again'
-			: 'removed the worktree and the branch again'
+		const undone = release(clone, branch, path, made, !exists)
+		const lost = !made && (e as NodeJS.ErrnoException).code === 'EEXIST'
+		const why = lost
+			? `${path} appeared meanwhile: another caller is giving ${branch} its worktree`
+			: (e as Error).message
 		throw new Error(
-			`could not make the worktree of ${branch} at ${path}, so ken ${undone}: ${(e as Error).message}\n` +
-				`Fix the cause, then run \`${get}${from === undefined ? '' : ` --from ${shellWord(from)}`}\`.`
+			`could not make the worktree of ${branch} at ${path}, so ken ${undone}: ${why}\n` +
+				(!lost
+					? `Fix the cause, then run \`${get}${from === undefined ? '' : ` --from ${shellWord(from)}`}\`.`
+					: `Run \`${get}\` for its path once that caller is done.`)
 		)
 	}
 	prepare(repo, clone, path)
@@ -134,10 +150,28 @@ function requireFree(clone: string, path: string): void {
 	)
 }
 
-/** Undo a worktree that failed: remove it if git got as far as making it, and the branch if ours. */
-function release(clone: string, branch: string, path: string, ours: boolean): void {
-	if (worktreeOf(clone, branch) === path) git(clone, 'worktree', 'remove', '--force', path)
-	if (ours) git(clone, 'branch', '-D', branch)
+/**
+ * Undo a worktree that failed, only what this caller made: the folder, and the worktree in it if
+ * git got that far; the branch if it made it and no other caller's worktree holds it. Says what.
+ */
+function release(
+	clone: string,
+	branch: string,
+	path: string,
+	made: boolean,
+	ours: boolean
+): string {
+	const undone: string[] = []
+	if (made) {
+		if (worktreeOf(clone, branch) === path) git(clone, 'worktree', 'remove', '--force', path)
+		rmSync(path, { recursive: true, force: true })
+		undone.push('removed the worktree')
+	}
+	if (ours && worktreeOf(clone, branch) === undefined) {
+		git(clone, 'branch', '-D', branch)
+		undone.push('deleted the branch')
+	}
+	return undone.length ? `${undone.join(' and ')} again` : 'left them as they are'
 }
 
 /** Read the worktree's `.ken.yaml`: `copy`, paths inside the repo, and `setup`, a command. */

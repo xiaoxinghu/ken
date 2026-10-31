@@ -161,10 +161,30 @@ describe('ken get -b', () => {
 		commit({ '.ken.yaml': 'copy: [\n' })
 		const r = ken(KEY, '-b', 'x')
 		expect(r).toMatchObject({ status: 1, stdout: '' })
-		expect(r.stderr).toContain('removed the worktree and the branch again')
+		expect(r.stderr).toContain('removed the worktree and deleted the branch again')
 		expect(exists('x')).toBe(false)
 		expect(existsSync(tree('x'))).toBe(false)
 		expect(git(clone(), 'worktree', 'list', '--porcelain')).not.toContain(tree('x'))
+	})
+
+	it("never removes another caller's worktree when it loses the race for the folder", () => {
+		// right after this caller creates the branch, a second one runs whole and gives it its worktree
+		const hook = join(clone(), '.git/hooks/reference-transaction')
+		writeFileSync(
+			hook,
+			[
+				'#!/bin/sh',
+				'[ "$1" = committed ] && [ -z "$INNER" ] || exit 0',
+				'unset GIT_DIR GIT_WORK_TREE GIT_INDEX_FILE GIT_PREFIX',
+				`INNER=1 "${process.execPath}" "${CLI}" get ${KEY} -b race >/dev/null 2>&1`
+			].join('\n'),
+			{ mode: 0o755 }
+		)
+		const r = ken(KEY, '-b', 'race')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('so ken left them as they are')
+		expect(r.stderr).toContain('another caller is giving race its worktree')
+		expect(git(tree('race'), 'branch', '--show-current')).toBe('race')
 	})
 
 	it('lets exactly one of two parallel callers create a new branch', async () => {

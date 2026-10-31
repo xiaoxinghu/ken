@@ -83,7 +83,7 @@ describe('ken layer add', () => {
 		expect(readFileSync(join(root, 'README.md'), 'utf8')).toMatch(
 			/## Layers\n\n- \[atlas\]\(atlas\/README\.md\): The sales tribe's shared knowledge\.\n$/
 		)
-		expect(r.stdout).toContain(`add -- atlas ${OWNER_AGENTS} .ken.yaml README.md`)
+		expect(r.stdout).toContain(`add -- atlas ${OWNER_AGENTS} .ken.yaml README.md .repos/index.yaml`)
 		expect(r.stdout).toContain('`ken repos --layer atlas`')
 
 		// the layer's index is now part of the merged one: get registers nothing for its repos
@@ -118,6 +118,9 @@ describe('ken layer add', () => {
 		expect(ken('layer', 'add', KEY).stderr).toContain(`${join(root, 'atlas')} is already a section`)
 		symlinkSync('nowhere', join(root, 'other'))
 		expect(ken('layer', 'add', KEY, '--as', 'other').stderr).toContain('is already a link')
+		// a link into the clone, not to it, is a section of its own
+		symlinkSync(`.repos/${KEY}/systems`, join(root, 'systems'))
+		expect(ken('layer', 'add', KEY, '--as', 'systems').stderr).toContain('is already a link')
 		expect(existsSync(clone())).toBe(false)
 	})
 

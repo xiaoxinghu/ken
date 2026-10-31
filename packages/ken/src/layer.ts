@@ -32,12 +32,15 @@ const RESERVED = [
 ]
 const NAME = /^[A-Za-z0-9._-]+$/
 
-/** Whether `link` is a symlink whose target, taken as written, is inside `dir` or `dir` itself. */
-function linksInto(link: string, dir: string): boolean {
-	if (!lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()) return false
-	const target = resolve(dirname(link), readlinkSync(link))
-	return target === dir || target.startsWith(dir + sep)
-}
+/** The target of `link`, taken as written, when it is a symlink. */
+const linkTarget = (link: string): string | undefined =>
+	lstatSync(link, { throwIfNoEntry: false })?.isSymbolicLink()
+		? resolve(dirname(link), readlinkSync(link))
+		: undefined
+
+/** Whether `link` is a symlink to a file inside `dir`. */
+const linksInto = (link: string, dir: string): boolean =>
+	linkTarget(link)?.startsWith(dir + sep) ?? false
 
 /** Each `.repos/<host>/<owner>/AGENTS.md` under `dir`, relative to `dir`. */
 function ownerFiles(dir: string): string[] {
@@ -139,7 +142,7 @@ export function addLayer(root: string, input: string, as?: string): string {
 	}
 	// our own link, left by an add that failed halfway, is no clash
 	const stat = lstatSync(link, { throwIfNoEntry: false })
-	if (stat && !linksInto(link, clone)) {
+	if (stat && linkTarget(link) !== clone) {
 		const what = stat.isSymbolicLink() ? 'a link' : stat.isDirectory() ? 'a section' : 'a file'
 		throw new Error(
 			`${link} is already ${what}, so the layer cannot be linked there; ken leaves it untouched. ${other}`
@@ -180,7 +183,7 @@ export function addLayer(root: string, input: string, as?: string): string {
 		...done.map((d) => `  ${d}`),
 		'',
 		'Next: commit it to the root, ' +
-			`\`git -C ${shellWord(root)} add -- ${[...changed, '.ken.yaml', 'README.md'].map(shellWord).join(' ')}\`, ` +
+			`\`git -C ${shellWord(root)} add -- ${[...changed, '.ken.yaml', 'README.md', '.repos/index.yaml'].map(shellWord).join(' ')}\`, ` +
 			`then list the repos it brings with \`ken repos --layer ${name}\`.`
 	].join('\n')
 }
@@ -214,7 +217,7 @@ export function removeLayer(root: string, name: string): string {
 		changed.push(file)
 	}
 	const link = join(root, name)
-	if (linksInto(link, clone)) {
+	if (linkTarget(link) === clone) {
 		unlinkSync(link)
 		done.push(`removed the link ${name}`)
 		changed.push(name)

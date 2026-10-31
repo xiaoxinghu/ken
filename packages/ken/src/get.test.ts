@@ -24,16 +24,18 @@ const config = (dir: string, name: string) =>
 	spawnSync('git', ['config', name], { cwd: dir, encoding: 'utf8' }).stdout.trim()
 
 // remotes are bare repos under <tmp>/remotes, reached by key as https://example.com/<owner>/<repo>.git
-// through url.insteadOf, so a key alone clones from a local file:// URL
+// through url.insteadOf, so a key alone clones from a local file:// URL; git@example.com:<owner>/<repo>.git too
 const ken = (...args: string[]) =>
 	spawnSync(process.execPath, [join(import.meta.dirname, 'cli.ts'), 'get', ...args], {
 		encoding: 'utf8',
 		env: {
 			...process.env,
 			KEN_ROOT: root,
-			GIT_CONFIG_COUNT: '1',
+			GIT_CONFIG_COUNT: '2',
 			GIT_CONFIG_KEY_0: `url.file://${tmp}/remotes/.insteadOf`,
-			GIT_CONFIG_VALUE_0: 'https://example.com/'
+			GIT_CONFIG_VALUE_0: 'https://example.com/',
+			GIT_CONFIG_KEY_1: `url.file://${tmp}/remotes/.insteadOf`,
+			GIT_CONFIG_VALUE_1: 'git@example.com:'
 		}
 	})
 
@@ -93,6 +95,25 @@ describe('ken get', () => {
 		expect(r.stderr).toContain('does not appear to be a git repository')
 		expect(r.stderr).toContain('run `ken get example.com/acme/missing` again')
 		expect(existsSync(join(root, '.repos/example.com/acme/missing'))).toBe(false)
+		expect(existsSync(indexFile(root))).toBe(false)
+	})
+
+	it('names the URL to rerun with when it holds a user name, without showing it', () => {
+		const r = ken('git@example.com:acme/missing.git')
+		expect(r.status).toBe(1)
+		expect(r.stderr).toContain('run `ken get` again with the URL you gave')
+		expect(r.stderr).not.toContain('git@')
+	})
+
+	it("refuses an empty .git rather than set up the root's own repo", () => {
+		git(root, 'init', '-q')
+		mkdirSync(join(clone(), '.git'), { recursive: true })
+		const r = ken(KEY)
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(
+			`${clone()} is a folder whose .git git does not take as a repository`
+		)
+		expect(config(root, 'worktree.useRelativePaths')).toBe('')
 		expect(existsSync(indexFile(root))).toBe(false)
 	})
 

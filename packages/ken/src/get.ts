@@ -42,7 +42,7 @@ export function get(root: string, input: string): string {
 					: ''
 			throw new Error(
 				`could not clone ${redact(url)} into ${dir}, so ${key} is not here; nothing was left behind. ` +
-					`${(e as Error).message}\nFix the cause, then run \`ken get ${shellWord(redact(input.trim()))}\` again.${hint}`
+					`${(e as Error).message}\nFix the cause, then ${rerun(input.trim())}.${hint}`
 			)
 		}
 	} else {
@@ -86,11 +86,18 @@ function claim(dir: string): boolean {
 	}
 }
 
-/** Throw unless `dir` is a clone: a folder of its own (no link) holding a `.git` folder. */
+/** How to run `ken get` again on `input`, never showing a user name or token it holds. */
+const rerun = (input: string): string =>
+	redact(input) === input
+		? `run \`ken get ${shellWord(input)}\` again`
+		: 'run `ken get` again with the URL you gave (not shown: it holds a user name or token)'
+
+/** Throw unless `dir` is a clone: a folder of its own (no link) whose `.git` folder git takes as its repo. */
 function requireClone(dir: string, key: string): void {
 	const stat = lstatSync(dir)
 	const dotGit = statSync(join(dir, '.git'), { throwIfNoEntry: false })
-	if (stat.isDirectory() && dotGit?.isDirectory()) return
+	// an empty or broken .git is no repo, and git would go on up to the root's own
+	if (stat.isDirectory() && dotGit?.isDirectory() && ownRepo(dir)) return
 	const aside = `~/${basename(dir)}.aside`
 	const worktree = stat.isDirectory() && dotGit?.isFile()
 	const plain = stat.isDirectory() && !dotGit
@@ -100,7 +107,9 @@ function requireClone(dir: string, key: string): void {
 			? 'a file'
 			: worktree
 				? 'a worktree of another clone (its .git is a file)'
-				: 'a folder that is not a git clone (it has no .git)'
+				: dotGit
+					? 'a folder whose .git git does not take as a repository'
+					: 'a folder that is not a git clone (it has no .git)'
 	const move = worktree
 		? `\`git -C ${shellWord(dir)} worktree move ${shellWord(dir)} ${aside}\``
 		: `\`mv ${shellWord(dir)} ${aside}\``
@@ -112,6 +121,16 @@ function requireClone(dir: string, key: string): void {
 				? `; or, to make that folder the repo, run \`git init ${shellWord(dir)}\`, then \`ken get ${key}\`.`
 				: '.')
 	)
+}
+
+/** Whether git, asked in `dir`, finds `dir/.git` and not a repository above it. */
+function ownRepo(dir: string): boolean {
+	try {
+		const found = git(dir, 'rev-parse', '--absolute-git-dir')
+		return realpathSync.native(found) === realpathSync.native(join(dir, '.git'))
+	} catch {
+		return false
+	}
 }
 
 /** Write an entry for `key` into the root's index when neither it nor a layer's lists one. */

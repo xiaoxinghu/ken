@@ -18,7 +18,8 @@ import { parseArgs } from 'node:util'
 import { configPath, configuredRoot } from '@unclex/ken/src/root.ts'
 
 const TEMPLATES = join(import.meta.dirname, '..', 'templates')
-const templates = ['minimal', 'claude', 'layer'].filter((t) => existsSync(join(TEMPLATES, t)))
+// minimal is the skeleton ken init makes and nothing more, so it has no folder to copy
+const templates = ['minimal', ...['claude', 'layer'].filter((t) => existsSync(join(TEMPLATES, t)))]
 
 const USAGE = `Usage: npm create ken [<dir>] [-- --template <name>]
 
@@ -105,13 +106,12 @@ async function main(): Promise<string> {
 		)
 	}
 
-	cpSync(join(TEMPLATES, template), target, { recursive: true })
-	// npm drops .gitignore and symlinks from a published package: see templates/README.md
-	if (existsSync(join(target, 'gitignore'))) {
-		renameSync(join(target, 'gitignore'), join(target, '.gitignore'))
-	}
-	if (existsSync(join(target, 'AGENTS.md')) && !existsSync(join(target, 'CLAUDE.md'))) {
-		symlinkSync('AGENTS.md', join(target, 'CLAUDE.md'))
+	if (existsSync(join(TEMPLATES, template))) {
+		cpSync(join(TEMPLATES, template), target, { recursive: true })
+		// npm drops .gitignore from a published package: see templates/README.md
+		if (existsSync(join(target, 'gitignore'))) {
+			renameSync(join(target, 'gitignore'), join(target, '.gitignore'))
+		}
 	}
 
 	const finish = `git init ${q(target)} && ken init ${q(target)}`
@@ -125,6 +125,8 @@ async function main(): Promise<string> {
 		...process.env,
 		KEN_ROOT: target
 	})
+	// Claude Code reads CLAUDE.md, not AGENTS.md; npm publishes no symlink, so it is made here
+	if (!existsSync(join(target, 'CLAUDE.md'))) symlinkSync('AGENTS.md', join(target, 'CLAUDE.md'))
 
 	const out = [
 		'',
@@ -132,9 +134,9 @@ async function main(): Promise<string> {
 	]
 	const commands = [
 		`cd ${q(target)}`,
-		'direnv allow                                  # load .envrc: .env, sockets under $TMPDIR',
 		`git add -A && git commit -m 'Start a ken root'`,
-		'ken layer add <key>                           # join a team: e.g. github.com/acme/sales-atlas'
+		'claude                # or any agent: tell it what this knowledge base is for',
+		"ken layer add <key>   # to join a team's shared knowledge, e.g. github.com/acme/handbook"
 	]
 	if (
 		!existsSync(configured.path) ||

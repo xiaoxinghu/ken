@@ -12,7 +12,7 @@ const IGNORE = ['.repos/*/*/*/', '.env']
 
 const frontPage = (name: string) => `# ${name}
 
-A ken root: a knowledge base over the repos under \`.repos/\`, one section per folder.
+A knowledge base kept by you and your agents. Replace this line with what it is for.
 
 ## Sections
 
@@ -21,17 +21,26 @@ A ken root: a knowledge base over the repos under \`.repos/\`, one section per f
 
 const agents = (name: string) => `# ${name}
 
-A ken root: a knowledge base with every git checkout inside it. Start at the front page,
-README.md, which lists the sections and layers; each folder's README.md indexes its pages.
+A ken root: a knowledge base, one git repo, with any repos it needs checked out inside it.
+Start at the front page, README.md: what this is for, its sections, its layers.
 
-## Layout
+## Knowledge
 
-- Folders at the top are sections of knowledge; a layer is a section linked to the clone
-  of a shared repo.
+- A section is a folder at the top with a README.md listing its pages, one line each. Make
+  one when a topic needs it, and add its line under \`## Sections\` in README.md.
+- A page is a Markdown file in one section, linked from its README.md by relative path.
+- A layer is a section shared by a team: a link to the clone of its repo, made by
+  \`ken layer add <key>\`. Change it in that repo, never here.
+- Names starting with \`.\`, and AGENTS.md, CLAUDE.md, log.md and README.md, are not sections.
+- Commit what you change: the root is synced by git and nothing else.
+
+## Code
+
 - \`.repos/<host>/<owner>/<repo>/\` is a clone on its default branch, and
   \`.repos/<host>/<owner>/<repo>.<branch>/\` a worktree beside it, \`/\` in the branch as \`-\`.
 - \`.repos/index.yaml\` describes every repo, cloned or not. \`.ken.yaml\` holds settings.
 - \`.bin/\` holds \`ken-<name>\` scripts, run as \`ken <name>\`.
+- Name code as \`<key>:<path>#<symbol>\`, never by a line number or an absolute path.
 
 ## Commands
 

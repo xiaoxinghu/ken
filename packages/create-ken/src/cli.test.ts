@@ -5,16 +5,13 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
-	readFileSync,
 	readlinkSync,
 	realpathSync,
 	writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join, relative } from 'node:path'
+import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-
-const MINIMAL = join(import.meta.dirname, '..', 'templates', 'minimal')
 
 let dir: string
 let root: string
@@ -34,28 +31,26 @@ const create = (...args: string[]) =>
 		encoding: 'utf8'
 	})
 
-/** Every file under `folder`, relative to it. */
-const files = (folder: string): string[] =>
-	readdirSync(folder, { recursive: true, withFileTypes: true })
-		.filter((e) => !e.isDirectory())
-		.map((e) => relative(folder, join(e.parentPath, e.name)))
-
 describe('create-ken', () => {
-	it('makes a git repo holding the template and ken init, then refuses to run into it again', () => {
+	it('makes a git repo holding what ken init makes and CLAUDE.md, then refuses to run into it again', () => {
 		const r = create(root)
 		expect(r.stderr).toBe('')
 		expect(r.status).toBe(0)
-		expect(existsSync(join(root, '.git'))).toBe(true)
-		for (const file of files(MINIMAL)) {
-			expect(existsSync(join(root, file === 'gitignore' ? '.gitignore' : file))).toBe(true)
-		}
-		expect(existsSync(join(root, 'gitignore'))).toBe(false)
-		// npm publishes no symlink, so the copy makes it
+		// minimal assumes nothing about what the root is for: the skeleton, and nothing more
+		expect(readdirSync(root).sort()).toEqual([
+			'.bin',
+			'.git',
+			'.gitignore',
+			'.ken.yaml',
+			'.repos',
+			'AGENTS.md',
+			'CLAUDE.md',
+			'README.md'
+		])
+		expect(existsSync(join(root, '.repos/index.yaml'))).toBe(true)
+		// npm publishes no symlink, so create-ken makes it
 		expect(lstatSync(join(root, 'CLAUDE.md')).isSymbolicLink()).toBe(true)
 		expect(readlinkSync(join(root, 'CLAUDE.md'))).toBe('AGENTS.md')
-		expect(existsSync(join(root, '.repos/index.yaml'))).toBe(true)
-		// the PRD caps the root AGENTS.md: it costs tokens on every turn
-		expect(readFileSync(join(root, 'AGENTS.md'), 'utf8').split('\n').length).toBeLessThan(40)
 
 		// git ignores the clones, worktrees and secrets, and nothing the root tracks
 		mkdirSync(join(root, '.repos/github.com/acme/web.feat-x'), { recursive: true })
@@ -80,7 +75,6 @@ describe('create-ken', () => {
 			'.repos/github.com/acme/AGENTS.md',
 			'.repos/github.com/acme/.envrc',
 			'.gitignore',
-			'.envrc',
 			'CLAUDE.md'
 		]) {
 			expect(status).toContain(`?? ${file}`)

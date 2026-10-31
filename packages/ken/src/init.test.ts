@@ -241,7 +241,8 @@ describe('the clones ken init makes unasked', () => {
 		expect(unattended(root, quiet)).toMatchObject({
 			GIT_TERMINAL_PROMPT: '0',
 			GIT_ASKPASS: '',
-			GIT_SSH_COMMAND: 'ssh -o BatchMode=yes -o ConnectTimeout=15',
+			GIT_SSH_COMMAND:
+				'ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2',
 			GIT_HTTP_LOW_SPEED_LIMIT: '1000',
 			GIT_HTTP_LOW_SPEED_TIME: '30'
 		})
@@ -255,7 +256,7 @@ describe('the clones ken init makes unasked', () => {
 			GIT_CONFIG_VALUE_0: 'ssh -i ~/.ssh/work'
 		}
 		expect(unattended(root, { ...quiet, ...config }).GIT_SSH_COMMAND).toBe(
-			'ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/work'
+			'ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i ~/.ssh/work'
 		)
 		expect(unattended(root, { ...quiet, GIT_SSH: 'plink' }).GIT_SSH_COMMAND).toBeUndefined()
 	})
@@ -264,7 +265,7 @@ describe('the clones ken init makes unasked', () => {
 		mkdirSync(root)
 		const own = { ...quiet, GIT_SSH_COMMAND: `"/my ssh/ssh" -o BatchMode=no -o ConnectTimeout=0` }
 		expect(unattended(root, own).GIT_SSH_COMMAND).toBe(
-			'"/my ssh/ssh" -o BatchMode=yes -o ConnectTimeout=15 -o BatchMode=no -o ConnectTimeout=0'
+			'"/my ssh/ssh" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o BatchMode=no -o ConnectTimeout=0'
 		)
 	})
 
@@ -291,7 +292,7 @@ describe('the clones ken init makes unasked', () => {
 		expect(r.status).toBe(0)
 		expect(r.stderr).toContain('the layer y (example.net/x/y) is offline')
 		expect(readFileSync(join(dir, 'ssh.log'), 'utf8')).toContain(
-			'0 -o BatchMode=yes -o ConnectTimeout=15 -i key '
+			'0 -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i key '
 		)
 	})
 })

@@ -77,7 +77,7 @@ export function unattended(root: string, env = process.env): NodeJS.ProcessEnv {
 		...(ssh && {
 			GIT_SSH_COMMAND: ssh.replace(
 				/^\s*("[^"]*"|'[^']*'|\S+)/,
-				'$1 -o BatchMode=yes -o ConnectTimeout=15'
+				'$1 -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2'
 			)
 		})
 	}

@@ -69,18 +69,29 @@ function firstProse(dir: string): string | undefined {
 
 const entryPrefix = (name: string) => `- [${name}](${name}/README.md)`
 
+/** The lines of the `## Layers` section: its heading and the index of the next heading, or -1. */
+function layersSection(lines: string[]): { heading: number; end: number } {
+	const heading = lines.findIndex((l) => l.trim() === '## Layers')
+	const next = lines.findIndex((l, i) => heading >= 0 && i > heading && /^#{1,2} /.test(l))
+	return { heading, end: next < 0 ? lines.length : next }
+}
+
+/** The line of the layer `name` under `## Layers`, or -1. */
+function entryLine(lines: string[], name: string): number {
+	const { heading, end } = layersSection(lines)
+	const at = lines.findIndex((l, i) => i > heading && i < end && l.startsWith(entryPrefix(name)))
+	return heading < 0 ? -1 : at
+}
+
 /** Add `line` at the end of `## Layers` in the front page, made at the end when missing. */
 function addFrontPageLine(file: string, name: string, line: string): boolean {
 	const lines = existsSync(file) ? readFileSync(file, 'utf8').split('\n') : ['']
-	if (lines.some((l) => l.startsWith(entryPrefix(name)))) return false
-	let heading = lines.findIndex((l) => l.trim() === '## Layers')
-	if (heading < 0) {
+	if (entryLine(lines, name) >= 0) return false
+	if (layersSection(lines).heading < 0) {
 		while (lines.length && lines.at(-1) === '') lines.pop()
 		lines.push(...(lines.length ? [''] : []), '## Layers', '')
-		heading = lines.length - 2
 	}
-	let end = lines.findIndex((l, i) => i > heading && /^#{1,2} /.test(l))
-	if (end < 0) end = lines.length
+	const { heading, end } = layersSection(lines)
 	let last = end - 1
 	while (last > heading && !lines[last]?.trim()) last--
 	const before = last === heading ? [''] : []
@@ -90,11 +101,11 @@ function addFrontPageLine(file: string, name: string, line: string): boolean {
 	return true
 }
 
-/** Remove the layer's line from the front page, and the blank line it no longer needs. */
+/** Remove the layer's line under `## Layers`, and the blank line it no longer needs. */
 function removeFrontPageLine(file: string, name: string): boolean {
 	if (!existsSync(file)) return false
 	const lines = readFileSync(file, 'utf8').split('\n')
-	const at = lines.findIndex((l) => l.startsWith(entryPrefix(name)))
+	const at = entryLine(lines, name)
 	if (at < 0) return false
 	lines.splice(at, 1)
 	if (at > 0 && lines[at - 1] === '' && (lines[at] ?? '') === '') lines.splice(at - 1, 1)
@@ -226,12 +237,20 @@ export function removeLayer(root: string, name: string): string {
 	}
 	removeLayerEntry(root, name)
 	done.push('removed its entry under layers: in .ken.yaml')
+	// what is gone now, whether this run or an earlier one that failed halfway removed it
+	const gone = [...new Set([...changed, name, ...ownerFiles(clone)])].filter(
+		(p) => !lstatSync(join(root, p), { throwIfNoEntry: false })
+	)
+	const git = `git -C ${shellWord(root)}`
+	const untrack = gone.length
+		? `${git} rm -q --cached --ignore-unmatch -- ${gone.map(shellWord).join(' ')} && `
+		: ''
 	return [
 		`Removed the layer ${name}, ${key}, from ${root}:`,
 		...done.map((d) => `  ${d}`),
 		'',
 		`The clone stays at ${clone}; delete it with \`rm -rf "$(ken path code ${key})"\` when no longer needed.`,
-		`Next: commit the removal, \`git -C ${shellWord(root)} add -A -- ${[...changed, '.ken.yaml', 'README.md'].map(shellWord).join(' ')}\`.`
+		`Next: commit the removal, \`${untrack}${git} add -- .ken.yaml README.md\`.`
 	].join('\n')
 }
 

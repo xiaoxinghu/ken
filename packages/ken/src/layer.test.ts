@@ -8,6 +8,7 @@ import {
 	readlinkSync,
 	realpathSync,
 	symlinkSync,
+	unlinkSync,
 	writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -145,12 +146,18 @@ describe('ken layer add', () => {
 
 describe('ken layer remove', () => {
 	it('undoes each step of add and keeps the clone; a second remove has nothing to do', () => {
-		const readme = readFileSync(join(root, 'README.md'), 'utf8')
+		// the front page's own line of the layer's shape, outside ## Layers, is not the layer's
+		const readme = readFileSync(join(root, 'README.md'), 'utf8').replace(
+			'## Sections\n',
+			'## Sections\n\n- [atlas](atlas/README.md)\n'
+		)
+		writeFileSync(join(root, 'README.md'), readme)
 		const kenYaml = readFileSync(join(root, '.ken.yaml'), 'utf8')
 		// an owner link the user made into another place is not the layer's
 		mkdirSync(join(root, '.repos/example.com/other'), { recursive: true })
 		symlinkSync('../../../elsewhere.md', join(root, '.repos/example.com/other/AGENTS.md'))
 		expect(ken('layer', 'add', KEY).status).toBe(0)
+		expect(readFileSync(join(root, 'README.md'), 'utf8')).toMatch(/## Layers\n\n- \[atlas\]/)
 
 		const r = ken('layer', 'remove', 'atlas')
 		expect(r.status).toBe(0)
@@ -166,5 +173,14 @@ describe('ken layer remove', () => {
 		expect(again.status).toBe(0)
 		expect(again.stdout).toContain('atlas is not a layer')
 		expect(again.stdout).toContain('nothing to remove')
+	})
+
+	it('stages the links an earlier remove deleted before it failed', () => {
+		expect(ken('layer', 'add', KEY).status).toBe(0)
+		unlinkSync(join(root, 'atlas'))
+		unlinkSync(join(root, OWNER_AGENTS))
+		expect(ken('layer', 'remove', 'atlas').stdout).toContain(
+			`rm -q --cached --ignore-unmatch -- atlas ${OWNER_AGENTS} && `
+		)
 	})
 })

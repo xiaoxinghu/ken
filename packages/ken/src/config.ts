@@ -1,6 +1,6 @@
-import { existsSync, lstatSync, readFileSync } from 'node:fs'
+import { existsSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { parse, stringify } from 'yaml'
+import { type Document, isMap as isMapNode, isSeq, parse, parseDocument, stringify } from 'yaml'
 import type { Command } from './command.ts'
 import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
@@ -109,6 +109,46 @@ function isKey(text: string): boolean {
 	}
 }
 
+/**
+ * The one writer of `.ken.yaml`: read it, refusing what `readKenYaml` refuses, change the
+ * document, write it beside and rename it over. Comments and every other key are kept.
+ */
+function editKenYaml(root: string, change: (doc: Document) => void): void {
+	readKenYaml(root)
+	const file = join(root, '.ken.yaml')
+	const doc = parseDocument(existsSync(file) ? readFileSync(file, 'utf8') : '')
+	change(doc)
+	const tmp = `${file}.${process.pid}.tmp`
+	try {
+		writeFileSync(tmp, String(doc))
+		renameSync(tmp, file)
+	} catch (e) {
+		rmSync(tmp, { force: true })
+		throw e
+	}
+}
+
+/** Append `layer` to `layers:`, made when missing or empty. */
+export function addLayerEntry(root: string, layer: Layer): void {
+	editKenYaml(root, (doc) => {
+		const layers = doc.get('layers', true)
+		if (isSeq(layers)) {
+			layers.flow = false
+			layers.add(doc.createNode(layer))
+		} else doc.set('layers', doc.createNode([layer]))
+	})
+}
+
+/** Remove the layer called `name` from `layers:`. */
+export function removeLayerEntry(root: string, name: string): void {
+	editKenYaml(root, (doc) => {
+		const layers = doc.get('layers', true)
+		if (!isSeq(layers)) return
+		layers.items = layers.items.filter((l) => !(isMapNode(l) && l.get('name') === name))
+		if (!layers.items.length) layers.flow = true
+	})
+}
+
 type Setting<T> = { value: T; source: string }
 type Effective = {
 	root: Setting<string>
@@ -149,7 +189,7 @@ function human({ root, clone, orgs, layers, ...sections }: Effective): string {
 				...(linked ? [] : [`no link ${name} at the root`])
 			]
 			const hint = missing.length
-				? `  (${missing.join(', ')}: run \`ken layer add ${key} --as ${name}\`)`
+				? `  (${missing.join(', ')}: run \`ken layer remove ${name} && ken layer add ${key} --as ${name}\`)`
 				: ''
 			return `  ${name}: ${key}${hint}`
 		})

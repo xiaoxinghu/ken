@@ -281,7 +281,7 @@ export const index: Command = {
 			dir = codePath(root, layer.key)
 			if (!existsSync(dir)) {
 				throw new Error(
-					`the layer ${layer.name} is not cloned at ${dir}, so its index cannot be written. Run \`ken layer add ${layer.key} --as ${layer.name}\`.`
+					`the layer ${layer.name} is not cloned at ${dir}, so its index cannot be written. Run \`ken get ${layer.key}\` to clone it again.`
 				)
 			}
 		}

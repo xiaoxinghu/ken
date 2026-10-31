@@ -292,7 +292,7 @@ describe('ken index --layer', () => {
 
 	it('refuses a layer that is not cloned, with the command that clones it', () => {
 		expect(refusal('set', 'github.com/acme/x', 'desc=x', '--layer', 'sales-atlas')).toContain(
-			'Run `ken layer add github.com/acme/sales-atlas --as sales-atlas`'
+			'Run `ken get github.com/acme/sales-atlas` to clone it again'
 		)
 	})
 })

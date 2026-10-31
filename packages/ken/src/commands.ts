@@ -5,6 +5,7 @@ import { getCommand } from './get.ts'
 import { index } from './index.ts'
 import { initCommand } from './init.ts'
 import { redact } from './key.ts'
+import { layer } from './layer.ts'
 import { path } from './path.ts'
 import { repos } from './repos.ts'
 import { configPath } from './root.ts'
@@ -34,6 +35,7 @@ export const COMMANDS: Record<string, Command> = {
 	get: getCommand,
 	repos,
 	index,
+	layer,
 	config,
 	help
 }

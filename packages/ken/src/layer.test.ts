@@ -187,6 +187,15 @@ describe('ken layer remove', () => {
 		expect(again.stdout).toContain('nothing to remove')
 	})
 
+	it('deletes no owner link outside the root, behind a symlinked owner folder', () => {
+		expect(ken('layer', 'add', KEY).status).toBe(0)
+		const outside = mkdtempSync(join(tmp, 'outside-'))
+		symlinkSync(join(clone(), OWNER_AGENTS), join(outside, 'AGENTS.md'))
+		symlinkSync(outside, join(root, '.repos/example.com/team'))
+		expect(ken('layer', 'remove', 'atlas').status).toBe(0)
+		expect(lstatSync(join(outside, 'AGENTS.md')).isSymbolicLink()).toBe(true)
+	})
+
 	it('stages the links an earlier remove deleted before it failed', () => {
 		expect(ken('layer', 'add', KEY).status).toBe(0)
 		unlinkSync(join(root, 'atlas'))

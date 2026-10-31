@@ -42,13 +42,11 @@ const linkTarget = (link: string): string | undefined =>
 const linksInto = (link: string, dir: string): boolean =>
 	linkTarget(link)?.startsWith(dir + sep) ?? false
 
-/** Each `.repos/<host>/<owner>/AGENTS.md` under `dir`, relative to `dir`. */
+/** Each `.repos/<host>/<owner>/AGENTS.md` under `dir`, relative to `dir`, through no folder link. */
 function ownerFiles(dir: string): string[] {
 	const folders = (path: string) =>
 		existsSync(path)
-			? readdirSync(path, { withFileTypes: true }).filter(
-					(e) => e.isDirectory() || e.isSymbolicLink()
-				)
+			? readdirSync(path, { withFileTypes: true }).filter((e) => e.isDirectory())
 			: []
 	return folders(join(dir, '.repos')).flatMap((host) =>
 		folders(join(dir, '.repos', host.name))

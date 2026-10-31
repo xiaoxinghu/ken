@@ -6,6 +6,7 @@ import { index } from './index.ts'
 import { initCommand } from './init.ts'
 import { redact } from './key.ts'
 import { path } from './path.ts'
+import { repos } from './repos.ts'
 import { configPath } from './root.ts'
 import { which } from './which.ts'
 
@@ -31,6 +32,7 @@ export const COMMANDS: Record<string, Command> = {
 	path,
 	which,
 	get: getCommand,
+	repos,
 	index,
 	config,
 	help

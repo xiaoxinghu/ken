@@ -14,7 +14,7 @@ import {
 	visit,
 	type YAMLMap
 } from 'yaml'
-import type { Command } from './command.ts'
+import { type Command, shellWord } from './command.ts'
 import { readKenYaml } from './config.ts'
 import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
@@ -281,7 +281,8 @@ export const index: Command = {
 			dir = codePath(root, layer.key)
 			if (!existsSync(dir)) {
 				throw new Error(
-					`the layer ${layer.name} is not cloned at ${dir}, so its index cannot be written. Run \`ken get ${layer.key}\` to clone it again.`
+					`the layer ${layer.name} is offline on this machine, with no clone at ${dir}, so its index cannot be written. ` +
+						`Once it can be reached, run \`ken init ${shellWord(root)}\` to clone it, then run this \`ken index ${action}\` again.`
 				)
 			}
 		}

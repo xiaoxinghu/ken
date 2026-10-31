@@ -3,7 +3,12 @@ import { redact } from './key.ts'
 
 /** Run git in `cwd`: the one place ken calls git. Returns stdout, trimmed; throws with git's stderr. */
 export function git(cwd: string, ...args: string[]): string {
-	const r = spawnSync('git', args, { cwd, encoding: 'utf8' })
+	return gitWith(process.env, cwd, ...args)
+}
+
+/** `git`, run with the environment `env`. */
+export function gitWith(env: NodeJS.ProcessEnv, cwd: string, ...args: string[]): string {
+	const r = spawnSync('git', args, { cwd, encoding: 'utf8', env })
 	if (r.error) {
 		throw new Error(
 			`ken runs git, which failed to start: ${r.error.message}. Install git, then retry.`

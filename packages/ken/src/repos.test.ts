@@ -87,8 +87,8 @@ describe('ken repos', () => {
 	it("merges the root's index then each layer's, the first whole entry winning, with every clone", () => {
 		const r = ken('repos', '--json')
 		expect(r.status).toBe(0)
-		expect(r.stderr).toContain(`the layer gone is not cloned at ${code('gone')}`)
-		expect(r.stderr).toContain(`Run \`ken get ${OWNER}/gone\``)
+		expect(r.stderr).toContain(`the layer gone (${OWNER}/gone) is offline on this machine`)
+		expect(r.stderr).toContain(`run \`ken init ${root}\` to clone it`)
 		const rows = byKey(JSON.parse(r.stdout))
 		expect(Object.keys(rows)).toEqual(['api', 'atlas', 'docs', 'lone', 'web', 'wiki'])
 		expect(rows.web).toMatchObject({ desc: "The root's web.", listedBy: 'root', cloned: true })

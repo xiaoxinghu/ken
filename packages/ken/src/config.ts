@@ -10,7 +10,7 @@ import {
 	stringify,
 	visit
 } from 'yaml'
-import type { Command } from './command.ts'
+import { type Command, shellWord } from './command.ts'
 import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
 import { locateRoot } from './root.ts'
@@ -207,13 +207,13 @@ function human({ root, clone, orgs, layers, ...sections }: Effective): string {
 		`layers:${none(layers)}`,
 		...layers.map(({ name, key, cloned, linked }) => {
 			const missing = [
-				...(cloned ? [] : [`no clone at .repos/${key}`]),
+				...(cloned ? [] : [`offline, no clone at .repos/${key}`]),
 				...(linked ? [] : [`no link ${name} at the root`])
 			]
-			const hint = missing.length
-				? `  (${missing.join(', ')}: run \`ken layer remove ${name} && ken layer add ${key} --as ${name}\`)`
-				: ''
-			return `  ${name}: ${key}${hint}`
+			const fix = linked
+				? `once it can be reached, run \`ken init ${shellWord(root.value)}\` to clone it`
+				: `run \`ken layer remove ${name} && ken layer add ${key} --as ${name}\``
+			return `  ${name}: ${key}${missing.length ? `  (${missing.join(', ')}: ${fix})` : ''}`
 		})
 	]
 	if (Object.keys(sections).length) {
@@ -235,7 +235,8 @@ export const config: Command = {
 		'                   else ~/ken (source default)',
 		'  clone.blobless   from .ken.yaml, else true (source default)',
 		'  orgs, layers     from .ken.yaml; each layer says whether its clone and its link at the',
-		'                   root exist',
+		'                   root exist. A layer with no clone (cloned: false) is offline on this',
+		'                   machine: `ken init` clones it once it can be reached',
 		"  <section>        any other top-level key of .ken.yaml, verbatim: another tool's settings",
 		'',
 		'  --json           one object; a tool reads its own section from it'

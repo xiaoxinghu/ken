@@ -5,13 +5,15 @@ import {
 	mkdtempSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
-import { init } from './init.ts'
+import { git } from './git.ts'
+import { init, unattended } from './init.ts'
 
 let dir: string
 let root: string
@@ -127,5 +129,177 @@ describe('ken init', () => {
 		})
 		expect(r).toMatchObject({ status: 0, stderr: '' })
 		for (const file of SKELETON) expect(existsSync(join(root, file))).toBe(true)
+	})
+})
+
+describe('ken init installs the layers', () => {
+	// remotes are bare repos under <dir>/remotes, reached by key through url.insteadOf, as in get.test.ts
+	const ken = (...args: string[]) =>
+		spawnSync(process.execPath, [join(import.meta.dirname, 'cli.ts'), ...args], {
+			encoding: 'utf8',
+			env: {
+				...process.env,
+				KEN_ROOT: root,
+				GIT_CONFIG_COUNT: '1',
+				GIT_CONFIG_KEY_0: `url.file://${dir}/remotes/.insteadOf`,
+				GIT_CONFIG_VALUE_0: 'https://example.com/'
+			}
+		})
+	const commit = (cwd: string, ...args: string[]) =>
+		git(cwd, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x', ...args)
+	/** A bare repo at <dir>/remotes/<path>.git holding `files`. */
+	function remote(path: string, files: Record<string, string>): void {
+		const work = join(dir, 'work', path)
+		for (const [file, text] of Object.entries(files)) {
+			mkdirSync(join(work, file, '..'), { recursive: true })
+			writeFileSync(join(work, file), text)
+		}
+		git(work, 'init', '-q', '-b', 'main')
+		git(work, 'add', '.')
+		commit(work)
+		git(dir, 'clone', '-q', '--bare', work, join(dir, 'remotes', `${path}.git`))
+	}
+	const ATLAS = '.repos/example.com/acme/atlas'
+	const KB = '.repos/example.com/team/kb'
+
+	/** A root listing the layers atlas and kb, committed as `ken layer add` leaves them, then cloned to `root` as a new machine would; kb's remote is gone. */
+	beforeEach(() => {
+		remote('acme/atlas', {
+			'README.md': '# Atlas\n\nShared knowledge.\n',
+			'systems/README.md': '# Systems\n',
+			'.repos/index.yaml': 'example.com/acme:\n  repos:\n    web:\n      desc: The web app.\n',
+			'.repos/example.com/acme/AGENTS.md': '# acme\n'
+		})
+		remote('acme/web', { 'README.md': '# web\n' })
+		remote('team/kb', { 'README.md': '# KB\n\nThe team.\n' })
+		root = join(dir, 'origin')
+		mkdirSync(root)
+		git(root, 'init', '-q')
+		init(root, env)
+		for (const key of ['example.com/acme/atlas', 'example.com/team/kb']) {
+			expect(ken('layer', 'add', key).status).toBe(0)
+		}
+		git(root, 'add', '-A')
+		commit(root)
+		rmSync(join(dir, 'remotes/team'), { recursive: true })
+		git(dir, 'clone', '-q', root, join(dir, 'ken'))
+		root = join(dir, 'ken')
+	})
+
+	it('clones a reachable layer, so its links resolve and its index is read', () => {
+		const r = ken('init', root)
+		expect(r.status).toBe(0)
+		expect(r.stdout).toContain(`atlas: cloned ${ATLAS}`)
+		expect(readFileSync(join(root, 'atlas/systems/README.md'), 'utf8')).toBe('# Systems\n')
+		expect(readFileSync(join(root, '.repos/example.com/acme/AGENTS.md'), 'utf8')).toBe('# acme\n')
+		const web = JSON.parse(ken('repos', '--json').stdout).find(
+			(row: { key: string }) => row.key === 'example.com/acme/web'
+		)
+		expect(web).toMatchObject({ desc: 'The web app.', listedBy: 'atlas' })
+		// atlas's index lists web, so get registers nothing in the root's
+		const get = ken('get', 'example.com/acme/web')
+		expect(get).toMatchObject({ status: 0, stderr: '' })
+	})
+
+	it('reports an unreachable layer offline, changes nothing tracked, and gets it once it is back', () => {
+		const r = ken('init', root)
+		expect(r.status).toBe(0)
+		expect(r.stderr).toContain('the layer kb (example.com/team/kb) is offline on this machine')
+		expect(r.stderr).toContain('does not appear to be a git repository')
+		expect(r.stderr).toContain(`run \`ken init ${root}\` again`)
+		expect(existsSync(join(root, KB))).toBe(false)
+		expect(git(root, 'status', '--porcelain')).toBe('')
+		// the rest of the root works without it
+		expect(ken('repos')).toMatchObject({ status: 0 })
+		expect(ken('path', 'layer', 'kb')).toMatchObject({ status: 0, stdout: `${join(root, KB)}\n` })
+		expect(ken('config').stdout).toContain(
+			`kb: example.com/team/kb  (offline, no clone at ${KB}: once it can be reached, run \`ken init ${root}\``
+		)
+
+		git(dir, 'clone', '-q', '--bare', join(dir, 'work/team/kb'), join(dir, 'remotes/team/kb.git'))
+		const again = ken('init', root)
+		expect(again).toMatchObject({ status: 0, stderr: '' })
+		expect(again.stdout).toContain(`kb: cloned ${KB}`)
+		expect(readFileSync(join(root, 'kb/README.md'), 'utf8')).toContain('The team.')
+	})
+
+	it('touches no layer whose clone is there, even with its remote gone', () => {
+		git(dir, 'clone', '-q', '--bare', join(dir, 'work/team/kb'), join(dir, 'remotes/team/kb.git'))
+		ken('init', root)
+		rmSync(join(dir, 'remotes'), { recursive: true })
+		const r = ken('init', root)
+		expect(r).toMatchObject({ status: 0, stderr: '' })
+		expect(r.stdout).not.toMatch(/layer|atlas|kb/)
+	})
+})
+
+describe('the clones ken init makes unasked', () => {
+	const quiet = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' }
+
+	it('neither prompt nor wait forever, over ssh or http', () => {
+		mkdirSync(root)
+		expect(unattended(root, quiet)).toMatchObject({
+			GIT_TERMINAL_PROMPT: '0',
+			GIT_ASKPASS: '',
+			GIT_SSH_COMMAND:
+				'ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2',
+			GIT_HTTP_LOW_SPEED_LIMIT: '1000',
+			GIT_HTTP_LOW_SPEED_TIME: '30'
+		})
+	})
+
+	it("keep the user's core.sshCommand, and leave a GIT_SSH program alone", () => {
+		mkdirSync(root)
+		const config = {
+			GIT_CONFIG_COUNT: '1',
+			GIT_CONFIG_KEY_0: 'core.sshCommand',
+			GIT_CONFIG_VALUE_0: 'ssh -i ~/.ssh/work'
+		}
+		expect(unattended(root, { ...quiet, ...config }).GIT_SSH_COMMAND).toBe(
+			'ssh -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i ~/.ssh/work'
+		)
+		expect(unattended(root, { ...quiet, GIT_SSH: 'plink' }).GIT_SSH_COMMAND).toBeUndefined()
+	})
+
+	const OPTIONS =
+		'-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2'
+	it.each([
+		// ssh takes the first value of each option, so ours come before the user's
+		['"/my ssh/ssh" -o BatchMode=no', `"/my ssh/ssh" ${OPTIONS} -o BatchMode=no`],
+		// a shell prefix stays in front of ssh
+		['env SSH_AUTH_SOCK=/s/ssh ssh -i k', `env SSH_AUTH_SOCK=/s/ssh ssh ${OPTIONS} -i k`],
+		['SSH_AUTH_SOCK=/s /usr/bin/ssh', `SSH_AUTH_SOCK=/s /usr/bin/ssh ${OPTIONS}`],
+		// a wrapper that runs ssh itself gets them after its own arguments
+		['my-ssh-wrapper --vpn', `my-ssh-wrapper --vpn ${OPTIONS}`]
+	])("go right after the ssh word of the user's %s", (command, expected) => {
+		mkdirSync(root)
+		expect(unattended(root, { ...quiet, GIT_SSH_COMMAND: command }).GIT_SSH_COMMAND).toBe(expected)
+	})
+
+	it("run with them, the user's GIT_SSH_COMMAND kept", () => {
+		// a stand-in ssh that logs how it was run and fails, so the layer is offline
+		const ssh = join(dir, 'bin/ssh')
+		mkdirSync(join(dir, 'bin'))
+		writeFileSync(ssh, `#!/bin/sh\necho "$GIT_TERMINAL_PROMPT $*" >> ${dir}/ssh.log\nexit 1\n`, {
+			mode: 0o755
+		})
+		init(root, env)
+		writeFileSync(join(root, '.ken.yaml'), 'layers:\n  - { name: y, key: example.net/x/y }\n')
+		const r = spawnSync(process.execPath, [join(import.meta.dirname, 'cli.ts'), 'init', root], {
+			encoding: 'utf8',
+			env: {
+				...quiet,
+				KEN_ROOT: root,
+				GIT_SSH_COMMAND: `${ssh} -i key`,
+				GIT_CONFIG_COUNT: '1',
+				GIT_CONFIG_KEY_0: 'url.ssh://fake/.insteadOf',
+				GIT_CONFIG_VALUE_0: 'https://example.net/'
+			}
+		})
+		expect(r.status).toBe(0)
+		expect(r.stderr).toContain('the layer y (example.net/x/y) is offline')
+		expect(readFileSync(join(dir, 'ssh.log'), 'utf8')).toContain(
+			'0 -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -i key '
+		)
 	})
 })

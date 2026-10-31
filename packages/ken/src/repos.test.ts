@@ -117,7 +117,7 @@ describe('ken repos', () => {
 		expect(api).toMatchObject({ branch: 'other' })
 		expect(api?.strays[1]).toContain('not its default branch main')
 		expect(api?.strays[1]).toContain(
-			`\`git -C ${code('api')} switch main\`, then \`git -C ${code('api')} worktree add ${code('api')}.other other\``
+			`\`git -C ${code('api')} switch main\`, then \`ken get ${OWNER}/api -b other\``
 		)
 	})
 

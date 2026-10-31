@@ -131,9 +131,7 @@ function row(root: string, key: string, listed: Listed | undefined, cloned: bool
 		'refs/remotes/origin/HEAD'
 	)
 	if (defaultBranch && branch !== defaultBranch) {
-		const add = branch
-			? `, then \`${inClone} worktree add ${shellWord(codePath(root, key, branch))} ${shellWord(branch)}\``
-			: ''
+		const add = branch ? `, then \`ken get ${key} -b ${shellWord(branch)}\`` : ''
 		strays.push(
 			`the clone is on ${branch ?? 'a detached HEAD'}, not its default branch ${defaultBranch}; a clone holds ` +
 				'the default branch and every other branch is a worktree beside it: ' +

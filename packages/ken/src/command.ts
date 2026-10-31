@@ -10,6 +10,10 @@ export type Command = {
 	run: (args: string[]) => string
 }
 
+/** `text` as one shell word: as is when nothing in it is special to a shell, else single-quoted. */
+export const shellWord = (text: string): string =>
+	/^[\w./@%+=:,-]+$/.test(text) ? text : `'${text.replaceAll("'", "'\\''")}'`
+
 export const indent = (text: string, by: string): string => text.replace(/^/gm, by)
 
 /** What `ken <name> --help` prints. */

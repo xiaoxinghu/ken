@@ -1,5 +1,6 @@
 import { type Command, commandHelp, indent } from './command.ts'
 import { config } from './config.ts'
+import { externals } from './extension.ts'
 import { index } from './index.ts'
 import { initCommand } from './init.ts'
 import { redact } from './key.ts'
@@ -14,7 +15,12 @@ const help: Command = {
 	run([name, ...rest]) {
 		if (name === undefined) return overview()
 		if (rest.length) throw new Error('ken help takes one command. Run e.g. `ken help path`.')
-		return commandHelp(lookup(name))
+		const command = builtin(name)
+		if (command) return commandHelp(command)
+		throw new Error(
+			`${JSON.stringify(redact(name))} is not a builtin, so ken help has no page for it. ` +
+				`If it is an external command, run \`ken ${redact(name)} --help\`; run \`ken help\` for every command.`
+		)
 	}
 }
 
@@ -40,16 +46,13 @@ function overview(): string {
 			indent([c.usage, indent([c.summary, ...c.examples].join('\n'), '    ')].join('\n'), '  ')
 		),
 		'',
+		externals(Object.keys(COMMANDS)),
+		'',
 		`The root is KEN_ROOT, else "root" in ${configPath()}, else ~/ken.`,
 		'Run `ken <command> --help` for its forms.'
 	].join('\n')
 }
 
-export function lookup(name: string): Command {
-	const command = Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined
-	if (command) return command
-	throw new Error(
-		`${JSON.stringify(redact(name))} is not a ken command. ` +
-			`The commands are ${Object.keys(COMMANDS).join(', ')}: run \`ken help\` for what each does.`
-	)
-}
+/** The builtin called `name`, if any: it always wins over a `ken-<name>` (decision 10). */
+export const builtin = (name: string): Command | undefined =>
+	Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined

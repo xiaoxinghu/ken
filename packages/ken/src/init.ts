@@ -22,6 +22,7 @@ A knowledge base kept by you and your agents. Replace this line with what it is 
 const agents = (name: string) => `# ${name}
 
 A ken root: a knowledge base, one git repo, with any repos it needs checked out inside it.
+Pushed, another root can add it as a layer; read there, \`ken\` works on that root, not this.
 Start at the front page, README.md: what this is for, its sections, its layers.
 
 ## Knowledge

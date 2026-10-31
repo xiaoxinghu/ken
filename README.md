@@ -12,6 +12,6 @@ few fixed rules; everything else is scripts and skills built on it.
 | ------------------ | ---------------- | ----------------------------------------------------- |
 | `@unclex/ken`      | `ken`            | the kernel: layout, index, layers, dispatch           |
 | `@unclex/ken-task` | `ken task`       | plain-text tasks in denote names, a worktree per task |
-| `create-ken`       | `npm create ken` | scaffold a root or a layer from a template            |
+| `create-ken`       | `npm create ken` | scaffold a root from a template; any root is a layer  |
 
 The design is `docs/prd.md`. Nothing is implemented yet.

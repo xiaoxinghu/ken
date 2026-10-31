@@ -73,15 +73,24 @@ export function unattended(root: string, env = process.env): NodeJS.ProcessEnv {
 		GIT_ASKPASS: '',
 		GIT_HTTP_LOW_SPEED_LIMIT: '1000',
 		GIT_HTTP_LOW_SPEED_TIME: '30',
-		// right after the program, since ssh takes the first value given for an option
-		...(ssh && {
-			GIT_SSH_COMMAND: ssh.replace(
-				/^\s*("[^"]*"|'[^']*'|\S+)/,
-				'$1 -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2'
-			)
-		})
+		...(ssh && { GIT_SSH_COMMAND: withSshOptions(ssh) })
 	}
 }
+
+const SSH_OPTIONS =
+	'-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2'
+/** The word of a shell command that runs ssh: `ssh` or a path to it, quoted or not, never a `NAME=value`. */
+const SSH_WORD = /(^|\s)("(?:[^"]*\/)?ssh"|'(?:[^']*\/)?ssh'|(?:[^\s"'=]*\/)?ssh)(?=\s|$)/
+
+/**
+ * `command` with the unattended ssh options right after its ssh word, since ssh takes the first
+ * value given for an option, so a prefix such as `env NAME=value` is kept; with none, a wrapper,
+ * they are appended.
+ */
+const withSshOptions = (command: string): string =>
+	SSH_WORD.test(command)
+		? command.replace(SSH_WORD, `$1$2 ${SSH_OPTIONS}`)
+		: `${command} ${SSH_OPTIONS}`
 
 /**
  * Get each layer `.ken.yaml` lists whose clone is missing, in order; say which. One that cannot be

@@ -261,12 +261,19 @@ describe('the clones ken init makes unasked', () => {
 		expect(unattended(root, { ...quiet, GIT_SSH: 'plink' }).GIT_SSH_COMMAND).toBeUndefined()
 	})
 
-	it("come before the user's own ssh options, since ssh takes the first value of each", () => {
+	const OPTIONS =
+		'-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2'
+	it.each([
+		// ssh takes the first value of each option, so ours come before the user's
+		['"/my ssh/ssh" -o BatchMode=no', `"/my ssh/ssh" ${OPTIONS} -o BatchMode=no`],
+		// a shell prefix stays in front of ssh
+		['env SSH_AUTH_SOCK=/s/ssh ssh -i k', `env SSH_AUTH_SOCK=/s/ssh ssh ${OPTIONS} -i k`],
+		['SSH_AUTH_SOCK=/s /usr/bin/ssh', `SSH_AUTH_SOCK=/s /usr/bin/ssh ${OPTIONS}`],
+		// a wrapper that runs ssh itself gets them after its own arguments
+		['my-ssh-wrapper --vpn', `my-ssh-wrapper --vpn ${OPTIONS}`]
+	])("go right after the ssh word of the user's %s", (command, expected) => {
 		mkdirSync(root)
-		const own = { ...quiet, GIT_SSH_COMMAND: `"/my ssh/ssh" -o BatchMode=no -o ConnectTimeout=0` }
-		expect(unattended(root, own).GIT_SSH_COMMAND).toBe(
-			'"/my ssh/ssh" -o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=2 -o BatchMode=no -o ConnectTimeout=0'
-		)
+		expect(unattended(root, { ...quiet, GIT_SSH_COMMAND: command }).GIT_SSH_COMMAND).toBe(expected)
 	})
 
 	it("run with them, the user's GIT_SSH_COMMAND kept", () => {

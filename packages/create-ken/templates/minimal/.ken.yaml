@@ -1,0 +1,11 @@
+# This root's settings. Every key is optional; `ken config` prints what is in effect and
+# where each came from. See "Configuration" in docs/prd.md of github.com/xiaoxinghu/ken.
+#
+# orgs: # short names for the owners you work in
+#   me: github.com/your-name
+#   work: github.com/acme
+#
+# clone:
+#   blobless: true # false makes `ken get` fetch every blob up front instead of on first use
+#
+# layers: is written by `ken layer add` and `ken layer remove`; leave it to them.

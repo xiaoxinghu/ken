@@ -486,6 +486,14 @@ its pinned `@unclex/ken` so the rules have one source, and prints the next comma
 logic beyond copy and prompt: anything that needs to know a rule is a kernel primitive.
 Templates are bundled, not cloned, so a template version is tied to a kernel version.
 
+It asks only on a terminal: for the directory, offering the configured root, and the
+template, listing those it has. Off a terminal a missing `<dir>` is an error giving the
+full command, and the template is `minimal`. A `<dir>` that exists and is not an empty
+folder is refused, naming it. npm publishes no `.gitignore` and no symlink, so a template
+stores `gitignore`, renamed on copy, and the copy links `CLAUDE.md -> AGENTS.md`. The next
+commands are `cd <dir>`, `direnv allow`, the first commit and `ken layer add <key>`, led
+by the `export KEN_ROOT=` line when `<dir>` is not the configured root.
+
 | Template  | Holds                                                                                                             |
 | --------- | ----------------------------------------------------------------------------------------------------------------- |
 | `minimal` | front page, `AGENTS.md`, `CLAUDE.md -> AGENTS.md`, `.ken.yaml`, `.gitignore`, `.envrc`, `log.md`, empty sections  |

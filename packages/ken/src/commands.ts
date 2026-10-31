@@ -1,5 +1,6 @@
 import { type Command, commandHelp, indent } from './command.ts'
 import { config } from './config.ts'
+import { index } from './index.ts'
 import { initCommand } from './init.ts'
 import { redact } from './key.ts'
 import { path } from './path.ts'
@@ -18,7 +19,14 @@ const help: Command = {
 }
 
 /** The builtins. A command added later adds its entry here; a builtin cannot be shadowed. */
-export const COMMANDS: Record<string, Command> = { init: initCommand, path, which, config, help }
+export const COMMANDS: Record<string, Command> = {
+	init: initCommand,
+	path,
+	which,
+	index,
+	config,
+	help
+}
 
 function overview(): string {
 	return [

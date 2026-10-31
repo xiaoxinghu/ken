@@ -46,14 +46,18 @@ export function readKenYaml(root: string): KenYaml {
 		)
 	}
 	const document = existsSync(file) ? parseDocument(readFileSync(file, 'utf8')) : undefined
-	const [error] = document?.errors ?? []
-	if (error) {
+	let parsed: unknown
+	try {
+		const [error] = document?.errors ?? []
+		if (error) throw error
+		// an alias to no anchor is no parse error, but fails here
+		parsed = document?.toJS() ?? null
+	} catch (e) {
 		throw new Error(
-			`${file} is not valid YAML, so ken cannot read its settings: ${redact(error.message.trimEnd())}\n` +
+			`${file} is not valid YAML, so ken cannot read its settings: ${redact((e as Error).message.trimEnd())}\n` +
 				`Fix it, then run \`ken config\` to check.`
 		)
 	}
-	const parsed: unknown = document?.toJS() ?? null
 	const doc = parsed ?? {}
 	if (!isMap(doc)) fail('the top level', 'a mapping of sections', parsed)
 	const { orgs = {}, clone = {}, layers = [], ...sections } = doc as Record<string, unknown>

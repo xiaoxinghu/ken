@@ -22,6 +22,7 @@ describe('readKenYaml', () => {
 		// ken config --json prints the root under "root", so a section of that name would be lost
 		['root: ~/ken', 'root must be absent: the root is per machine'],
 		['a: [', 'is not valid YAML'],
+		['task: *missing', 'is not valid YAML'],
 		// ken layer add and remove would edit the alias, not the list it stands for
 		[
 			'shared: &s [{ name: atlas, key: github.com/acme/atlas }]\nlayers: *s',

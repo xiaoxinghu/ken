@@ -255,9 +255,17 @@ describe('the clones ken init makes unasked', () => {
 			GIT_CONFIG_VALUE_0: 'ssh -i ~/.ssh/work'
 		}
 		expect(unattended(root, { ...quiet, ...config }).GIT_SSH_COMMAND).toBe(
-			'ssh -i ~/.ssh/work -o BatchMode=yes -o ConnectTimeout=15'
+			'ssh -o BatchMode=yes -o ConnectTimeout=15 -i ~/.ssh/work'
 		)
 		expect(unattended(root, { ...quiet, GIT_SSH: 'plink' }).GIT_SSH_COMMAND).toBeUndefined()
+	})
+
+	it("come before the user's own ssh options, since ssh takes the first value of each", () => {
+		mkdirSync(root)
+		const own = { ...quiet, GIT_SSH_COMMAND: `"/my ssh/ssh" -o BatchMode=no -o ConnectTimeout=0` }
+		expect(unattended(root, own).GIT_SSH_COMMAND).toBe(
+			'"/my ssh/ssh" -o BatchMode=yes -o ConnectTimeout=15 -o BatchMode=no -o ConnectTimeout=0'
+		)
 	})
 
 	it("run with them, the user's GIT_SSH_COMMAND kept", () => {
@@ -283,7 +291,7 @@ describe('the clones ken init makes unasked', () => {
 		expect(r.status).toBe(0)
 		expect(r.stderr).toContain('the layer y (example.net/x/y) is offline')
 		expect(readFileSync(join(dir, 'ssh.log'), 'utf8')).toContain(
-			'0 -i key -o BatchMode=yes -o ConnectTimeout=15 '
+			'0 -o BatchMode=yes -o ConnectTimeout=15 -i key '
 		)
 	})
 })

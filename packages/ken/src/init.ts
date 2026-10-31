@@ -73,7 +73,13 @@ export function unattended(root: string, env = process.env): NodeJS.ProcessEnv {
 		GIT_ASKPASS: '',
 		GIT_HTTP_LOW_SPEED_LIMIT: '1000',
 		GIT_HTTP_LOW_SPEED_TIME: '30',
-		...(ssh && { GIT_SSH_COMMAND: `${ssh} -o BatchMode=yes -o ConnectTimeout=15` })
+		// right after the program, since ssh takes the first value given for an option
+		...(ssh && {
+			GIT_SSH_COMMAND: ssh.replace(
+				/^\s*("[^"]*"|'[^']*'|\S+)/,
+				'$1 -o BatchMode=yes -o ConnectTimeout=15'
+			)
+		})
 	}
 }
 

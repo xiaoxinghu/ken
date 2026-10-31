@@ -8,6 +8,7 @@ import {
 	statSync
 } from 'node:fs'
 import { basename, dirname, join } from 'node:path'
+import { branchFolder } from './branch.ts'
 import { type Command, shellWord } from './command.ts'
 import { type Layer, readKenYaml } from './config.ts'
 import { git, requireGit } from './git.ts'
@@ -15,6 +16,7 @@ import { indexFile, readIndex, setFields } from './index.ts'
 import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
 import { findRoot } from './root.ts'
+import { worktree } from './worktree.ts'
 
 /**
  * Make the repo `input` names ready in `root` and return its clone, `.repos/<key>`: cloned when
@@ -48,7 +50,12 @@ export function get(root: string, input: string): string {
 	} else {
 		requireClone(dir, key)
 	}
-	git(dir, 'config', 'worktree.useRelativePaths', 'true')
+	// written only when unset, so parallel gets of one clone do not race for its config lock
+	if (
+		git(dir, 'config', '--type=bool', '--default=false', 'worktree.useRelativePaths') !== 'true'
+	) {
+		git(dir, 'config', 'worktree.useRelativePaths', 'true')
+	}
 	git(dir, 'worktree', 'repair')
 	register(root, key, layers)
 	return dir
@@ -146,35 +153,72 @@ function register(root: string, key: string, layers: Layer[]): void {
 }
 
 export const getCommand: Command = {
-	usage: 'get <url|key>',
+	usage: 'get <url|key> [-b <branch> [--from <ref>]]',
 	summary:
-		'Make a repo ready here: clone it to .repos/<key> when missing, register it, print the path.',
+		'Make a repo ready here: clone it to .repos/<key> when missing, register it, print the path; -b: its worktree of <branch>.',
 	details: [
-		'  <key>     <host>/<owner>/<repo>, cloned from https://<key>.git',
-		'  <url>     a git URL (https, ssh, or git@host:owner/repo.git), cloned from as given',
+		'  <key>          <host>/<owner>/<repo>, cloned from https://<key>.git',
+		'  <url>          a git URL (https, ssh, or git@host:owner/repo.git), cloned from as given',
+		'  -b <branch>    then give <branch> its worktree at .repos/<key>.<branch>, / as -, and print',
+		'                 that path instead: a new branch is made from the default branch as it',
+		'                 stands (no fetch), an existing one is checked out there, one with a',
+		'                 worktree prints it, and the default branch prints the clone',
+		'  --from <ref>   base a new <branch> on <ref>; refused for a branch that exists',
 		'',
 		'Clones blobless (--filter=blob:none) unless .ken.yaml says clone.blobless: false; never',
 		'shallow. A clone already at .repos/<key> is used as it is, with no fetch; anything else',
 		'there is refused and left untouched. Every time, sets worktree.useRelativePaths and runs',
 		'`git worktree repair` in the clone, so a clone moved there with `mv` is adopted. When no',
 		"index, the root's or a layer's, lists the key, writes an entry into the root's and says on",
-		'stderr how to describe it. Prints only the path on stdout. Needs git 2.48 or newer.'
+		'stderr how to describe it. Prints only the path on stdout. Needs git 2.48 or newer.',
+		'',
+		"A new worktree reads the repo's own .ken.yaml: `copy: [<path>...]` copies each file from the",
+		'clone to the same path in it, then `setup: <command>` runs there with `sh -c`, its output on',
+		'stderr. A failure there keeps the worktree and prints the commands to finish by hand. A',
+		'folder in the way, or one differing only by case, is refused before anything is made.'
 	].join('\n'),
 	examples: [
 		'ken get github.com/acme/join-web',
 		'cd "$(ken get git@github.com:acme/join-web.git)"',
+		'cd "$(ken get github.com/acme/join-web -b feat/login)"   # .../join-web.feat-login',
+		'ken get github.com/acme/join-web -b hotfix --from v1.2.0',
 		'# adopt a clone: its owner folder first, then mv it in',
 		'mkdir -p "$(ken path repos)/github.com/acme" && mv ~/src/join-web "$(ken path code github.com/acme/join-web)" && ken get github.com/acme/join-web',
 		'git init "$(ken path code github.com/acme/new-repo)" && ken get github.com/acme/new-repo   # a new repo'
 	],
 	run(args) {
-		const [input] = args
-		if (args.length !== 1 || input === undefined || input.startsWith('-')) {
+		const usage =
+			'Run e.g. `ken get github.com/acme/join-web`, `ken get github.com/acme/join-web -b feat/login`, or `ken get --help`.'
+		const inputs: string[] = []
+		const flags: Record<string, string> = {}
+		for (let i = 0; i < args.length; i++) {
+			const arg = args[i] ?? ''
+			if (arg === '-b' || arg === '--from') {
+				const value = args[++i]
+				if (value === undefined || value.startsWith('-') || arg in flags) {
+					throw new Error(`ken get takes ${arg} once, followed by a value. ${usage}`)
+				}
+				flags[arg] = value
+			} else {
+				inputs.push(arg)
+			}
+		}
+		const [input] = inputs
+		const branch = flags['-b']
+		const from = flags['--from']
+		if (inputs.length !== 1 || input === undefined || input.startsWith('-')) {
 			throw new Error(
-				`ken get takes one <url|key>, got ${JSON.stringify(redact(args.join(' ')))}. ` +
-					'Run e.g. `ken get github.com/acme/join-web`, or `ken get --help`.'
+				`ken get takes one <url|key>, got ${JSON.stringify(redact(inputs.join(' ')))}. ${usage}`
 			)
 		}
-		return get(findRoot(), input)
+		if (from !== undefined && branch === undefined) {
+			throw new Error(
+				`ken get takes --from only with -b <branch>, the branch to base on it. ${usage}`
+			)
+		}
+		// a bad branch name is refused before anything is cloned
+		if (branch !== undefined) branchFolder(branch)
+		const clone = get(findRoot(), input)
+		return branch === undefined ? clone : worktree(clone, parseKey(input).key, branch, from)
 	}
 }

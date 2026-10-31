@@ -61,6 +61,7 @@ beforeAll(() => {
 		[OWNER_AGENTS]: '# acme\n'
 	})
 	remote('acme/web', { 'README.md': '# web\n' })
+	remote('acme/team', { '.repos/example.org/team/AGENTS.md': '# team\n' })
 })
 
 beforeEach(() => {
@@ -100,6 +101,17 @@ describe('ken layer add', () => {
 		expect(lstatSync(join(root, OWNER_AGENTS)).isSymbolicLink()).toBe(false)
 		expect(readFileSync(join(root, OWNER_AGENTS), 'utf8')).toBe('# ours\n')
 		expect(r.stdout).toContain(`left ${OWNER_AGENTS}`)
+	})
+
+	it('links no owner AGENTS.md through a host folder that is a symlink out of the root', () => {
+		const outside = mkdtempSync(join(tmp, 'outside-'))
+		symlinkSync(outside, join(root, '.repos/example.org'))
+		const r = ken('layer', 'add', 'example.com/acme/team')
+		expect(r.status).toBe(0)
+		expect(r.stdout).toContain(
+			'left .repos/example.org/team/AGENTS.md: .repos/example.org is a symlink'
+		)
+		expect(existsSync(join(outside, 'team'))).toBe(false)
 	})
 
 	it.each([

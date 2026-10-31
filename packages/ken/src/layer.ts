@@ -172,7 +172,16 @@ export function addLayer(root: string, input: string, as?: string): string {
 	changed.push(name)
 	for (const file of ownerFiles(clone)) {
 		const own = join(root, file)
-		if (linksInto(own, clone)) changed.push(file)
+		// get checked .repos; a link at the host or owner would put this one outside the root
+		const outside = [dirname(dirname(file)), dirname(file)].find((f) =>
+			lstatSync(join(root, f), { throwIfNoEntry: false })?.isSymbolicLink()
+		)
+		if (outside) {
+			done.push(
+				`left ${file}: ${outside} is a symlink, so a link in it would be outside the root. Replace ` +
+					`it with a folder, then run \`ken layer remove ${name} && ken layer add ${key} --as ${name}\``
+			)
+		} else if (linksInto(own, clone)) changed.push(file)
 		else if (lstatSync(own, { throwIfNoEntry: false })) {
 			done.push(`left ${file}: the root has its own, which wins over the layer's`)
 		} else {

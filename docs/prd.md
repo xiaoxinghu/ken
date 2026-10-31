@@ -331,7 +331,8 @@ task: # ken-task's section; ken keeps it and prints it, nothing more
 Every key is optional, and one left empty is its default; a missing file is all defaults.
 A key of the wrong type, or a YAML error, stops every command that reads the file, with the
 file, the key and what it expects. `root` is refused
-here, since the root is per machine. `ken config --json` prints one object: `root` and
+here, since the root is per machine. `layers` is written out, with no YAML anchor or alias,
+since `layer add` and `layer remove` edit it in place, keeping comments and every other key. `ken config --json` prints one object: `root` and
 `clone.blobless` as `{ value, source }`, `orgs`, `layers` with `cloned` and `linked` (the
 clone and the root link exist, a hint), then every unknown section as written, so a tool
 reads its own with `ken config --json | jq .task`.

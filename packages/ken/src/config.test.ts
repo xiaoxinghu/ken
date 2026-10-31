@@ -21,7 +21,16 @@ describe('readKenYaml', () => {
 		['orgs: { me: xiaoxinghu }', 'orgs.me must be a lowercase <host>/<owner>'],
 		// ken config --json prints the root under "root", so a section of that name would be lost
 		['root: ~/ken', 'root must be absent: the root is per machine'],
-		['a: [', 'is not valid YAML']
+		['a: [', 'is not valid YAML'],
+		// ken layer add and remove would edit the alias, not the list it stands for
+		[
+			'shared: &s [{ name: atlas, key: github.com/acme/atlas }]\nlayers: *s',
+			'layers must be written out, with no YAML anchor or alias'
+		],
+		[
+			'a: &a { name: atlas, key: github.com/acme/atlas }\nlayers: [*a]',
+			'layers must be written out, with no YAML anchor or alias'
+		]
 	])('refuses %j, naming the file and the key', (text, message) => {
 		const root = rootWith(text)
 		expect(() => readKenYaml(root)).toThrow(message)

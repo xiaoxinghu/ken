@@ -1,6 +1,15 @@
 import { existsSync, lstatSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
-import { type Document, isMap as isMapNode, isSeq, parse, parseDocument, stringify } from 'yaml'
+import {
+	type Document,
+	isAlias,
+	isMap as isMapNode,
+	isNode,
+	isSeq,
+	parseDocument,
+	stringify,
+	visit
+} from 'yaml'
 import type { Command } from './command.ts'
 import { parseKey, redact } from './key.ts'
 import { codePath } from './path.ts'
@@ -36,15 +45,15 @@ export function readKenYaml(root: string): KenYaml {
 				`Fix ${key} in ${file}, then run \`ken config\` to check.`
 		)
 	}
-	let parsed: unknown
-	try {
-		parsed = existsSync(file) ? parse(readFileSync(file, 'utf8')) : null
-	} catch (e) {
+	const document = existsSync(file) ? parseDocument(readFileSync(file, 'utf8')) : undefined
+	const [error] = document?.errors ?? []
+	if (error) {
 		throw new Error(
-			`${file} is not valid YAML, so ken cannot read its settings: ${redact((e as Error).message.trimEnd())}\n` +
+			`${file} is not valid YAML, so ken cannot read its settings: ${redact(error.message.trimEnd())}\n` +
 				`Fix it, then run \`ken config\` to check.`
 		)
 	}
+	const parsed: unknown = document?.toJS() ?? null
 	const doc = parsed ?? {}
 	if (!isMap(doc)) fail('the top level', 'a mapping of sections', parsed)
 	const { orgs = {}, clone = {}, layers = [], ...sections } = doc as Record<string, unknown>
@@ -76,6 +85,15 @@ export function readKenYaml(root: string): KenYaml {
 
 	const list = layers ?? []
 	if (!Array.isArray(list)) fail('layers', 'a list of { name, key }', layers)
+	// ken layer add and remove edit the list in place, which an alias would make a copy or a share
+	const layersNode = document?.get('layers', true)
+	if (isNode(layersNode)) {
+		visit(layersNode, (_, node) => {
+			if (isAlias(node) || (isNode(node) && node.anchor)) {
+				fail('layers', 'written out, with no YAML anchor or alias (&name, *name)', layers)
+			}
+		})
+	}
 	const parsedLayers = (list as unknown[]).map((layer, i): Layer => {
 		const at = `layers[${i}]`
 		if (!isMap(layer)) return fail(at, 'a mapping { name, key }', layer)

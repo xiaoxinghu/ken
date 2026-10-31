@@ -19,7 +19,7 @@ import { configPath, configuredRoot } from '@unclex/ken/src/root.ts'
 
 const TEMPLATES = join(import.meta.dirname, '..', 'templates')
 // minimal is the skeleton ken init makes and nothing more, so it has no folder to copy
-const templates = ['minimal', ...['claude', 'layer'].filter((t) => existsSync(join(TEMPLATES, t)))]
+const templates = ['minimal', ...['claude'].filter((t) => existsSync(join(TEMPLATES, t)))]
 
 const USAGE = `Usage: npm create ken [<dir>] [-- --template <name>]
 

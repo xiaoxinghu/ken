@@ -6,6 +6,7 @@ import { join, resolve } from 'node:path'
 import { addTask } from './add.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
 import { resolveTask } from './resolve.ts'
+import { setTask } from './set.ts'
 
 const HELP = `ken task <command>
 
@@ -23,12 +24,15 @@ Commands:
   path <task>     the absolute path of a task, live or archived
   add <path> [-r <key>] [-b <task>]...
                   create a task file, print its path
+  set <task> <field> <value>
+                  rewrite one front matter line: status, repo, blocked-by, scheduled, due
 
 Examples:
   ken task list
   ken task ready | head -1
   ken task add portal/fix-login -b portal/web-view-profiles
   ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"
+  ken task set tasks/portal/print-web-views-to-pdf status done
 
 Run \`ken task <command> --help\` for one command.`
 
@@ -112,6 +116,32 @@ Examples:
   ken task add "Fix Login"                                # tasks/fix-login.md
   ken task add portal/fix-login -r github.com/acme/portal -b portal/web-view-profiles
   echo 'Login fails after a password reset.' >> "$(ken task add portal/fix-login)"`
+
+const SET_HELP = `ken task set <task> <field> <value>
+
+Rewrite the one front matter line of <field> in the task file and print its absolute
+path. Every other byte stays: other fields, comments on the line, the body, the line
+endings. A missing line is added to the front matter; a file with none gets one at the
+top. An empty value removes the line.
+
+Fields:
+  status      todo, done or wontfix; done or wontfix also writes closed: <today>, todo
+              removes closed
+  repo        a repo key, <host>/<owner>/<repo>, e.g. github.com/acme/join-web
+  blocked-by  comma-separated tasks, each any path that reaches the file from here, the
+              root or the folder, found live or archived; written relative to the file
+  scheduled   YYYY-MM-DD, the day the task becomes ready
+  due         YYYY-MM-DD, its deadline
+
+Only a .md has front matter; another file is refused, as is one \`ken task list\` shows
+as a problem, until the fix its note names is made.
+
+Examples:
+  ken task set tasks/portal/print-web-views-to-pdf status done
+  ken task set tasks/portal/print-web-views-to-pdf repo github.com/xiaoxinghu/portal
+  ken task set tasks/portal/print-web-views-to-pdf blocked-by tasks/portal/a,tasks/ken/b.md
+  ken task set tasks/portal/print-web-views-to-pdf due 2026-11-30
+  ken task set tasks/portal/print-web-views-to-pdf scheduled ''   # remove the line`
 
 /** The root and the task folder, absolute, through `ken config --json` (PRD decision 11). */
 function settings(): { root: string; folder: string } {
@@ -244,11 +274,30 @@ function add(args: string[]): void {
 	process.stdout.write(`${added.path}\n`)
 }
 
+function set(args: string[]): void {
+	const [task, field, value] = args
+	if (args.length !== 3 || task === undefined || field === undefined || value === undefined) {
+		throw new Error(
+			`ken task set takes a task, a field and a value, got ${args.length} arguments. ` +
+				"Run `ken task set <task> <field> <value>`, e.g. `ken task set tasks/do-the-thing.md status done`, or `''` as the value to remove the line."
+		)
+	}
+	const { root, folder } = settings()
+	const path = setTask(root, folder, process.cwd(), [task, field, value], localDate(new Date()))
+	process.stdout.write(`${path}\n`)
+	if (field === 'status' && value === 'done') {
+		process.stderr.write(
+			`Done. Before the task is archived, distil what it taught into the knowledge section its folder's README.md names; \`ken path "${path}"\` prints that README chain.\n`
+		)
+	}
+}
+
 const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = {
 	list: [LIST_HELP, list],
 	ready: [READY_HELP, ready],
 	path: [PATH_HELP, path],
-	add: [ADD_HELP, add]
+	add: [ADD_HELP, add],
+	set: [SET_HELP, set]
 }
 
 const [command, ...args] = process.argv.slice(2)

@@ -60,6 +60,11 @@ function span(source: string, keys: string[]): [number, number] | undefined {
 	if (error)
 		throw new Error(`its front matter is not YAML (${error.message.split('\n')[0]}): fix it`)
 	if (!isMap(doc.contents)) return undefined
+	if (doc.contents.flow) {
+		throw new Error(
+			'its front matter is one `{...}` mapping, so one field cannot be rewritten without the others: write each field as `field: value` on a line of its own'
+		)
+	}
 	const line = (offset: number) => source.slice(0, offset).split('\n').length - 1
 	for (const pair of doc.contents.items) {
 		const key = pair.key
@@ -137,7 +142,7 @@ export function setTask(
 		)
 	}
 	const text = readFileSync(file, 'utf8')
-	const { problems } = readTask(basename(path), text)
+	const { fields: before, problems } = readTask(basename(path), text)
 	if (problems.length) {
 		throw new Error(
 			`${path} could not be fully read, so a field written into it might not read back: ${problems.join('; ')}. Then rerun.`
@@ -159,10 +164,18 @@ export function setTask(
 	}
 
 	const { fields: back, problems: after } = readTask(basename(path), next)
+	// every field but the one set, and closed with status, reads back as it was
+	const others = (fields: object) =>
+		JSON.stringify(
+			Object.entries(fields)
+				.filter(([k]) => k !== field && !(field === 'status' && k === 'closed'))
+				.sort(([a], [b]) => (a < b ? -1 : 1))
+		)
 	const expected =
 		field === 'blocked-by' ? refs : value || (field === 'status' ? 'todo' : undefined)
 	if (
 		after.length ||
+		others(back) !== others(before) ||
 		JSON.stringify(back[field as keyof typeof back]) !== JSON.stringify(expected) ||
 		(field === 'status' && back.closed !== (closes ? today : undefined))
 	) {

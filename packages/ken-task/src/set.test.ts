@@ -142,6 +142,11 @@ describe('ken task set', () => {
 	})
 
 	it.each([
+		[
+			'a front matter that is one {...} mapping',
+			'---\n{status: todo, repo: a/b/c, owner: me}\n---\n',
+			'write each field as `field: value` on a line of its own'
+		],
 		['unclosed front matter', '---\nstatus: todo\n# T\n', 'add a `---` line after the last field'],
 		[
 			'front matter that is not YAML',

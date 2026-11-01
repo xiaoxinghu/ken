@@ -78,6 +78,12 @@ describe('ken task set', () => {
 		expect(text()).toBe('---\nblocked-by: [a.md]\n---\n')
 	})
 
+	it('keeps the comment on a block scalar header', () => {
+		const { set, text } = setup('t.md', '---\nstatus: |- # see the thread\n  todo\n---\n')
+		expect(set('status', 'wontfix').status).toBe(0)
+		expect(text()).toBe(`---\nstatus: wontfix # see the thread\nclosed: ${today}\n---\n`)
+	})
+
 	it('keeps the indentation of the front matter fields', () => {
 		const { set, text } = setup('t.md', '---\n  status: todo # open\n  repo: a/b/c\n---\n')
 		expect(set('status', 'done').status).toBe(0)
@@ -113,6 +119,16 @@ describe('ken task set', () => {
 		const { set, text } = setup('t.md', body)
 		expect(set('repo', 'github.com/acme/web').status).toBe(0)
 		expect(text()).toBe(`﻿---\r\nrepo: github.com/acme/web\r\n---\r\n${body.slice(1)}`)
+	})
+
+	it('keeps each line its own ending when they are mixed', () => {
+		const { set, text } = setup('t.md', '---\r\nstatus: todo\n---\n# T\r\n')
+		expect(set('status', 'done').status).toBe(0)
+		expect(text()).toBe(`---\r\nstatus: done\nclosed: ${today}\n---\n# T\r\n`)
+		const crlf = setup('t.md', '---\nstatus: todo\r\n---\n')
+		expect(crlf.set('due', '2026-01-01').status).toBe(0)
+		expect(crlf.set('status', 'wontfix').status).toBe(0)
+		expect(crlf.text()).toBe(`---\nstatus: wontfix\r\ndue: 2026-01-01\r\nclosed: ${today}\r\n---\n`)
 	})
 
 	it('keeps CRLF line endings', () => {

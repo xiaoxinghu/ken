@@ -20,33 +20,36 @@ const PART = /^[a-z0-9._-]+$/
  * endings included. Throws on front matter with no closing `---`.
  */
 export function withField(text: string, field: string, value: string | undefined): string {
-	const bom = text.startsWith('﻿') ? '﻿' : ''
-	const eol = /^[^\n]*\r\n/.test(text) ? '\r\n' : '\n'
-	const lines = text.slice(bom.length).split(eol)
-	const line = (indent = '') => (value === undefined ? [] : [`${indent}${field}: ${value}`])
-	if (!FENCE.test(lines[0] ?? '')) {
-		return value === undefined
-			? text
-			: bom + ['---', ...line(), '---', ''].join(eol) + text.slice(bom.length)
+	const bom = text.startsWith('\uFEFF') ? '\uFEFF' : ''
+	const body = text.slice(bom.length)
+	// each line with its own ending, split as the reader splits, so mixed endings survive
+	const lines = body.match(/[^\n]*\n|[^\n]+$/g) ?? []
+	const bare = (l = '') => l.replace(/\r?\n$/, '')
+	const ending = (l = '') => /\r?\n$/.exec(l)?.[0] ?? '\n'
+	const line = (indent: string, eol: string) =>
+		value === undefined ? [] : [`${indent}${field}: ${value}${eol}`]
+	if (!FENCE.test(bare(lines[0]))) {
+		const eol = ending(lines[0])
+		return value === undefined ? text : `${bom}---${eol}${line('', eol).join('')}---${eol}${body}`
 	}
-	const end = lines.findIndex((l, i) => i > 0 && FENCE.test(l))
+	const end = lines.findIndex((l, i) => i > 0 && FENCE.test(bare(l)))
 	if (end < 0) {
 		throw new Error(
 			'its front matter has no closing `---`, so a field written into it would not read back: add a `---` line after the last field'
 		)
 	}
 	const keys = field === 'blocked-by' ? [field, ...ALIASES] : [field]
-	const { found, comment, indent } = span(lines.slice(1, end).join('\n'), keys)
+	const { found, comment, indent } = span(lines.slice(1, end).map(bare).join('\n'), keys)
 	if (!found) {
-		lines.splice(end, 0, ...line(indent))
-		return bom + lines.join(eol)
+		lines.splice(end, 0, ...line(indent, ending(lines[end - 1])))
+		return bom + lines.join('')
 	}
 	const [at, next] = [found[0] + 1, found[1] + 1]
-	const old = lines[at] ?? ''
+	const old = bare(lines[at])
 	const gap = /^[ \t]*/.exec(old.slice(old.indexOf(':') + 1))?.[0] || ' '
-	const set = `${indent}${field}:${gap}${value}${comment ?? ''}`
+	const set = `${indent}${field}:${gap}${value}${comment ?? ''}${ending(lines[next - 1])}`
 	lines.splice(at, next - at, ...(value === undefined ? [] : [set]))
-	return bom + lines.join(eol)
+	return bom + lines.join('')
 }
 
 /**
@@ -78,9 +81,12 @@ function span(
 		if (!isScalar(key) || !keys.includes(String(key.value)) || !key.range) continue
 		const value = isNode(pair.value) ? pair.value.range : undefined
 		const last = Math.max(key.range[1], value?.[1] ?? 0)
-		// what follows an offset on its line, when that is a comment, after the colon if any
+		// what follows an offset on its line, when that is a comment, after the colon and a
+		// block scalar's header if any
 		const tail = (offset: number) =>
-			/^:?([ \t]+#.*)?$/.exec(source.slice(offset).split('\n')[0] ?? '')?.[1]
+			/^(?::[ \t]*(?:[|>][-+0-9]*)?)?([ \t]+#.*)?$/.exec(
+				source.slice(offset).split('\n')[0] ?? ''
+			)?.[1]
 		const comment = tail(last) ?? tail(key.range[1])
 		return {
 			found: [line(key.range[0]), line(Math.max(last - 1, key.range[0])) + 1],

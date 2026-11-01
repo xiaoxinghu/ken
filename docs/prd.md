@@ -44,7 +44,8 @@ hidden name.
   .gitignore                       .repos/*/*/*/   .env
   .envrc                           direnv root: dotenv_if_exists; socket paths to $TMPDIR
   .bin/                            ken-* scripts: features, built on the primitives
-  .claude/                         hooks, deny rules, skills; not ken's business
+  .agents/                         skills and hooks.json, the files every harness shares; not ken's business
+  .claude/  .codex/  .pi/          one thin adapter per harness, pointing into .agents/; not ken's business
   .repos/                          every checkout
     index.yaml                     one entry per repo, by owner
     github.com/acme/AGENTS.md              owner-level context: tracked, on the cascade path
@@ -55,7 +56,7 @@ hidden name.
     github.com/acme/sales-atlas/           the layer's clone, with the same shape inside
 ```
 
-**Reserved names** at the root: `.repos`, `.bin`, `.ken.yaml`, `.claude`, `.envrc`,
+**Reserved names** at the root: `.repos`, `.bin`, `.ken.yaml`, `.agents`, `.claude`, `.codex`, `.pi`, `.envrc`,
 `AGENTS.md`, `CLAUDE.md`, `log.md`, and `README.md` as the front page. `ken init` creates
 the ones it owns; `ken layer add` refuses a section name that collides with one, or with
 an existing section. Everything else at the root is a section of the knowledge base.
@@ -350,6 +351,9 @@ layers:
     key: github.com/acme/sales-atlas
 task: # ken-task's section; ken keeps it and prints it, nothing more
   folder: tasks
+template: # create-ken's section: what the root was scaffolded from, read by its --diff
+  name: agents
+  version: 0.0.0
 ```
 
 Every key is optional, and one left empty is its default; a missing file is all defaults.
@@ -406,11 +410,19 @@ Templates are bundled, not cloned, so a template version is tied to a kernel ver
 It asks only on a terminal: for the directory, offering the configured root, and the
 template, listing those it has. Off a terminal a missing `<dir>` is an error giving the
 full command, and the template is `minimal`. A `<dir>` that exists and is not an empty
-folder is refused, naming it. npm publishes no `.gitignore` and no symlink, so a template
-stores `gitignore`, renamed on copy, and `CLAUDE.md -> AGENTS.md` is linked after `ken
-init`. The next commands are `cd <dir>`, the first commit, starting an agent there to say
-what the knowledge base is for, and `ken layer add <key>` to join a team, led by the
-`export KEN_ROOT=` line when `<dir>` is not the configured root.
+folder is refused, naming it, unless it is a root (it holds `.ken.yaml`): then, like `ken
+init`, it adds the template's missing files and links, overwrites nothing, and says what it
+added, so a root scaffolded from an older template picks up new files by running the same
+command again. The template's name and create-ken's version are recorded under `template:`
+in `.ken.yaml`, a section `ken` keeps and prints. `--diff` prints, for each template file,
+the difference between the bundled template and the root's copy, missing files named, and
+writes nothing: the agent reading it is the merge tool. There is no three-way merge: the
+template is meant not to need one (see "Harness files"). npm publishes no `.gitignore` and
+no symlink, so a template stores `gitignore`, renamed on copy, and `CLAUDE.md ->
+AGENTS.md` and the template's other links are made after `ken init`. The next commands are
+`cd <dir>`, the first commit, starting an agent there to say what the knowledge base is
+for, and `ken layer add <key>` to join a team, led by the `export KEN_ROOT=` line when
+`<dir>` is not the configured root.
 
 `minimal` is the hello world: it assumes nothing about what the root is for, not even
 software, so it holds no files of its own. The root is what `ken init` makes plus the
@@ -420,7 +432,37 @@ A layer starts the same way: any root is one (see "Layers").
 | Template  | Holds                                                                                         |
 | --------- | --------------------------------------------------------------------------------------------- |
 | `minimal` | nothing beyond `ken init` and `CLAUDE.md -> AGENTS.md`: no sections, no `log.md`, no `.envrc` |
-| `claude`  | `minimal` plus `.claude/` hooks, deny rules and skills, and the `.bin/` scripts they call     |
+| `agents`  | `minimal` plus the harness files below: hooks, deny rules, skills, and the `.bin/` scripts    |
+
+**Harness files.** Two of the four surfaces a harness reads have a standard every harness
+checked honours (Claude Code, Codex and pi; OpenCode, Gemini CLI, Cursor and Copilot CLI on
+most of it): `AGENTS.md` for instructions and `.agents/skills/<name>/SKILL.md` for skills,
+the Agent Skills specification. Hooks have a de facto one: Codex reads Claude Code's hooks
+schema and stdin/stdout contract unchanged, Cursor and Copilot read `.claude/settings.json`
+hooks directly, and pi has no hook file at all, only TypeScript extensions. Deny rules and
+PATH have nothing shared. So the `agents` template keeps one source for each shared
+surface and one thin adapter per harness, each pointing at the shared file:
+
+```
+AGENTS.md                      every harness; Claude Code only while no CLAUDE.md is above it, so the link stays
+.agents/skills/<name>/         Codex and pi read it; Claude Code does not: one link per skill in .claude/skills/
+.agents/hooks.json             one hooks object in Claude Code's schema; Codex reads it as it is
+.bin/ken-status, ken-ensure    the scripts the hooks run
+.claude/settings.json          hooks (a copy of the object: a settings file holds other keys) and permissions.deny
+.codex/hooks.json -> ../.agents/hooks.json
+.pi/extensions/ken-hooks.ts    a shim: reads hooks.json, maps session_start and tool_call onto it, spawns the commands
+```
+
+Hook lines name commands, `ken status` and `ken ensure`, not script paths. A command
+resolves through decision 10, so the script behind it can move from the root's `.bin/` to a
+layer's or to a package on `PATH` and update by `git pull` or an upgrade, while the hook
+files never change; Codex and pi pin hooks by hash, so a hook file that never changes is
+never re-trusted. The adapters change rarely; when they do, the re-run and `--diff` above
+carry the change into an existing root. Codex and pi load a project's hooks, skills and
+extensions only after a trust prompt, which the first-run message says. A deny rule is
+Claude Code's alone: no other harness has a declarative path deny. Nothing in the template
+puts `.bin/` on `PATH`: hooks and skills reach scripts as `ken <name>`, so only `ken` must
+be on the `PATH` of the shell that starts the harness, which every harness inherits.
 
 ## Built on top
 
@@ -430,25 +472,27 @@ are one line each. Skills are tested with golden questions: ten to twenty real p
 questions with known answers, run through a fresh session at the root and scored, rerun
 after a docs, skill or model change.
 
-| Piece                                                                  | Built from                                                                                                                                   |
-| ---------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ken-status`, a session-start hook                                     | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders.                                                            |
-| `ken-ensure`, a pre-tool hook on read, search and shell                | `which` then `repos --json`; `get <key>` when the key is listed and not cloned: the lazy clone.                                              |
-| deny rules in the root's `.claude/settings.json`                       | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                         |
-| `ken-doctor`                                                           | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream. |
-| `ken-lint`                                                             | `find -L` over the sections, the READMEs, the caps, `path` for every reference.                                                              |
-| `ken-pull`                                                             | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                |
-| `ken-grep`                                                             | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                |
-| `ken-promote`                                                          | `git mv` plus `index unset` and `index set --layer`.                                                                                         |
-| `ken-jira`                                                             | Jira issue picker into `get <key> -b <issue>`; no task file involved.                                                                        |
-| skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote` | the flows above. A team's playbooks are skills in its layer.                                                                                 |
+| Piece                                                                            | Built from                                                                                                                                   |
+| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ken-status`, run by the session-start hook as `ken status`                      | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders.                                                            |
+| `ken-ensure`, run by the pre-tool hook on read, search and shell as `ken ensure` | `which` then `repos --json`; `get <key>` when the key is listed and not cloned: the lazy clone. Exits non-zero only to block.                |
+| deny rules in the root's `.claude/settings.json`, Claude Code only               | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                         |
+| `ken-doctor`                                                                     | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream. |
+| `ken-lint`                                                                       | `find -L` over the sections, the READMEs, the caps, `path` for every reference.                                                              |
+| `ken-pull`                                                                       | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                |
+| `ken-grep`                                                                       | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                |
+| `ken-promote`                                                                    | `git mv` plus `index unset` and `index set --layer`.                                                                                         |
+| `ken-jira`                                                                       | Jira issue picker into `get <key> -b <issue>`; no task file involved.                                                                        |
+| skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote`           | the flows above. A team's playbooks are skills in its layer.                                                                                 |
 
 Sessions start at the root: that is where the hooks, skills and deny rules live, and the
 only layout a harness that walks down from the git root understands. A session that must
 start in a clone gets the root's skills and hooks as a plugin enabled at user scope. Two
-documented traps: an ancestor `CLAUDE.md` hides a clone's `AGENTS.md` unless the clone has
-`CLAUDE.md -> AGENTS.md` or the user sets `instructionFiles: claude-md-and-agents-md`;
-auto-memory is keyed on the git repo, so every session at the root shares one memory.
+documented traps: Claude Code reads `AGENTS.md` natively only while no `CLAUDE.md` exists
+in the working directory or above it (its default `instructionFiles`), so an ancestor
+`CLAUDE.md` hides a clone's `AGENTS.md` unless the clone has `CLAUDE.md -> AGENTS.md` or
+the user sets `instructionFiles: claude-md-and-agents-md` in user settings; auto-memory is
+keyed on the git repo, so every session at the root shares one memory.
 
 ## Path length
 

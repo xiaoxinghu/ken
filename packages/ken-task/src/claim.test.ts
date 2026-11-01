@@ -1,7 +1,7 @@
 // `ken task claim` against a local repo cloned into the layout with `ken get`, whose
 // .ken.yaml copies a file into each new worktree and runs a setup there.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { git } from './git.ts'
@@ -140,6 +140,35 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 		expect(r.stderr).toContain('Run `ken get example.com/acme/plain`')
 		expect(kenTask(root, ['claim'])).toMatchObject({ status: 1, stdout: '' })
 		expect(git(root, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/')).toBe('main')
+	})
+
+	it('refuses a link to a repo elsewhere where the clone belongs, leaving that repo alone', () => {
+		const root = newRoot()
+		const elsewhere = join(root, 'elsewhere')
+		mkdirSync(elsewhere)
+		git(elsewhere, 'init', '-q', '-b', 'main')
+		git(
+			elsewhere,
+			'-c',
+			'user.name=T',
+			'-c',
+			'user.email=t@example.com',
+			'commit',
+			'-q',
+			'--allow-empty',
+			'-m',
+			'init'
+		)
+		mkdirSync(join(root, '.repos/example.com/acme'), { recursive: true })
+		symlinkSync(elsewhere, join(root, '.repos/example.com/acme/linked'))
+		write(join(root, 'tasks/linked.md'), '---\nrepo: example.com/acme/linked\n---\n')
+		const r = kenTask(root, ['claim', 'tasks/linked.md'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('is a symlink')
+		expect(r.stderr).toContain('so no branch was made for linked')
+		expect(git(elsewhere, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/')).toBe(
+			'main'
+		)
 	})
 
 	it('keeps the branch when the worktree fails, and names the ken get -b to rerun', () => {

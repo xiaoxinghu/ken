@@ -79,13 +79,29 @@ function requireClaimable(path: string, name: string, row: Row | undefined): str
 	return repo
 }
 
+/** `ken get <args>`, its stderr passed through: its stdout, or a throw saying what to do after it. */
+function kenGet(args: string[], next: string): string {
+	const r = spawnSync('ken', ['get', ...args], {
+		encoding: 'utf8',
+		stdio: ['inherit', 'pipe', 'inherit']
+	})
+	if (r.status !== 0) {
+		throw new Error(`${r.error ? `ken could not be run (${r.error.message}): ` : ''}${next}`)
+	}
+	return r.stdout.trim()
+}
+
 /**
  * Make branch `name` in the clone of `key` from its default branch as it stands, no fetch,
  * then its worktree with `ken get -b`, and return the worktree; undefined when the branch
- * exists already, which means another caller won it.
+ * exists already, which means another caller won it. `ken get` checks the clone first, so a
+ * clone it would refuse, such as a link to a repo elsewhere, gets no branch.
  */
 function claim(key: string, name: string): string | undefined {
-	const clone = codePath(key)
+	const clone = kenGet(
+		[key],
+		`\`ken get ${key}\` refused the clone of ${key}, as said above, so no branch was made for ${name}. Fix what it names, then rerun.`
+	)
 	let main: string
 	try {
 		main = git(clone, 'symbolic-ref', '-q', 'HEAD')
@@ -102,17 +118,9 @@ function claim(key: string, name: string): string | undefined {
 		if (git(clone, 'branch', '--list', name)) return undefined
 		throw new Error(`could not create branch ${name} in ${clone}: ${(e as Error).message}`)
 	}
-	const get = `ken get ${key} -b ${name}`
-	const r = spawnSync('ken', ['get', key, '-b', name], {
-		encoding: 'utf8',
-		stdio: ['inherit', 'pipe', 'inherit']
-	})
-	if (r.status !== 0) {
-		throw new Error(
-			`branch ${name} is made in ${clone}, so the task is claimed, but its worktree is not ready` +
-				`${r.error ? `: ken could not be run (${r.error.message})` : ''}. ` +
-				`Finish by hand as said above, or fix the cause and run \`${get}\`, which prints the worktree.`
-		)
-	}
-	return r.stdout.trim()
+	return kenGet(
+		[key, '-b', name],
+		`branch ${name} is made in ${clone}, so the task is claimed, but its worktree is not ready. ` +
+			`Finish by hand as said above, or fix the cause and run \`ken get ${key} -b ${name}\`, which prints the worktree.`
+	)
 }

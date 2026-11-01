@@ -68,11 +68,12 @@ beforeEach(() => {
 		remote(`example.com/acme/${repo}`)
 		expect(run(`ken index set example.com/acme/${repo} desc="The ${repo}."`).status).toBe(0)
 	}
-})
+	// each hook and ken call is a node process: slow under a full parallel run
+}, 30_000)
 
 const read = (file: string) => JSON.parse(readFileSync(join(root, file), 'utf8'))
 
-describe('the agents template', () => {
+describe('the agents template', { timeout: 30_000 }, () => {
 	it('gives Claude Code and Codex one hooks object, and links what npm cannot publish', () => {
 		// a settings file carries other keys, so it holds a copy, which must not drift
 		expect(read('.claude/settings.json').hooks).toEqual(read('.agents/hooks.json').hooks)

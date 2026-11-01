@@ -107,8 +107,9 @@ export function since(root: string, folder: string): Since {
 
 /**
  * Where `ref`, written in the file at `path` in `folder`, a folder of `root`, leads:
- * `target`, its live task, one of `live`, unless it is archived, and `from` what it resolved
- * from when that is not the file; undefined if nowhere.
+ * `target`, its live task, one of `live`, unless it is archived, `file` the file it names,
+ * live or archived, and `from` what it resolved from when that is not the file; undefined
+ * if nowhere.
  */
 export function resolveRef(
 	root: string,
@@ -116,7 +117,7 @@ export function resolveRef(
 	live: { has(path: string): boolean },
 	path: string,
 	ref: string
-): { target: string; live?: string; from: string } | undefined {
+): { target: string; live?: string; file: string; from: string } | undefined {
 	for (const [base, from] of [
 		[dirname(path), ''],
 		[folder, 'the folder'],
@@ -127,13 +128,15 @@ export function resolveRef(
 		if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) continue
 		// a reference into the archive names the archived file, at any suffix, as a live one would
 		if (rel.startsWith('.archive/')) {
-			if (archived(folder, rel.slice('.archive/'.length))) return { target, from }
+			const file = archived(folder, rel.slice('.archive/'.length))
+			if (file) return { target, file, from }
 			continue
 		}
 		// the path as written, else as the disk names it, which may differ in case
 		const found = live.has(target) ? target : real(target)
-		if (live.has(found)) return { target, live: found, from }
-		if (archived(folder, rel)) return { target, from }
+		if (live.has(found)) return { target, live: found, file: found, from }
+		const file = archived(folder, rel)
+		if (file) return { target, file, from }
 	}
 }
 

@@ -8,6 +8,7 @@ import { archiveTasks, purgeArchive } from './archive.ts'
 import { finishTask } from './finish.ts'
 import { lintTasks } from './lint.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
+import { renameTask } from './rename.ts'
 import { resolveTask } from './resolve.ts'
 import { setTask } from './set.ts'
 
@@ -29,6 +30,8 @@ Commands:
                   create a task file, print its path
   set <task> <field> <value>
                   rewrite one front matter line: status, repo, blocked-by, scheduled, due
+  rename <task> <path>
+                  move a task file, rewriting every blocked-by that names it
   finish <task>   remove the worktree and branch of a done or wontfix task
   lint [--fix]    every file not in the canonical shape, with the upgrade
   archive <task>...
@@ -42,6 +45,7 @@ Examples:
   ken task add portal/fix-login -b portal/web-view-profiles
   ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"
   ken task set tasks/portal/print-web-views-to-pdf status done
+  ken task rename tasks/portal/print-web-views-to-pdf portal/print-to-pdf
   ken task finish tasks/portal/print-web-views-to-pdf
   ken task lint --fix
   ken task archive tasks/portal/print-web-views-to-pdf
@@ -317,6 +321,38 @@ function set(args: string[]): void {
 	}
 }
 
+const RENAME_HELP = `ken task rename <task> <path>
+
+Move the task file to <path> and print its new absolute path. <path> is read as add reads
+one: absolute, from here, from the root or from the folder; lowercased with dashes for
+spaces, said on stderr; a .md, .md added when it has no extension; folders on the way are
+made. A task's path is its identity, so rename keeps every reference true:
+
+  - every live task whose blocked-by names it gets that value rewritten, relative to its
+    own file, the rest of the line, a comment included, kept
+  - moved to another folder, its own blocked-by is rewritten so each value still resolves
+  - before anything is written, every reference must name, as it will read after the move,
+    the file it names now
+
+The heading is content and is left alone. Files in .archive/ are never touched, so a
+reference from an archived task may go stale. The new file is made first and the old one
+removed last; a write that fails midway is undone, so nothing is renamed.
+
+Refused before anything is written: a task whose branch, its path in the folder without
+extension, exists in its repo (claimed, landing, or not finished), since the branch
+carries the old name: close it and run \`ken task finish\` first; an archived task; a link
+to it, which the move would break, or whose blocked-by names it, since the file behind it
+may be archived; a live task that cannot be fully read, a problem in \`ken task list\`,
+since it may name it; a file of another extension whose text would read as other fields
+once a .md; a new name that would change what a reference names, as by shadowing an
+archived task; a target that exists, or another extension of its name; other punctuation
+in <path>.
+
+Examples:
+  ken task rename tasks/fix-login tasks/fix-login-after-reset
+  ken task rename tasks/fix-login portal/fix-login          # into tasks/portal/
+  ken task rename "$(ken task ready | head -1)" portal/next-up`
+
 const FINISH_HELP = `ken task finish <task>
 
 Remove the worktree, then the branch, of a done or wontfix task: \`git worktree remove\`
@@ -333,6 +369,19 @@ Examples:
   ken task set tasks/portal/print-web-views-to-pdf status done
   ken task finish tasks/portal/print-web-views-to-pdf
   ken task list --json | jq -r '.[] | select(.state == "done") | .path' | xargs -n1 ken task finish`
+
+function rename(args: string[]): void {
+	if (args.length !== 2) {
+		throw new Error(
+			`ken task rename takes a task and a path, got ${args.length} arguments: quote a name with spaces. ` +
+				'Run `ken task rename <task> <path>`, e.g. `ken task rename tasks/fix-login.md portal/fix-login`.'
+		)
+	}
+	const { root, folder } = settings()
+	const renamed = renameTask(root, folder, process.cwd(), args[0] ?? '', args[1] ?? '')
+	if (renamed.renamed) process.stderr.write(`${renamed.renamed}\n`)
+	process.stdout.write(`${renamed.path}\n`)
+}
 
 function finish(args: string[]): void {
 	if (args.length !== 1) {
@@ -448,6 +497,7 @@ const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = 
 	path: [PATH_HELP, path],
 	add: [ADD_HELP, add],
 	set: [SET_HELP, set],
+	rename: [RENAME_HELP, rename],
 	finish: [FINISH_HELP, finish],
 	lint: [LINT_HELP, lint],
 	archive: [ARCHIVE_HELP, archive],

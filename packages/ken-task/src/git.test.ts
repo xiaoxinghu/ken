@@ -191,6 +191,17 @@ describe('repo tasks', { timeout: 30_000 }, () => {
 		])
 	})
 
+	it('refuses to rename a claimed task, since its branch carries the old name', () => {
+		const t = setup()
+		t.claim()
+		const r = kenTask(t.root, ['rename', TASK, 'web/fix-sign-in'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`has a branch, ${NAME} of ${KEY}`)
+		expect(r.stderr).toContain(`\`ken task finish ${join(t.root, TASK)}\``)
+		expect(existsSync(join(t.root, TASK))).toBe(true)
+		expect(existsSync(join(t.root, 'tasks/web/fix-sign-in.md'))).toBe(false)
+	})
+
 	it('reads a repo not cloned here as having no branch, said once', () => {
 		const root = newRoot()
 		write(join(root, 'tasks/a.md'), '---\nrepo: example.com/acme/gone\n---\n')

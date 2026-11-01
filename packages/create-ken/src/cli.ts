@@ -4,6 +4,8 @@ import { spawnSync } from 'node:child_process'
 import {
 	cpSync,
 	existsSync,
+	lstatSync,
+	mkdirSync,
 	readdirSync,
 	realpathSync,
 	renameSync,
@@ -19,7 +21,15 @@ import { configPath, configuredRoot } from '@unclex/ken/src/root.ts'
 
 const TEMPLATES = join(import.meta.dirname, '..', 'templates')
 // minimal is the skeleton ken init makes and nothing more, so it has no folder to copy
-const templates = ['minimal', ...['claude'].filter((t) => existsSync(join(TEMPLATES, t)))]
+const templates = ['minimal', ...['agents'].filter((t) => existsSync(join(TEMPLATES, t)))]
+// npm publishes no symlink, so the links a template needs are made after the copy: each
+// link to its target, relative to the link, when the target is there and the link is not
+const LINKS: [link: string, target: string][] = [
+	// Claude Code reads AGENTS.md only while no CLAUDE.md is above it, so the root links one
+	['CLAUDE.md', 'AGENTS.md'],
+	// Codex reads Claude Code's hooks schema as it is, so it reads the shared hooks file
+	['.codex/hooks.json', '../.agents/hooks.json']
+]
 
 const USAGE = `Usage: npm create ken [<dir>] [-- --template <name>]
 
@@ -30,6 +40,7 @@ otherwise <dir> is required and the template is minimal. Templates: ${templates.
 Examples:
   npm create ken ~/ken
   npm create ken ~/work -- --template minimal
+  npm create ken ~/ken -- --template agents
   pnpm create ken ~/ken --template minimal`
 
 /** `s` as one shell word, quoted only when it needs to be. */
@@ -125,8 +136,12 @@ async function main(): Promise<string> {
 		...process.env,
 		KEN_ROOT: target
 	})
-	// Claude Code reads CLAUDE.md, not AGENTS.md; npm publishes no symlink, so it is made here
-	if (!existsSync(join(target, 'CLAUDE.md'))) symlinkSync('AGENTS.md', join(target, 'CLAUDE.md'))
+	for (const [link, to] of LINKS) {
+		const path = join(target, link)
+		if (lstatSync(path, { throwIfNoEntry: false }) || !existsSync(join(dirname(path), to))) continue
+		mkdirSync(dirname(path), { recursive: true })
+		symlinkSync(to, path)
+	}
 
 	const out = [
 		'',
@@ -149,6 +164,15 @@ async function main(): Promise<string> {
 				`{"root": ${JSON.stringify(target)}} in ${configPath()}.`
 		)
 		commands.unshift(`export KEN_ROOT=${q(target)}`)
+	}
+	if (template === 'agents') {
+		out.push(
+			'',
+			'The session-start hook runs `ken status`, so ken must be on the ' +
+				'PATH of the shell that starts the agent. Codex and pi run them only once this root is trusted: ' +
+				'accept the trust prompt on their first start here, then `/hooks` in Codex to trust the hooks, ' +
+				'`/trust` in pi.'
+		)
 	}
 	out.push('', 'Next:', ...commands.map((c) => `  ${c}`))
 	return out.join('\n')

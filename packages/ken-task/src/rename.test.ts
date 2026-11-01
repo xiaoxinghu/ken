@@ -146,4 +146,14 @@ describe('ken task rename', () => {
 		expect(t.read('old.md')).toBe('# Old\n')
 		expect(existsSync(join(t.tasks, 'new.md'))).toBe(false)
 	})
+
+	it('refuses while a live task cannot be fully read, since what it names is unknown', () => {
+		const broken = '---\nblocked-by: [old.md]\nnote: [unclosed\n---\n'
+		const t = setup({ 'old.md': '# Old\n', 'b.md': broken })
+		const r = t.rename('tasks/old.md', 'new')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`${join(t.tasks, 'b.md')} could not be fully read`)
+		expect(t.read('old.md')).toBe('# Old\n')
+		expect(t.read('b.md')).toBe(broken)
+	})
 })

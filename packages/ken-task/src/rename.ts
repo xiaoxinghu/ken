@@ -102,6 +102,13 @@ export function renameTask(
 		}
 		const before = bytes.toString('utf8')
 		const read = readTask(basename(path), before)
+		// what could not be read may be a blocked-by that names the task
+		if (read.problems.length) {
+			throw new Error(
+				`${path} could not be fully read, so whether its blocked-by names ${source} is unknown, and renaming could leave that reference stale: ` +
+					`${read.problems.join('; ')}. Then rerun.`
+			)
+		}
 		let changed = false
 		const refs = read.fields['blocked-by'].map((ref) => {
 			const hit = resolveRef(root, folder, tasks, path, ref)
@@ -123,11 +130,6 @@ export function renameTask(
 			throw new Error(
 				`${path} names ${source} in blocked-by, but is a link to ${link}, and rename writes only the task files themselves: ` +
 					`replace the link with its file, \`rm ${path} && cp ${link} ${path}\`, or take the task out of its blocked-by, then rerun.`
-			)
-		}
-		if (read.problems.length) {
-			throw new Error(
-				`${path} names ${source} in blocked-by, but could not be fully read, so it cannot be rewritten: ${read.problems.join('; ')}. Then rerun.`
 			)
 		}
 		const next = withField(before, 'blocked-by', flowList(refs))

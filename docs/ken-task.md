@@ -100,9 +100,13 @@ What to do, why, and how to check it is done.
 `status` is `todo`, `done` or `wontfix`. Dates are `YYYY-MM-DD`, local. `repo` is a repo
 key, `<host>/<owner>/<repo>`. The title is the first `# ` heading, else the file name with
 dashes as spaces. Front matter is YAML, written only when a field is set, and only the line
-of the field being set changes; unknown fields are kept byte for byte, so new metadata
-needs no migration. A file whose format has no front matter, a `.txt`, is a task with every
-default; `set` refuses it, saying to make it a `.md`.
+of the field being set changes, with the lines that continue its value, a trailing comment
+kept; an alias of `blocked-by` is that line, written back as `blocked-by`. Unknown fields
+are kept byte for byte, so new metadata needs no migration. `set status todo` removes
+`closed`. A file whose format has no front matter, a `.txt`, is a task with every default;
+`set` refuses it, saying to make it a `.md`. `set` also refuses a file `list` shows as a
+`problem`, and front matter not closed, with the fix: what it writes must read back as
+written, which it checks before renaming the new text over the file.
 
 ## States
 

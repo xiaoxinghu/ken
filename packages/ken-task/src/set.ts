@@ -1,0 +1,160 @@
+import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
+import { basename, dirname, join, relative } from 'node:path'
+import { parse } from 'yaml'
+import { isDate, readTask } from './read.ts'
+import { resolveTask } from './resolve.ts'
+
+/** The fields `set` writes, in the order its messages name them. */
+export const FIELDS = ['status', 'repo', 'blocked-by', 'scheduled', 'due'] as const
+const STATUSES = ['todo', 'done', 'wontfix']
+const ALIASES = ['blocked_by', 'blockedBy', 'depends_on', 'depends-on']
+const FENCE = /^---\s*$/
+const PART = /^[a-z0-9._-]+$/
+
+/**
+ * `text` with the front matter line of `field` set to `value`, or removed when `value` is
+ * undefined: only that line changes, keeping the space after its colon and a trailing
+ * comment, and the lines that continue its value go with it. A missing line is appended at
+ * the end of the front matter; a file with none gets one at the top. An alias of
+ * `blocked-by` is its line, written back as `blocked-by`. Every other byte stays, the line
+ * endings included. Throws on front matter with no closing `---`.
+ */
+export function withField(text: string, field: string, value: string | undefined): string {
+	const bom = text.startsWith('﻿') ? '﻿' : ''
+	const eol = /^[^\n]*\r\n/.test(text) ? '\r\n' : '\n'
+	const lines = text.slice(bom.length).split(eol)
+	const line = value === undefined ? [] : [`${field}: ${value}`]
+	if (!FENCE.test(lines[0] ?? '')) {
+		return line.length ? bom + ['---', ...line, '---', ''].join(eol) + text.slice(bom.length) : text
+	}
+	const end = lines.findIndex((l, i) => i > 0 && FENCE.test(l))
+	if (end < 0) {
+		throw new Error(
+			'its front matter has no closing `---`, so a field written into it would not read back: add a `---` line after the last field'
+		)
+	}
+	const keys = field === 'blocked-by' ? [field, ...ALIASES] : [field]
+	const at = lines.findIndex((l, i) => i > 0 && i < end && keys.includes(key(l) ?? ''))
+	if (at < 0) {
+		lines.splice(end, 0, ...line)
+		return bom + lines.join(eol)
+	}
+	let next = at + 1
+	while (next < end && /^([ \t]+\S|-(\s|$))/.test(lines[next] ?? '')) next++
+	const old = lines[at] ?? ''
+	const rest = old.slice(old.indexOf(':') + 1)
+	const quoted = /^\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')/.exec(rest)?.[0].length ?? 0
+	const comment = /\s+#.*$/.exec(rest.slice(quoted))?.[0] ?? ''
+	const gap = /^[ \t]*/.exec(rest)?.[0] || ' '
+	lines.splice(at, next - at, ...(value === undefined ? [] : [`${field}:${gap}${value}${comment}`]))
+	return bom + lines.join(eol)
+}
+
+const key = (line: string) => /^([A-Za-z_][\w-]*):(\s|$)/.exec(line)?.[1]
+
+/** `items` as a one-line YAML list, each item plain when YAML reads it back as written. */
+function flowList(items: string[]): string {
+	const plain = `[${items.join(', ')}]`
+	try {
+		if (JSON.stringify(parse(plain)) === JSON.stringify(items)) return plain
+	} catch {}
+	return `[${items.map((item) => JSON.stringify(item)).join(', ')}]`
+}
+
+/** `value` checked as `field` takes it, or a refusal that names the format. */
+function check(field: string, value: string): void {
+	const refuse = (format: string, example: string) =>
+		new Error(
+			`${field} ${JSON.stringify(value)} is not ${format}, so it would not read as one: run \`ken task set <task> ${field} ${example}\`, ` +
+				`or \`ken task set <task> ${field} ''\` to remove the line`
+		)
+	if (field === 'status' && !STATUSES.includes(value)) {
+		throw refuse(`one of ${STATUSES.join(', ')}`, 'done')
+	}
+	if ((field === 'scheduled' || field === 'due') && !isDate(value)) {
+		throw refuse('a date, YYYY-MM-DD', '2026-11-30')
+	}
+	const parts = value.split('/')
+	if (
+		field === 'repo' &&
+		!(parts.length === 3 && parts.every((p) => PART.test(p) && p !== '.' && p !== '..'))
+	) {
+		throw refuse('a repo key, <host>/<owner>/<repo> in lowercase', 'github.com/acme/join-web')
+	}
+}
+
+/**
+ * `ken task set`: rewrite the line of `field` in the task `arg` names to `value`, an empty
+ * value removing it, and return the file's path. `blocked-by` takes comma-separated paths
+ * as typed from `cwd` and writes each relative to the file; `status done` or `wontfix` also
+ * writes `closed: <today>`, `status todo` or none removes it. The new text must read back as
+ * set, and is written beside the file, then renamed over it.
+ */
+export function setTask(
+	root: string,
+	folder: string,
+	cwd: string,
+	[arg, field, value]: [string, string, string],
+	today: string
+): string {
+	if (!(FIELDS as readonly string[]).includes(field)) {
+		throw new Error(
+			`${JSON.stringify(field)} is not a field ken task set writes; it writes ${FIELDS.join(', ')}. ` +
+				'Run `ken task set --help` for the formats.'
+		)
+	}
+	if (value && field !== 'blocked-by') check(field, value)
+	const path = resolveTask(root, folder, cwd, arg)
+	if (!path.endsWith('.md')) {
+		throw new Error(
+			`${path} is not a .md, so it has no front matter to hold ${field}: make it one, ` +
+				`\`mv "${path}" "${path.replace(/(.)\.[^./]*$/, '$1')}.md"\`, then rerun; a blocked-by that names it must name the .md too`
+		)
+	}
+	const file = realpathSync(path)
+	const stat = statSync(file)
+	if (!stat.isFile()) {
+		throw new Error(
+			`${path} is not a regular file, so it cannot be set: \`ls -ld ${path}\` shows what it is`
+		)
+	}
+	const text = readFileSync(file, 'utf8')
+	const { problems } = readTask(basename(path), text)
+	if (problems.length) {
+		throw new Error(
+			`${path} could not be fully read, so a field written into it might not read back: ${problems.join('; ')}. Then rerun.`
+		)
+	}
+	const refs = (field === 'blocked-by' ? value : '')
+		.split(',')
+		.map((ref) => ref.trim())
+		.filter(Boolean)
+		.map((ref) => relative(dirname(path), resolveTask(root, folder, cwd, ref)))
+	const written = !value ? undefined : field === 'blocked-by' ? flowList(refs) : value
+	const closes = value === 'done' || value === 'wontfix'
+	let next: string
+	try {
+		next = withField(text, field, written)
+		if (field === 'status') next = withField(next, 'closed', closes ? today : undefined)
+	} catch (e) {
+		throw new Error(`${path} cannot be set: ${(e as Error).message}, then rerun`)
+	}
+
+	const { fields: back, problems: after } = readTask(basename(path), next)
+	const expected =
+		field === 'blocked-by' ? refs : value || (field === 'status' ? 'todo' : undefined)
+	if (
+		after.length ||
+		JSON.stringify(back[field as keyof typeof back]) !== JSON.stringify(expected) ||
+		(field === 'status' && back.closed !== (closes ? today : undefined))
+	) {
+		throw new Error(
+			`${field} written as ${JSON.stringify(written)} would not read back as set, so ${path} is left as it was: ` +
+				`edit the line by hand, then run \`ken task list\` to check it`
+		)
+	}
+	const temp = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`)
+	writeFileSync(temp, next, { mode: stat.mode & 0o777 })
+	renameSync(temp, file)
+	return path
+}

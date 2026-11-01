@@ -93,10 +93,18 @@ for (const readme of readmes) {
 
 // Links and code references, in the front pages, the section READMEs and the pages.
 // an inline link's target, or a reference-style link's definition, `[name]: target`, not a
-// footnote's, `[^1]: text`
-const LINK = /(?:\]\(|^ {0,3}\[(?!\^)[^\]]+\]:)\s*(?:<([^>]*)>|([^)\s]+))/gm
+// footnote's, `[^1]: text`; balanced parentheses and backslash escapes in it, as CommonMark
+const LINK = /(?:\]\(|^ {0,3}\[(?!\^)[^\]]+\]:)\s*(?:<([^>]*)>|((?:\\.|[^()\s\\]|\([^()\s]*\))+))/gm
 // `<host>/<owner>/<repo>:<path>`, each part as `ken path` takes it
-const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s`'"()<>[\]#,;]+)/gi
+const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s`'"<>#,;]+)/gi
+// a path keeps its brackets, `src/app/[id]/page.ts`, but not the punctuation after it, nor a
+// `)` or `]` that closes the prose or the link around it
+const trimPath = (path) => {
+	const p = path.replace(/[.:!?]+$/, '')
+	const open = { ')': '(', ']': '[' }[p.at(-1)]
+	const count = (c) => p.split(c).length
+	return open && count(open) < count(p.at(-1)) ? trimPath(p.slice(0, -1)) : p
+}
 const inbound = new Set() // pages some front page or page links to
 const paths = new Map() // code reference -> `ken path` of it
 const uncloned = new Map() // key -> references into it not checked
@@ -108,8 +116,9 @@ for (const file of [...front, ...readmes, ...pages.keys()]) {
 	// a link in code is an example, not a link
 	for (const m of text.replace(/```[\s\S]*?```|`[^`\n]*`/g, '').matchAll(LINK)) {
 		const target = m[1] ?? m[2]
-		if (/^[a-z][a-z0-9+.-]*:|^#|^\/\//i.test(target)) continue
-		let path = target.replace(/[#?].*$/, '')
+		// a URL, an anchor, or a code reference, checked below
+		if (/^[a-z][a-z0-9+.-]*:|^#|^\/\/|^[^/:]+\/[^/:]+\/[^/:]+:/i.test(target)) continue
+		let path = target.replace(/[#?].*$/, '').replace(/\\(.)/g, '$1')
 		try {
 			path = decodeURIComponent(path)
 		} catch {}
@@ -121,7 +130,7 @@ for (const file of [...front, ...readmes, ...pages.keys()]) {
 	}
 	for (const page of listed) pages.get(page).push(file)
 	for (const m of text.matchAll(REFERENCE)) {
-		const [key, path] = [m[1], m[2].replace(/[.:!?]+$/, '')]
+		const [key, path] = [m[1], trimPath(m[2])]
 		const ref = `${key}:${path}`
 		if (!paths.has(ref)) paths.set(ref, ken('path', ref))
 		const r = paths.get(ref)

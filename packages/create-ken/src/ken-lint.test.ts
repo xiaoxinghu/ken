@@ -65,12 +65,17 @@ beforeEach(() => {
 	)
 	expect(r.status).toBe(0)
 	write({
-		// reference-style, and a footnote that is no link
+		// reference-style, a footnote that is no link, and parentheses in a destination
 		'systems/README.md':
-			'# Systems\n\n- [join][j]: the join flow.[^1]\n\n[j]: join.md\n[^1]: Since 2025.\n',
+			'# Systems\n\n- [join][j]: the join flow.[^1]\n- [design](design(v2).md): v2.\n\n[j]: join.md\n[^1]: Since 2025.\n',
+		'systems/design(v2).md': '# Design\n',
+		// a reference in code, in a link, and with brackets in its path inside parentheses
 		'systems/join.md':
-			'The form is `example.com/acme/web:src/app.ts#start`; the team is in [the atlas](../atlas/teams/sales.md).\n',
+			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
+			'by a page (example.com/acme/web:src/app/[id]/page.ts); the team is in [the atlas](../atlas/teams/sales.md).\n',
 		'.repos/example.com/acme/web/src/app.ts': 'export const start = 1\n',
+		'.repos/example.com/acme/web/src/app/[id]/page.ts': 'export default 1\n',
+		'.repos/example.com/acme/web/src/app/(auth)/page.ts': 'export default 1\n',
 		// tasks, not pages, in a task folder below a section
 		'work/README.md': '# Work\n',
 		'work/tasks/fix-join.md': 'Fix the join form.\n',
@@ -91,7 +96,7 @@ describe('ken lint', { timeout: 30_000 }, () => {
 	it('passes a clean root with a layer', () => {
 		const r = run('ken lint')
 		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe('ken lint: no errors in 2 pages.\n')
+		expect(r.stdout).toBe('ken lint: no errors in 3 pages.\n')
 		expect(r.status).toBe(0)
 	})
 
@@ -108,6 +113,7 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		commit(root, 'systems/old.md', '2020-01-01T00:00:00')
 		appendFileSync(join(root, 'README.md'), pad(60))
 		appendFileSync(join(root, 'AGENTS.md'), pad(40))
+		appendFileSync(join(root, 'systems/join.md'), 'example.com/acme/web:src/app/(auth)/gone.ts\n')
 		appendFileSync(join(root, LAYER, 'teams/README.md'), pad(150))
 		appendFileSync(
 			join(root, LAYER, 'teams/sales.md'),
@@ -129,6 +135,7 @@ describe('ken lint', { timeout: 30_000 }, () => {
 				'error atlas/teams/sales.md', // and a reference-style one
 				'error flows/README.md', // a reference to a file not in the clone, a host with no dot
 				'error systems/join.md', // listed in two section READMEs
+				'error systems/join.md', // a reference to a missing file under (auth)/
 				'error systems/lost.md', // listed in none
 				'note systems/old.md' // nobody links to it, untouched since 2020
 			].sort()

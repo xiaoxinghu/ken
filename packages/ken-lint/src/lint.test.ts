@@ -70,8 +70,9 @@ beforeEach(() => {
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
 			'by a page (example.com/acme/web:src/app/[id]/page.ts), [example.com/acme/web:src/app.ts](design(v2).md), ' +
-			'**example.com/acme/web:src/app.ts** in bold, [encoded](example.com/acme/web:src/app/%5Bid%5D/page.ts); the team is in [the atlas](../atlas/teams/sales.md).\n',
+			'**example.com/acme/web:src/app.ts** in bold, [encoded](example.com/acme/web:src/app/%5Bid%5D/page.ts), [spaced](example.com/acme/web:src/my%20file.ts); the team is in [the atlas](../atlas/teams/sales.md).\n',
 		'.repos/example.com/acme/web/src/app.ts': 'export const start = 1\n',
+		'.repos/example.com/acme/web/src/my file.ts': 'export default 1\n',
 		'.repos/example.com/acme/web/src/app/[id]/page.ts': 'export default 1\n',
 		'.repos/example.com/acme/web/src/app/(auth)/page.ts': 'export default 1\n',
 		// tasks, not pages, in a task folder below a section
@@ -79,7 +80,9 @@ beforeEach(() => {
 		'work/tasks/fix-join.md': 'Fix the join form.\n',
 		[`${LAYER}/README.md`]: '# Atlas\n\n- [teams](teams/README.md)\n',
 		[`${LAYER}/teams/README.md`]: '# Teams\n\n- [sales](sales.md): who sells.\n',
-		[`${LAYER}/teams/sales.md`]: '# Sales\n'
+		[`${LAYER}/teams/sales.md`]: '# Sales\n',
+		// the layer's own tasks, in its default task folder
+		[`${LAYER}/tasks/hire.md`]: 'Hire a seller.\n'
 	})
 	// a link back into a section walks nothing twice
 	symlinkSync('.', join(root, 'systems/again'))

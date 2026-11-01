@@ -26,7 +26,7 @@ type Config = {
 }
 type Page = { path: string; listedBy: string[] }
 
-const ken = (...args: string[]) => spawnSync('ken', args, { encoding: 'utf8' })
+const ken = (args: string[], env = process.env) => spawnSync('ken', args, { encoding: 'utf8', env })
 
 /** A path keeps its brackets, `src/app/[id]/page.ts`, not the prose's punctuation after it. */
 function trimPath(path: string): string {
@@ -52,17 +52,28 @@ function visit(node: Nodes, fn: (node: Nodes) => void): void {
 
 /** Lint the root at `root`: one line per problem, then the summary; `errors` decides the exit. */
 export function lint(root: string): { lines: string[]; errors: number } {
-	const cfg = ken('config', '--json')
+	const cfg = ken(['config', '--json'])
 	if (cfg.status !== 0) {
 		throw new Error(`\`ken config --json\` failed, so the layers are unknown:\n${cfg.stderr}`)
 	}
 	const config = JSON.parse(cfg.stdout) as Config
-	// the task folder holds tasks, not pages; an offline layer has nothing to read
-	const taskFolder = resolve(root, config.task?.folder ?? 'tasks')
+	// an offline layer has nothing to read
 	const tops = [
 		root,
 		...config.layers.filter((l) => l.cloned && l.linked).map((l) => join(root, l.name))
 	]
+	// a task folder holds tasks, not pages: the root's, and each layer's from its own .ken.yaml
+	const taskFolders = new Set(
+		tops.map((top) => {
+			const own =
+				top === root
+					? config
+					: (JSON.parse(
+							ken(['config', '--json'], { ...process.env, KEN_ROOT: top }).stdout || '{}'
+						) as Partial<Config>)
+			return resolve(top, own.task?.folder ?? 'tasks')
+		})
+	)
 
 	const problems: string[] = []
 	const report = (kind: 'error' | 'note', file: string, text: string, line?: number) =>
@@ -84,7 +95,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	const topOf = new Map<string, string>() // file -> the root or layer it is in
 	const seen = new Set<string>()
 	const walk = (dir: string, top: string) => {
-		if (dir === taskFolder || seen.has(realpathSync(dir))) return
+		if (taskFolders.has(dir) || seen.has(realpathSync(dir))) return
 		seen.add(realpathSync(dir))
 		for (const name of readdirSync(dir).sort()) {
 			const path = join(dir, name)
@@ -133,27 +144,29 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	const inbound = new Set<string>() // real paths of pages some front page or page links to
 	const paths = new Map<string, SpawnSyncReturns<string>>() // reference -> `ken path` of it
 	const uncloned = new Map<string, number>() // key -> references into it not checked
+	const checkReference = (file: string, key: string, path: string, line?: number) => {
+		const ref = `${key}:${path}`
+		const r = paths.get(ref) ?? ken(['path', ref])
+		paths.set(ref, r)
+		const out = r.stdout.trim()
+		if (r.status !== 0)
+			report('error', file, `\`ken path ${ref}\` failed: ${r.stderr.trim()}`, line)
+		else if (out.startsWith('https://')) uncloned.set(key, (uncloned.get(key) ?? 0) + 1)
+		else if (!existsSync(out)) {
+			report(
+				'error',
+				file,
+				`${ref} names a file not in the clone. Find where it went, \`git -C "$(ken path code ${key})" log --oneline -- '${path}'\`, and fix the reference.`,
+				line
+			)
+		}
+	}
+	// in prose or a code span, a reference ends where the text says it does
 	const checkReferences = (file: string, text: string, line?: number) => {
 		for (const m of text.matchAll(REFERENCE)) {
 			// the node's first line, plus the lines before the match within it
 			const at = line && line + text.slice(0, m.index).split('\n').length - 1
-			const key = m[1] ?? ''
-			const path = trimPath(m[2] ?? '')
-			const ref = `${key}:${path}`
-			const r = paths.get(ref) ?? ken('path', ref)
-			paths.set(ref, r)
-			const out = r.stdout.trim()
-			if (r.status !== 0)
-				report('error', file, `\`ken path ${ref}\` failed: ${r.stderr.trim()}`, at)
-			else if (out.startsWith('https://')) uncloned.set(key, (uncloned.get(key) ?? 0) + 1)
-			else if (!existsSync(out)) {
-				report(
-					'error',
-					file,
-					`${ref} names a file not in the clone. Find where it went, \`git -C "$(ken path code ${key})" log --oneline -- ${path}\`, and fix the reference.`,
-					at
-				)
-			}
+			checkReference(file, m[1] ?? '', trimPath(m[2] ?? ''), at)
 		}
 	}
 	const front = tops.map((t) => join(t, 'README.md')).filter((f) => existsSync(f))
@@ -183,9 +196,13 @@ export function lint(root: string): { lines: string[]; errors: number } {
 						: undefined
 			const checks = node.type !== 'linkReference'
 			if (url === undefined) return
-			// a link's destination is URL-encoded: `%5Bid%5D` is `[id]`
-			if (IS_REFERENCE.test(url))
-				return checks ? checkReferences(file, decode(url), line) : undefined
+			// as a link's destination, a reference is the whole of it, URL-encoded: `%20` is a space
+			if (IS_REFERENCE.test(url)) {
+				const ref = url.replace(/#.*$/, '')
+				const colon = ref.indexOf(':')
+				if (checks) checkReference(file, ref.slice(0, colon), decode(ref.slice(colon + 1)), line)
+				return
+			}
 			// a URL or an anchor
 			if (/^[a-z][a-z0-9+.-]*:|^#|^\/\//i.test(url)) return
 			const path = decode(url.replace(/[#?].*$/, ''))

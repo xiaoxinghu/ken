@@ -12,8 +12,14 @@ const ken = (...args) =>
 
 try {
 	const { cwd = process.cwd(), tool_input: input = {} } = JSON.parse(readFileSync(0, 'utf8'))
-	// a file tool's path (Claude Code's file_path, pi's path), or the words of a shell command
-	const words = [input.file_path, input.path, ...String(input.command ?? '').split(/[\s'"`;|&()<>=]+/)]
+	// a file tool's path (Claude Code's file_path, pi's path), a glob's pattern, or the words of
+	// a shell command; a glob is answered from its shape, which ends at the repo's folder
+	const words = [
+		input.file_path,
+		input.path,
+		input.pattern,
+		...String(input.command ?? '').split(/[\s'"`;|&()<>=]+/)
+	]
 	const missing = words
 		.filter((w) => typeof w === 'string' && w.includes('.repos/'))
 		.map((w) => resolve(cwd, w))

@@ -49,19 +49,20 @@ export type Repo = {
  * The repo of each key, each asked of git once per run, its answers as of then: one
  * `for-each-ref` for its branches, one for those on the default branch and one `worktree
  * list`, each the first time it is needed. A key whose clone is not on this machine has no
- * repo, so its tasks have no branch; that is said once on stderr.
+ * repo, so its tasks have no branch; that is said once on stderr, unless `quiet`.
  */
-export function repos(): (key: string) => Repo | undefined {
+export function repos(quiet = false): (key: string) => Repo | undefined {
 	const seen = new Map<string, Repo | undefined>()
 	return (key) => {
-		if (!seen.has(key)) seen.set(key, open(key))
+		if (!seen.has(key)) seen.set(key, open(key, quiet))
 		return seen.get(key)
 	}
 }
 
-function open(key: string): Repo | undefined {
+function open(key: string, quiet: boolean): Repo | undefined {
 	const clone = codePath(key)
 	if (!isClone(clone)) {
+		if (quiet) return undefined
 		process.stderr.write(
 			`${key} is not cloned on this machine (${clone}), so ken-task sees no branch of it: its tasks show the state their status gives. ` +
 				`Run \`ken get ${key}\` to clone it, or to be told what is in its place.\n`

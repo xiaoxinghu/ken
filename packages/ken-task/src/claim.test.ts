@@ -116,6 +116,7 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 		const gone = kenTask(t.root, ['claim', 'tasks/gone.md'])
 		expect(gone).toMatchObject({ status: 1, stdout: '' })
 		expect(gone.stderr).toContain('Run `ken get example.com/acme/gone`, which clones it')
+		expect(gone.stderr.match(/example\.com\/acme\/gone is not cloned/g)).toHaveLength(1)
 	})
 
 	it("refuses a plain folder where the clone belongs, leaving the root's own repo alone", () => {

@@ -40,7 +40,8 @@ const clone = (repo: string) => join(root, '.repos/example.com/acme', repo)
 
 beforeEach(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'create-ken-agents-')))
-	root = join(dir, 'ken')
+	// a space in the root, which a shell command quotes
+	root = join(dir, 'my ken')
 	// the hooks run `ken` from PATH: this one, with no ken-task beside it
 	const bin = join(dir, 'bin')
 	mkdirSync(bin)
@@ -64,7 +65,7 @@ beforeEach(() => {
 	)
 	expect(r.stderr).toBe('')
 	expect(r.status).toBe(0)
-	for (const repo of ['web', 'api', 'docs', 'site']) {
+	for (const repo of ['web', 'api', 'docs', 'site', 'lib']) {
 		remote(`example.com/acme/${repo}`)
 		expect(run(`ken index set example.com/acme/${repo} desc="The ${repo}."`).status).toBe(0)
 	}
@@ -126,6 +127,11 @@ describe('the agents template', { timeout: 30_000 }, () => {
 		const bash = hook('Bash', { command: "rg -n 'x' .repos/example.com/acme/api/src | head" })
 		expect(bash.status).toBe(0)
 		expect(existsSync(join(clone('api'), 'README.md'))).toBe(true)
+
+		// an absolute path, quoted for the space in the root
+		const quoted = hook('Bash', { command: `cat "${clone('lib')}/README.md"` })
+		expect(quoted.status).toBe(0)
+		expect(existsSync(join(clone('lib'), 'README.md'))).toBe(true)
 
 		// garbage in is no reason to block a tool
 		expect(run('ken ensure', 'not json').status).toBe(0)

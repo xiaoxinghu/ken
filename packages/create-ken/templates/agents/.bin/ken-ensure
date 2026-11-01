@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The pre-tool hook on read, search and shell, run as `ken ensure`: the lazy clone. When the
-// tool touches a path under .repos/ that does not exist yet, and its repo is listed in the
-// index but not cloned, `ken get` clones it before the tool runs. It never blocks a tool:
+// tool names a checkout folder under .repos/ that is not there yet, and its repo is listed in
+// the index but not cloned, `ken get` clones it before the tool runs. It never blocks a tool:
 // it exits 0 whatever happens, since a harness may block the tool on any other exit.
 import { execFileSync } from 'node:child_process'
 import { existsSync, readFileSync } from 'node:fs'
@@ -14,22 +14,32 @@ try {
 	const { cwd = process.cwd(), tool_name, tool_input: input = {} } = JSON.parse(
 		readFileSync(0, 'utf8')
 	)
-	// a file tool's path (Claude Code's file_path, pi's path), a Glob's pattern under its path
-	// (pi's find reaches here as Glob), or the words of a shell command. A Grep's pattern is
-	// text to find, not a path. A glob is answered from its shape, which ends at the repo's folder.
-	const candidates = [
-		[input.file_path],
-		tool_name === 'Glob' ? [input.path ?? '.', input.pattern] : [input.path],
-		...String(input.command ?? '')
-			.split(/[\s'"`;|&()<>=]+/)
-			.map((w) => [w])
-	]
-	const missing = candidates
-		.filter((parts) => parts.every((p) => typeof p === 'string') && parts.join('/').includes('.repos/'))
-		.map((parts) => resolve(cwd, ...parts))
-		.filter((p) => !existsSync(p))
+	// the text a tool reads paths from: a file tool's path (Claude Code's file_path, pi's path),
+	// a Glob's pattern under its path (pi's find reaches here as Glob), a shell command. A
+	// Grep's pattern is text to find, not a path.
+	const texts = [
+		input.file_path,
+		tool_name === 'Glob' ? `${input.path ?? '.'}/${input.pattern}` : input.path,
+		input.command
+	].filter((t) => typeof t === 'string')
+	// each checkout folder named in it, .repos/<host>/<owner>/<folder>, anchored on what comes
+	// before: the root or the cwd as written, which may hold spaces, else the rest of its word
+	const SEP = `\\s'"\`;|&()<>=`
+	const folders = new Set()
+	for (const text of texts) {
+		for (const m of text.matchAll(new RegExp(`\\.repos(?:/[^/${SEP}]+){3}`, 'g'))) {
+			const before = text.slice(0, m.index)
+			const base = [process.env.KEN_ROOT, cwd].find((d) => d && before.endsWith(`${d}/`))
+			folders.add(
+				base
+					? `${base}/${m[0]}`
+					: resolve(cwd, `${before.match(new RegExp(`[^${SEP}]*$`))[0]}${m[0]}`)
+			)
+		}
+	}
 	const keys = new Set()
-	for (const path of missing) {
+	// a folder that exists is a checkout already: nothing to clone
+	for (const path of [...folders].filter((f) => !existsSync(f))) {
 		try {
 			keys.add(JSON.parse(ken('which', '--json', path)).key)
 		} catch {

@@ -1,5 +1,5 @@
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs'
-import { dirname, join, relative } from 'node:path'
+import { basename, dirname, join, relative } from 'node:path'
 import { Document } from 'yaml'
 import { inFolder, outside, real, resolveTask } from './resolve.ts'
 
@@ -21,11 +21,66 @@ export type Added = {
 }
 
 /**
- * Add the task `arg` names, a path into the task folder `configured` read as `resolveTask`
- * reads one, in the canonical shape of docs/ken-task.md: `status: todo`, `created: <today>`,
- * `repo` and `blocked-by` when given, then the heading. Everything is checked before anything
- * is written; the file is made with the exclusive-create flag, so of two adds of one path
- * exactly one wins.
+ * Where a new task named `arg` goes: a path into the task folder `folder`, a real path, read as
+ * `resolveTask` reads one, lowercased with spaces as dashes, a `.md`. Refused, naming what to
+ * run instead with `command` (`ken task add`, or `ken task rename <task>`): a path outside the
+ * folder, another extension, other punctuation, and a file, or another extension of its stem,
+ * that exists.
+ */
+export function newPath(
+	root: string,
+	folder: string,
+	cwd: string,
+	arg: string,
+	command: string
+): Added {
+	const [typed] = inFolder(root, folder, cwd, arg)
+	if (typed === undefined) throw outside(root, folder, arg)
+	// the one normalisation: lowercase, spaces to dashes
+	const rel = typed.toLowerCase().replaceAll(' ', '-')
+	const ext = EXT.exec(rel)?.[0] ?? ''
+	if (ext && ext !== '.md') {
+		throw new Error(
+			`${typed} is a ${ext}, but a task ken-task writes holds front matter, which ken-task reads only in a .md, so its fields would be lost: ` +
+				`run \`${command} ${join(folder, rel.slice(0, -ext.length))}\` for the .md. A file of another extension is a task with every default, written by hand.`
+		)
+	}
+	const parts = rel.slice(0, rel.length - ext.length).split('/')
+	if (!parts.every((p) => PART.test(p))) {
+		const name = parts
+			.map((p) => p.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, ''))
+			.join('/')
+		throw new Error(
+			`${typed} has punctuation other than dashes, and a task's path is its branch name, so ken-task names tasks ` +
+				`with letters, digits and dashes only: run \`${command} ${join(folder, name + ext)}\`.`
+		)
+	}
+	const path = join(folder, ext ? rel : `${rel}.md`)
+	// the normalised path may lead elsewhere than the typed one did, through a link
+	if (!inFolder(root, folder, folder, path).length) throw outside(root, folder, path)
+	const dir = dirname(path)
+	const stem = stemOf(path.slice(dir.length + 1))
+	const taken = files(dir).find((e) => stemOf(e).toLowerCase() === stem)
+	if (taken) {
+		const existing = join(dir, taken)
+		throw new Error(
+			existing === path
+				? `${path} exists, and a task's path is its identity, so no other task can take it: read it with \`cat ${path}\`, ` +
+						`or run \`${command} <another path>\`.`
+				: `${existing} exists, and a task's branch is its path without the extension, so ${path} would share its branch: ` +
+						`run \`${command} <another path>\`.`
+		)
+	}
+	if (typed === rel) return { path }
+	const renamed = `${typed} is named ${relative(folder, path)}: a task's path is its branch name, so it is lowercase, with dashes for spaces.`
+	return { path, renamed }
+}
+
+/**
+ * Add the task `arg` names, a path into the task folder `configured` as `newPath` takes it, in
+ * the canonical shape of docs/ken-task.md: `status: todo`, `created: <today>`, `repo` and
+ * `blocked-by` when given, then the heading. Everything is checked before anything is written;
+ * the file is made with the exclusive-create flag, so of two adds of one path exactly one wins.
  */
 export function addTask(
 	root: string,
@@ -42,42 +97,9 @@ export function addTask(
 		)
 	}
 	const folder = real(configured)
-	const [typed] = inFolder(root, folder, cwd, arg)
-	if (typed === undefined) throw outside(root, folder, arg)
-	// the one normalisation: lowercase, spaces to dashes
-	const rel = typed.toLowerCase().replaceAll(' ', '-')
-	const ext = EXT.exec(rel)?.[0] ?? ''
-	if (ext && ext !== '.md') {
-		throw new Error(
-			`${typed} is a ${ext}, but what add writes is front matter, which ken-task reads only in a .md, so its fields would be lost: ` +
-				`run \`ken task add ${join(folder, rel.slice(0, -ext.length))}\` for the .md. A file of another extension is a task with every default, written by hand.`
-		)
-	}
-	const parts = rel.slice(0, rel.length - ext.length).split('/')
-	if (!parts.every((p) => PART.test(p))) {
-		const name = parts
-			.map((p) => p.replace(/[^\p{L}\p{N}]+/gu, '-').replace(/^-+|-+$/g, ''))
-			.join('/')
-		throw new Error(
-			`${typed} has punctuation other than dashes, and a task's path is its branch name, so ken-task names tasks ` +
-				`with letters, digits and dashes only: run \`ken task add ${join(folder, name + ext)}\`.`
-		)
-	}
-	const path = join(folder, ext ? rel : `${rel}.md`)
-	// the normalised path may lead elsewhere than the typed one did, through a link
-	if (!inFolder(root, folder, folder, path).length) throw outside(root, folder, path)
+	const added = newPath(root, folder, cwd, arg, 'ken task add')
+	const { path } = added
 	const dir = dirname(path)
-	const stem = stemOf(path.slice(dir.length + 1))
-	const taken = files(dir).find((e) => stemOf(e).toLowerCase() === stem)
-	if (taken) {
-		const existing = join(dir, taken)
-		throw new Error(
-			existing === path
-				? `${path} exists, so it cannot be added: add more to it with \`cat >> ${path}\`, or give this task another name.`
-				: `${existing} exists, and a task's branch is its path without the extension, so ${path} would share its branch: ` +
-						'give this task another name.'
-		)
-	}
 	const refs = blockedBy.map((b) => relative(dir, resolveTask(root, folder, cwd, b)))
 	const lines = ['---', 'status: todo', `created: ${today}`]
 	if (repo) lines.push(`repo: ${repo}`)
@@ -88,7 +110,7 @@ export function addTask(
 			`blocked-by: ${list.toString({ lineWidth: 0, flowCollectionPadding: false }).trim()}`
 		)
 	}
-	lines.push('---', '', `# ${stem.replaceAll('-', ' ')}`, '')
+	lines.push('---', '', `# ${stemOf(basename(path)).replaceAll('-', ' ')}`, '')
 	mkdirSync(dir, { recursive: true })
 	try {
 		writeFileSync(path, lines.join('\n'), { flag: 'wx' })
@@ -98,9 +120,7 @@ export function addTask(
 			`${path} exists, made since this add looked, most likely by another \`ken task add\`: read it with \`cat ${path}\`, or give this task another name.`
 		)
 	}
-	if (typed === rel) return { path }
-	const renamed = `${typed} is named ${relative(folder, path)}: a task's path is its branch name, so it is lowercase, with dashes for spaces.`
-	return { path, renamed }
+	return added
 }
 
 /** The entries of `dir` other than folders; none if it does not exist. */

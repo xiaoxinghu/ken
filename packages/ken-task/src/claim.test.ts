@@ -115,7 +115,31 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 		)
 		const gone = kenTask(t.root, ['claim', 'tasks/gone.md'])
 		expect(gone).toMatchObject({ status: 1, stdout: '' })
-		expect(gone.stderr).toContain('Run `ken get example.com/acme/gone`, then `ken task claim')
+		expect(gone.stderr).toContain('Run `ken get example.com/acme/gone`, which clones it')
+	})
+
+	it("refuses a plain folder where the clone belongs, leaving the root's own repo alone", () => {
+		const root = newRoot()
+		git(root, 'init', '-q', '-b', 'main')
+		git(
+			root,
+			'-c',
+			'user.name=T',
+			'-c',
+			'user.email=t@example.com',
+			'commit',
+			'-q',
+			'--allow-empty',
+			'-m',
+			'init'
+		)
+		mkdirSync(join(root, '.repos/example.com/acme/plain'), { recursive: true })
+		write(join(root, 'tasks/plain.md'), '---\nrepo: example.com/acme/plain\n---\n')
+		const r = kenTask(root, ['claim', 'tasks/plain.md'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('Run `ken get example.com/acme/plain`')
+		expect(kenTask(root, ['claim'])).toMatchObject({ status: 1, stdout: '' })
+		expect(git(root, 'for-each-ref', '--format=%(refname:lstrip=2)', 'refs/heads/')).toBe('main')
 	})
 
 	it('keeps the branch when the worktree fails, and names the ken get -b to rerun', () => {

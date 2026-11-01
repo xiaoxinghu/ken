@@ -1,6 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { branchOf, codePath, git } from './git.ts'
+import { branchOf, codePath, git, isClone } from './git.ts'
 import { listTasks, type Row, readyTasks } from './list.ts'
 import { real, resolveTask } from './resolve.ts'
 
@@ -20,7 +19,7 @@ export function claimTask(
 	const folder = real(configured)
 	if (arg === undefined) {
 		for (const row of readyTasks(root, configured, today)) {
-			if (!row.repo || !existsSync(codePath(row.repo))) continue
+			if (!row.repo || !isClone(codePath(row.repo))) continue
 			const worktree = claim(row.repo, branchOf(folder, row.path))
 			if (worktree) return worktree
 		}
@@ -71,10 +70,10 @@ function requireClaimable(path: string, name: string, row: Row | undefined): str
 		)
 	}
 	const clone = codePath(repo)
-	if (!existsSync(clone)) {
+	if (!isClone(clone)) {
 		throw new Error(
 			`${repo} is not cloned here (${clone}), so there is no clone to make the branch of ${path} in. ` +
-				`Run \`ken get ${repo}\`, then \`ken task claim ${path}\`.`
+				`Run \`ken get ${repo}\`, which clones it or says what is in its place, then \`ken task claim ${path}\`.`
 		)
 	}
 	return repo

@@ -1,7 +1,7 @@
 // The one place ken-task meets a repo's git: the git CLI, run in the clone `ken path code` prints.
 import { spawnSync } from 'node:child_process'
-import { existsSync } from 'node:fs'
-import { relative } from 'node:path'
+import { join, relative } from 'node:path'
+import { real } from './resolve.ts'
 
 /** Run `command` with `args` in `cwd`; its stdout, trimmed, or a throw with what it said. */
 function run(command: string, args: string[], cwd?: string): string {
@@ -21,6 +21,15 @@ export const git = (cwd: string, ...args: string[]): string => run('git', args, 
 /** What `ken path code <key> [<branch>]` prints: the clone, or the worktree of `branch` beside it. */
 export const codePath = (key: string, branch?: string): string =>
 	run('ken', ['path', 'code', key, ...(branch === undefined ? [] : [branch])])
+
+/**
+ * Whether `path` is a clone: git, asked there, finds its own `.git` folder. A plain folder
+ * inside the root's own repo would otherwise send every git command to that repo.
+ */
+export function isClone(path: string): boolean {
+	const r = spawnSync('git', ['rev-parse', '--absolute-git-dir'], { cwd: path, encoding: 'utf8' })
+	return r.status === 0 && real(r.stdout.trim()) === real(join(path, '.git'))
+}
 
 /** A clone, asked about branch `<name>`, the task's path in the folder without extension. */
 export type Repo = {
@@ -52,10 +61,10 @@ export function repos(): (key: string) => Repo | undefined {
 
 function open(key: string): Repo | undefined {
 	const clone = codePath(key)
-	if (!existsSync(clone)) {
+	if (!isClone(clone)) {
 		process.stderr.write(
 			`${key} is not cloned on this machine (${clone}), so ken-task sees no branch of it: its tasks show the state their status gives. ` +
-				`Run \`ken get ${key}\` to clone it.\n`
+				`Run \`ken get ${key}\` to clone it, or to be told what is in its place.\n`
 		)
 		return undefined
 	}

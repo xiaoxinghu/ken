@@ -7,14 +7,10 @@ import {
 	symlinkSync,
 	writeFileSync
 } from 'node:fs'
-import { createRequire } from 'node:module'
 import { tmpdir } from 'node:os'
 import { dirname, join } from 'node:path'
 import { beforeEach, describe, expect, it } from 'vitest'
 
-const require = createRequire(import.meta.url)
-const pkg = require.resolve('@unclex/ken/package.json')
-const KEN = join(dirname(pkg), require(pkg).bin.ken)
 const LAYER = '.repos/example.com/acme/atlas'
 
 let dir: string
@@ -41,16 +37,16 @@ const commit = (cwd: string, paths = '.', date?: string) => {
 	expect(r.stderr).toBe('')
 }
 
-// A clean root from the agents template, with a section, a cloned repo and a layer, each
-// page listed once and every link and code reference resolving.
+// A clean root, with a section, a cloned repo and a layer, each page listed once and every
+// link and code reference resolving. `ken` and `ken-lint` are on PATH as a user installs them,
+// so `ken lint` goes through dispatch.
 beforeEach(() => {
-	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'create-ken-lint-')))
+	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-lint-')))
 	root = join(dir, 'my ken')
 	const bin = join(dir, 'bin')
 	mkdirSync(bin)
-	writeFileSync(join(bin, 'ken'), `#!/bin/sh\nexec ${process.execPath} ${KEN} "$@"\n`, {
-		mode: 0o755
-	})
+	symlinkSync(join(import.meta.dirname, '../../ken/src/cli.ts'), join(bin, 'ken'))
+	symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-lint'))
 	const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 	env = {
 		HOME: join(dir, 'home'),
@@ -58,12 +54,8 @@ beforeEach(() => {
 		KEN_ROOT: root,
 		PATH: [bin, dirname(process.execPath), dirname(git), '/usr/bin', '/bin'].join(':')
 	}
-	const r = spawnSync(
-		process.execPath,
-		[join(import.meta.dirname, 'cli.ts'), root, '--template', 'agents'],
-		{ env, encoding: 'utf8' }
-	)
-	expect(r.status).toBe(0)
+	mkdirSync(root)
+	expect(run('git init -q && ken init').status).toBe(0)
 	write({
 		// reference-style, a footnote that is no link, and parentheses in a destination
 		'systems/README.md':
@@ -72,11 +64,13 @@ beforeEach(() => {
 		'systems/pages/intro.md': '# Intro\n',
 		// a link in a tilde fence is an example
 		'systems/design(v2).md':
-			'# Design\n\n~~~md\n[example](missing.md)\n~~~\n\nOr inline: ``[example](missing.md)``, `a`.\n',
-		// a reference in code, in a link, and with brackets in its path inside parentheses
+			'# Design\n\n~~~md\n[example](missing.md) example.com/acme/web:src/nope.ts\n~~~\n\nOr inline: ``[example](missing.md)``, `a`.\n',
+		// a reference in code, as a link, as a link's label, with brackets in its path inside
+		// parentheses, and in bold
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
-			'by a page (example.com/acme/web:src/app/[id]/page.ts), **example.com/acme/web:src/app.ts** in bold; the team is in [the atlas](../atlas/teams/sales.md).\n',
+			'by a page (example.com/acme/web:src/app/[id]/page.ts), [example.com/acme/web:src/app.ts](design(v2).md), ' +
+			'**example.com/acme/web:src/app.ts** in bold; the team is in [the atlas](../atlas/teams/sales.md).\n',
 		'.repos/example.com/acme/web/src/app.ts': 'export const start = 1\n',
 		'.repos/example.com/acme/web/src/app/[id]/page.ts': 'export default 1\n',
 		'.repos/example.com/acme/web/src/app/(auth)/page.ts': 'export default 1\n',
@@ -114,7 +108,8 @@ describe('ken lint', { timeout: 30_000 }, () => {
 			'flows/README.md':
 				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\ngit/acme/web:src/gone.ts\n',
 			'.repos/git/acme/web/src/app.ts': 'export const start = 1\n',
-			'systems/old.md': '# Old\n'
+			'systems/old.md': '# Old\n',
+			'overview.md': '# Overview\n'
 		})
 		appendFileSync(join(root, 'systems/README.md'), '- [old](old.md): settled long ago.\n')
 		commit(root, 'systems/old.md', '2020-01-01T00:00:00')
@@ -138,11 +133,12 @@ describe('ken lint', { timeout: 30_000 }, () => {
 				'error AGENTS.md', // over 40 lines
 				'error README.md', // the front page over 60
 				'error atlas/teams/README.md', // a section README over 150, in the layer
-				'error atlas/teams/sales.md', // a link to a file that does not exist
-				'error atlas/teams/sales.md', // and a reference-style one
-				'error flows/README.md', // a reference to a file not in the clone, a host with no dot
+				'error atlas/teams/sales.md:2', // a link to a file that does not exist
+				'error atlas/teams/sales.md:4', // and a reference-style one
+				'error overview.md', // a page at the top, in no section
+				'error flows/README.md:5', // a reference to a file not in the clone, a host with no dot
 				'error systems/join.md', // listed in two section READMEs
-				'error systems/join.md', // a reference to a missing file under (auth)/
+				'error systems/join.md:2', // a reference to a missing file under (auth)/, on its line
 				'error systems/lost.md', // listed in none
 				'note systems/old.md' // nobody links to it, untouched since 2020
 			].sort()

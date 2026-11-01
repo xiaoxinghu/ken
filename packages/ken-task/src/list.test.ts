@@ -103,7 +103,7 @@ describe('ken task list', () => {
 		task('overdue.md', front(`due: ${day(-1)}`))
 		task('bad-date.md', front('scheduled: next week'))
 		task('notes.txt', '---\nstatus: done\n---\n')
-		task('quoted.md', front('status: "done" # finished\nrepo: \'github.com/a/b\''))
+		task('quoted.md', front('  # metadata\nstatus: "done" # finished\nrepo: \'github.com/a/b\''))
 		task('into-archive.md', front('blocked-by: [.archive/portal/b.md]'))
 		task('bad-month.md', `${front('due: 2026-13-01')}# Bad month\n`)
 		task('locked/hidden-inside.md', '# Locked\n')
@@ -213,7 +213,7 @@ describe('ken task list', () => {
 		expect(row('bad-date.md').notes.join()).toContain('`scheduled: YYYY-MM-DD`')
 	})
 
-	it('reads a quoted value with a comment after it', () => {
+	it('reads a quoted value with a comment after it, and a comment before the first field', () => {
 		expect(row('quoted.md')).toMatchObject({
 			status: 'done',
 			repo: 'github.com/a/b',

@@ -95,7 +95,7 @@ function frontMatter(lines: string[], read: Read): void {
 		else if (last && /^[\s-]/.test(line)) {
 			last.raw.push(...blank, line)
 			if (!/^\s*#/.test(line)) last.more.push(line.trim())
-		} else if (!line.startsWith('#')) {
+		} else if (!/^\s*#/.test(line)) {
 			problems.push(
 				`line ${i + 2}, ${JSON.stringify(line)}, is not a \`field: value\` line of its front matter: make it one, or remove it`
 			)

@@ -28,6 +28,16 @@ type Page = { path: string; listedBy: string[] }
 
 const ken = (args: string[], env = process.env) => spawnSync('ken', args, { encoding: 'utf8', env })
 
+/** A word for sh, whatever it holds. */
+const quote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
+
+/** `ken config --json` at `top`; a failure stops the lint, saying what is unknown. */
+function readConfig(top: string, unknown: string): Config {
+	const r = ken(['config', '--json'], { ...process.env, KEN_ROOT: top })
+	if (r.status !== 0) throw new Error(`\`ken config --json\` failed ${unknown}:\n${r.stderr}`)
+	return JSON.parse(r.stdout) as Config
+}
+
 /** A path keeps its brackets, `src/app/[id]/page.ts`, not the prose's punctuation after it. */
 function trimPath(path: string): string {
 	const p = path.replace(/[.:!?]+$/, '')
@@ -52,26 +62,22 @@ function visit(node: Nodes, fn: (node: Nodes) => void): void {
 
 /** Lint the root at `root`: one line per problem, then the summary; `errors` decides the exit. */
 export function lint(root: string): { lines: string[]; errors: number } {
-	const cfg = ken(['config', '--json'])
-	if (cfg.status !== 0) {
-		throw new Error(`\`ken config --json\` failed, so the layers are unknown:\n${cfg.stderr}`)
-	}
-	const config = JSON.parse(cfg.stdout) as Config
+	const config = readConfig(root, 'so the layers are unknown')
 	// an offline layer has nothing to read
 	const tops = [
 		root,
 		...config.layers.filter((l) => l.cloned && l.linked).map((l) => join(root, l.name))
 	]
-	// a task folder holds tasks, not pages: the root's, and each layer's from its own .ken.yaml
+	// a task folder holds tasks, not pages: the root's, and each layer's from its own .ken.yaml;
+	// compared by real path, so a link to a folder above it does not reach it either
 	const taskFolders = new Set(
 		tops.map((top) => {
 			const own =
 				top === root
 					? config
-					: (JSON.parse(
-							ken(['config', '--json'], { ...process.env, KEN_ROOT: top }).stdout || '{}'
-						) as Partial<Config>)
-			return resolve(top, own.task?.folder ?? 'tasks')
+					: readConfig(top, `at the layer ${basename(top)}, so its task folder is unknown`)
+			const folder = resolve(top, own.task?.folder ?? 'tasks')
+			return existsSync(folder) ? realpathSync(folder) : folder
 		})
 	)
 
@@ -95,7 +101,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	const topOf = new Map<string, string>() // file -> the root or layer it is in
 	const seen = new Set<string>()
 	const walk = (dir: string, top: string) => {
-		if (taskFolders.has(dir) || seen.has(realpathSync(dir))) return
+		if (taskFolders.has(realpathSync(dir)) || seen.has(realpathSync(dir))) return
 		seen.add(realpathSync(dir))
 		for (const name of readdirSync(dir).sort()) {
 			const path = join(dir, name)
@@ -260,7 +266,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		report(
 			'note',
 			page,
-			`nobody links to it and nobody has changed it since ${new Date(changed).toISOString().slice(0, 10)}. If it is settled, propose archiving it: \`cd "$(${cd})" && mkdir -p ${join('.archive', dirname(rel))} && git mv ${rel} ${join('.archive', rel)}\`, then drop its line from its README.md.`
+			`nobody links to it and nobody has changed it since ${new Date(changed).toISOString().slice(0, 10)}. If it is settled, propose archiving it: \`cd "$(${cd})" && mkdir -p -- ${quote(join('.archive', dirname(rel)))} && git mv -- ${quote(rel)} ${quote(join('.archive', rel))}\`, then drop its line from its README.md.`
 		)
 	}
 

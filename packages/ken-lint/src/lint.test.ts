@@ -87,6 +87,8 @@ beforeEach(() => {
 	// a link back into a section walks nothing twice
 	symlinkSync('.', join(root, 'systems/again'))
 	symlinkSync('pages', join(root, 'systems/alias'))
+	// the task folder, first reached through a link to the section above it
+	symlinkSync('work', join(root, 'a-work'))
 	run(`git init -q ${LAYER}`)
 	commit(join(root, LAYER))
 	symlinkSync(LAYER, join(root, 'atlas'))
@@ -111,11 +113,11 @@ describe('ken lint', { timeout: 30_000 }, () => {
 			'flows/README.md':
 				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\ngit/acme/web:src/gone.ts\n\n[lost]: ../systems/lost.md\n',
 			'.repos/git/acme/web/src/app.ts': 'export const start = 1\n',
-			'systems/old.md': '# Old\n',
+			'systems/old notes.md': '# Old\n',
 			'overview.md': '# Overview\n'
 		})
-		appendFileSync(join(root, 'systems/README.md'), '- [old](old.md): settled long ago.\n')
-		commit(root, 'systems/old.md', '2020-01-01T00:00:00')
+		appendFileSync(join(root, 'systems/README.md'), '- [old](old%20notes.md): settled long ago.\n')
+		commit(root, "'systems/old notes.md'", '2020-01-01T00:00:00')
 		appendFileSync(join(root, 'README.md'), pad(60))
 		appendFileSync(join(root, 'AGENTS.md'), pad(40))
 		appendFileSync(join(root, 'systems/join.md'), 'example.com/acme/web:src/app/(auth)/gone.ts\n')
@@ -143,10 +145,20 @@ describe('ken lint', { timeout: 30_000 }, () => {
 				'error systems/join.md', // listed in two section READMEs
 				'error systems/join.md:2', // a reference to a missing file under (auth)/, on its line
 				'error systems/lost.md', // listed in none: a definition no link uses renders nothing
-				'note systems/old.md' // nobody links to it, untouched since 2020
+				'note systems/old notes.md' // nobody links to it, untouched since 2020
 			].sort()
 		)
+		// the archive command keeps a name with a space one word
+		expect(r.stdout).toContain("git mv -- 'systems/old notes.md' '.archive/systems/old notes.md'")
 		// the uncloned repo is counted, not an error
 		expect(r.stdout).toMatch(/^note: .*1 code reference.*example\.com\/acme\/api/m)
+	})
+
+	it("stops when a layer's config cannot be read, rather than guess its task folder", () => {
+		writeFileSync(join(root, LAYER, '.ken.yaml'), 'task: [\n')
+		const r = run('ken lint')
+		expect(r.status).toBe(1)
+		expect(r.stdout).toBe('')
+		expect(r.stderr).toMatch(/failed at the layer atlas, so its task folder is unknown/)
 	})
 })

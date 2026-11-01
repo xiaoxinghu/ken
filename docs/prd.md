@@ -411,7 +411,8 @@ runs `ken path` for every code reference.
 
 It walks the root's sections and each layer's, through the layer links as `find -L` does,
 each folder once, skipping hidden entries and the task folders: the root's, and each
-layer's from its own `.ken.yaml` (`KEN_ROOT=<layer> ken config --json`). Each problem names its file,
+layer's from its own `.ken.yaml` (`KEN_ROOT=<layer> ken config --json`), compared by
+real path; a config it cannot read stops it with `ken`'s message. Each problem names its file,
 and its line when it has one, and what to do. Errors, exit 1: a page in no section
 `README.md` or in more than one; a `.md` at the top of the root or a layer other than
 `README.md`, `AGENTS.md`, `CLAUDE.md` and `log.md`, a page in no section; a Markdown link or

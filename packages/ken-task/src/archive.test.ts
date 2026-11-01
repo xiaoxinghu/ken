@@ -1,4 +1,4 @@
-import { existsSync, readFileSync, utimesSync } from 'node:fs'
+import { existsSync, readFileSync, symlinkSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { git } from './git.ts'
@@ -58,6 +58,18 @@ describe('ken task archive', () => {
 		expect(readFileSync(join(root, 'tasks/b.md'), 'utf8')).toBe(dependent)
 	})
 
+	it('archives a relative link so it still reaches its file', () => {
+		const root = newRoot()
+		write(join(root, 'records/a.md'), front('status: done'))
+		write(join(root, 'tasks/b.md'), front('blocked-by: [a.md]'))
+		symlinkSync('../records/a.md', join(root, 'tasks/a.md'))
+		expect(kenTask(root, ['archive', 'tasks/a.md']).status).toBe(0)
+		const archived = join(root, 'tasks/.archive/a.md')
+		expect(readFileSync(archived, 'utf8')).toBe(front('status: done'))
+		expect(kenTask(root, ['path', 'tasks/a']).stdout).toBe(`${archived}\n`)
+		expect(kenTask(root, ['ready']).stdout).toBe(`${join(root, 'tasks/b.md')}\n`)
+	})
+
 	it('carries examples in --help', () => {
 		const root = newRoot()
 		expect(kenTask(root, ['archive', '--help']).stdout).toContain('Examples:')
@@ -106,11 +118,15 @@ describe('ken task purge', () => {
 		])
 	})
 
-	it('requires --older-than, with no default', () => {
-		const { root, archive } = setup()
-		const r = kenTask(root, ['purge'])
-		expect(r.status).toBe(1)
-		expect(r.stderr).toContain('`ken task purge --older-than <days>`')
-		expect(existsSync(join(archive, 'old.md'))).toBe(true)
-	})
+	// a million days reaches before the year 1000; a billion, past any date there is
+	it.each([[[]], [['--older-than', '1000000']], [['--older-than', '1000000000']]])(
+		'refuses %j, deleting nothing: --older-than is required, and must end after the year 1000',
+		(args: string[]) => {
+			const { root, archive } = setup()
+			const r = kenTask(root, ['purge', ...args])
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain('`ken task purge --older-than ')
+			expect(existsSync(join(archive, 'old.md'))).toBe(true)
+		}
+	)
 })

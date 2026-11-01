@@ -3,18 +3,21 @@ import {
 	mkdirSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
 	renameSync,
 	rmSync,
-	statSync
+	statSync,
+	symlinkSync
 } from 'node:fs'
-import { basename, dirname, extname, join, relative } from 'node:path'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { branchOf, git, repos } from './git.ts'
 import { localDate } from './list.ts'
 import { readTask } from './read.ts'
 import { real, resolveTask } from './resolve.ts'
 
 /**
- * `ken task archive`: move each task `args` name to `.archive/<its path in the folder>`,
+ * `ken task archive`: move each task `args` name to `.archive/<its path in the folder>`, a
+ * relative link made anew so it reaches its file,
  * after every one is checked: closed, not already archived, and with no branch left on this
  * machine. A name already archived keeps its file; the new one takes the first free numeric
  * suffix before its extension, which `renamed` says. Only the named files are touched:
@@ -60,7 +63,12 @@ export function archiveTasks(
 			target = join(archive, dirname(rel), `${basename(rel, ext)}-${n}${ext}`)
 		}
 		mkdirSync(dirname(target), { recursive: true })
-		renameSync(path, target)
+		// a relative link is made anew from its new folder, so it still reaches its file
+		const link = lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined
+		if (link && !isAbsolute(link)) {
+			symlinkSync(relative(dirname(target), resolve(dirname(path), link)), target)
+			rmSync(path)
+		} else renameSync(path, target)
 		const renamed =
 			target === join(archive, rel)
 				? undefined
@@ -93,6 +101,13 @@ export function purgeArchive(
 	const folder = real(configured)
 	const archive = join(folder, '.archive')
 	const cutoff = localDate(new Date(today.getTime() - days * 864e5))
+	// dates compare as text, so a cutoff must be a four-digit year
+	if (!/^\d{4}-/.test(cutoff)) {
+		throw new Error(
+			`--older-than ${days} reaches before the year 1000, so no file can be that old and nothing was deleted. ` +
+				'Run `ken task purge --older-than <days>` with a number of days that ends after that, e.g. `ken task purge --older-than 365`.'
+		)
+	}
 	const deleted = files(archive).filter((path) => {
 		let closed: string | undefined
 		try {

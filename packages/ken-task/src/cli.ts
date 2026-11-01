@@ -334,12 +334,13 @@ made. A task's path is its identity, so rename keeps every reference true:
 
 The heading is content and is left alone. Files in .archive/ are never touched, so a
 reference from an archived task may go stale. The new file is made first and the old one
-removed last, so a failure midway leaves each reference resolving to a file that exists.
+removed last; a write that fails midway is undone, so nothing is renamed.
 
 Refused before anything is written: a task whose branch, its path in the folder without
 extension, exists in its repo (claimed, landing, or not finished), since the branch
-carries the old name: close it and run \`ken task finish\` first; an archived task; a target
-that exists, or another extension of its name; other punctuation in <path>.
+carries the old name: close it and run \`ken task finish\` first; an archived task; a link
+whose blocked-by names it, since the file behind it may be archived; a target that exists,
+or another extension of its name; other punctuation in <path>.
 
 Examples:
   ken task rename tasks/fix-login tasks/fix-login-after-reset

@@ -66,9 +66,10 @@ export function renameTask(
 	}
 
 	// the new text of each file whose blocked-by changes, the moved file's at its new path
-	const tasks = new Set(walk(folder))
+	// sorted, so the files are written, and on a failure restored, in one order
+	const tasks = new Set(walk(folder).sort())
 	const moves = dirname(dest) !== dirname(source)
-	const writes = new Map<string, string>()
+	const writes = new Map<string, [before: string, next: string]>()
 	for (const path of tasks) {
 		const own = path === source
 		let before: string
@@ -90,6 +91,14 @@ export function renameTask(
 			return relative(dirname(own ? dest : path), at)
 		})
 		if (!changed) continue
+		// a link's file is elsewhere, maybe in the archive, maybe another task: write none
+		if (!own && lstatSync(path).isSymbolicLink()) {
+			const real = realpathSync(path)
+			throw new Error(
+				`${path} names ${source} in blocked-by, but is a link to ${real}, and rename writes only the task files themselves: ` +
+					`replace the link with its file, \`rm ${path} && cp ${real} ${path}\`, or take the task out of its blocked-by, then rerun.`
+			)
+		}
 		if (read.problems.length) {
 			throw new Error(
 				`${path} names ${source} in blocked-by, but could not be fully read, so it cannot be rewritten: ${read.problems.join('; ')}. Then rerun.`
@@ -108,12 +117,12 @@ export function renameTask(
 					`write it as \`blocked-by: [<path>, ...]\` on one line by hand, then rerun`
 			)
 		}
-		writes.set(own ? dest : realpathSync(path), next)
+		writes.set(own ? dest : path, [before, next])
 	}
 
 	mkdirSync(dirname(dest), { recursive: true })
 	try {
-		writeFileSync(dest, writes.get(dest) ?? text, { flag: 'wx', mode: stat.mode & 0o777 })
+		writeFileSync(dest, writes.get(dest)?.[1] ?? text, { flag: 'wx', mode: stat.mode & 0o777 })
 	} catch (e) {
 		if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
 		throw new Error(
@@ -122,13 +131,28 @@ export function renameTask(
 	}
 	// a move keeps the file's age, which counts from its mtime when nothing else dates it
 	utimesSync(dest, stat.atime, stat.mtime)
+	const done: string[] = []
 	try {
-		for (const [file, next] of writes) if (file !== dest) replaceFile(file, next)
+		for (const [file, [, next]] of writes) {
+			if (file === dest) continue
+			replaceFile(file, next)
+			done.push(file)
+		}
 		unlinkSync(source)
 	} catch (e) {
+		const failed = (e as Error).message
+		// undone, so every reference names the old file again, which still exists
+		try {
+			for (const file of done) replaceFile(file, writes.get(file)?.[0] ?? '')
+			unlinkSync(dest)
+		} catch (undo) {
+			throw new Error(
+				`${failed}; undoing it failed too (${(undo as Error).message}), so ${source} and ${dest} both exist, each reference resolving to one of them: ` +
+					`finish the move by hand, rewriting blocked-by to name ${dest} in ${[...writes.keys()].filter((f) => f !== dest).join(', ')} where it does not yet, then \`rm ${source}\`.`
+			)
+		}
 		throw new Error(
-			`${(e as Error).message}; ${source} and ${dest} both exist now, each reference resolving to one of them: ` +
-				`\`rm ${dest}\`, fix what failed, then rerun \`ken task rename ${source} ${to}\``
+			`${failed}; so nothing is renamed, every file as it was: fix what failed, then rerun \`ken task rename ${source} ${to}\`.`
 		)
 	}
 	return target

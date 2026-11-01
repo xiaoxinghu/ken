@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from 'node:fs'
+import { chmodSync, existsSync, readFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { kenTask, newRoot, write } from './testing.ts'
@@ -83,5 +83,34 @@ describe('ken task rename', () => {
 		expect(r.stderr).toContain(`ken task rename ${join(t.tasks, 'old.md')} <another path>`)
 		expect(t.read('old.md')).toBe('# Old\n')
 		expect(t.read('b.md')).toBe('---\nblocked-by: [old.md]\n---\n')
+	})
+
+	it('undoes what it wrote when a write fails midway, so nothing is renamed', () => {
+		const t = setup({
+			'old.md': '# Old\n',
+			'a.md': '---\nblocked-by: [old.md]\n---\n',
+			'z/b.md': '---\nblocked-by: [../old.md]\n---\n'
+		})
+		// a.md is written first; z/b.md cannot be, its folder taking no new file
+		chmodSync(join(t.tasks, 'z'), 0o555)
+		const r = t.rename('tasks/old.md', 'new')
+		chmodSync(join(t.tasks, 'z'), 0o755)
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('nothing is renamed')
+		expect(t.read('a.md')).toBe('---\nblocked-by: [old.md]\n---\n')
+		expect(t.read('old.md')).toBe('# Old\n')
+		expect(existsSync(join(t.tasks, 'new.md'))).toBe(false)
+	})
+
+	it('refuses when a link names it, since the file behind a link may be archived', () => {
+		// read through the link at tasks/b.md, old.md is the task being renamed
+		const archived = '---\nblocked-by: [old.md]\n---\n'
+		const t = setup({ 'old.md': '# Old\n', '.archive/b.md': archived })
+		symlinkSync(join(t.tasks, '.archive/b.md'), join(t.tasks, 'b.md'))
+		const r = t.rename('tasks/old.md', 'new')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`${join(t.tasks, 'b.md')} names ${join(t.tasks, 'old.md')}`)
+		expect(t.read('.archive/b.md')).toBe(archived)
+		expect(existsSync(join(t.tasks, 'new.md'))).toBe(false)
 	})
 })

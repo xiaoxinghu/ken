@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { addTask } from './add.ts'
+import { finishTask } from './finish.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
 import { resolveTask } from './resolve.ts'
 import { setTask } from './set.ts'
@@ -26,6 +27,7 @@ Commands:
                   create a task file, print its path
   set <task> <field> <value>
                   rewrite one front matter line: status, repo, blocked-by, scheduled, due
+  finish <task>   remove the worktree and branch of a done or wontfix task
 
 Examples:
   ken task list
@@ -33,6 +35,7 @@ Examples:
   ken task add portal/fix-login -b portal/web-view-profiles
   ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"
   ken task set tasks/portal/print-web-views-to-pdf status done
+  ken task finish tasks/portal/print-web-views-to-pdf
 
 Run \`ken task <command> --help\` for one command.`
 
@@ -41,17 +44,25 @@ const LIST_HELP = `ken task list [--json]
 Every task in the folder, by path: its state, the blockers it waits on, and what needs
 you. Always exits 0: a file that cannot be fully read is a row, never an abort.
 
-States, in this order:
+States, in this order. A task's branch is its path in the folder without extension, in
+the clone of its repo that \`ken path code <repo>\` prints:
   problem   the file could not be fully read; its note says the fix
+  landing   status: done, but its branch exists and is not on the default branch
   done      status: done
   wontfix   status: wontfix
-  blocked   a blocked-by entry is open, or found in neither the folder nor its .archive/
+  claimed   open, and its branch exists
+  blocked   a blocked-by entry is open, landing, or found in neither the folder nor its
+            .archive/
   later     scheduled is after today
   ready     none of the above
 
+A repo not cloned here has no branches, said once on stderr.
+
 Notes under a row: overdue; open more than 90 days, by created, else the date git added
-the file, else its mtime; a problem with its fix; a deviation from the canonical shape,
-read anyway, with the upgrade.
+the file, else its mtime; landing; closed but its branch remains; claimed but its
+worktree is missing or holds another branch; uncommitted changes in its worktree; a
+problem with its fix; a deviation from the canonical shape, read anyway, with the
+upgrade.
 
   --json    one array of objects: path, title, every field read, other (the fields
             ken-task does not know), state, unmet blockers and notes
@@ -134,7 +145,9 @@ Fields:
   due         YYYY-MM-DD, its deadline
 
 Only a .md has front matter; another file is refused, as is one \`ken task list\` shows
-as a problem, until the fix its note names is made.
+as a problem, until the fix its note names is made. status done is refused on a task
+whose branch, its path in the folder without extension, exists in its repo and is not on
+the default branch: done means landed, by a rebase then a merge that keeps the commits.
 
 Examples:
   ken task set tasks/portal/print-web-views-to-pdf status done
@@ -292,12 +305,40 @@ function set(args: string[]): void {
 	}
 }
 
+const FINISH_HELP = `ken task finish <task>
+
+Remove the worktree, then the branch, of a done or wontfix task: \`git worktree remove\`
+then \`git branch -d\`, in the clone \`ken path code <repo>\` prints. The branch is the
+task's path in the folder without extension. Run it from outside the worktree. Prints
+nothing on stdout; stderr says what was removed. A task with no repo, or no branch here,
+has nothing to remove.
+
+Refused: an open task, so work in progress is never thrown away; set it done first.
+Git's own refusals pass through, uncommitted changes in the worktree or commits not on
+the default branch, with the --force form to run by hand when they are to go.
+
+Examples:
+  ken task set tasks/portal/print-web-views-to-pdf status done
+  ken task finish tasks/portal/print-web-views-to-pdf
+  ken task list --json | jq -r '.[] | select(.state == "done") | .path' | xargs -n1 ken task finish`
+
+function finish(args: string[]): void {
+	if (args.length !== 1) {
+		throw new Error(
+			`ken task finish takes one task, got ${args.length}. Run \`ken task finish <task>\`, e.g. \`ken task finish tasks/do-the-thing.md\`.`
+		)
+	}
+	const { root, folder } = settings()
+	process.stderr.write(`${finishTask(root, folder, process.cwd(), args[0] ?? '')}\n`)
+}
+
 const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = {
 	list: [LIST_HELP, list],
 	ready: [READY_HELP, ready],
 	path: [PATH_HELP, path],
 	add: [ADD_HELP, add],
-	set: [SET_HELP, set]
+	set: [SET_HELP, set],
+	finish: [FINISH_HELP, finish]
 }
 
 const [command, ...args] = process.argv.slice(2)

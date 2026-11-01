@@ -1,13 +1,22 @@
 import { spawnSync } from 'node:child_process'
-import { type Dirent, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { type Dirent, existsSync, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
+import { branchOf, codePath, dirty, type Repo, repos } from './git.ts'
 import { type Fields, type Read, readTask } from './read.ts'
 import { archived, real } from './resolve.ts'
 
-export type State = 'problem' | 'done' | 'wontfix' | 'blocked' | 'later' | 'ready'
+export type State =
+	| 'problem'
+	| 'landing'
+	| 'done'
+	| 'wontfix'
+	| 'claimed'
+	| 'blocked'
+	| 'later'
+	| 'ready'
 
 /** A blocker that holds a task back: `path` is where it was found, absent when `missing`. */
-export type Unmet = { ref: string; path?: string; reason: 'open' | 'missing' }
+export type Unmet = { ref: string; path?: string; reason: 'open' | 'landing' | 'missing' }
 
 /** One row of `ken task list`: the file, its fields, its state and what a human needs to know. */
 export type Row = { path: string; title: string } & Fields & {
@@ -124,6 +133,7 @@ export function listTasks(
 	// the real path, as the root is, so that every path compares as the disk names it
 	const folder = real(configured)
 	const tasks = new Map(walk(folder).map((path) => [path, load(path)]))
+	const repo = repos()
 	return [...tasks.entries()]
 		.sort(([a], [b]) => (a < b ? -1 : 1))
 		.map(([path, read]) => {
@@ -166,6 +176,19 @@ export function listTasks(
 		}
 	}
 
+	/** The repo of the task at `path` and its branch, when the branch exists on this machine. */
+	function branch(path: string, read: Read): { repo: Repo; name: string } | undefined {
+		const found = read.fields.repo && !read.problems.length ? repo(read.fields.repo) : undefined
+		const name = branchOf(folder, path)
+		return found?.exists(name) ? { repo: found, name } : undefined
+	}
+
+	/** Done, but its branch exists and is not on the default branch: not landed yet. */
+	function isLanding(path: string, read: Read): boolean {
+		const b = read.fields.status === 'done' ? branch(path, read) : undefined
+		return !!b && !b.repo.landed(b.name)
+	}
+
 	function row(path: string, read: Read): Row {
 		const { title, fields, problems } = read
 		const flags = [...read.flags]
@@ -178,22 +201,30 @@ export function listTasks(
 				)
 			}
 			const live = found.live && tasks.get(found.live)
-			return live && isOpen(live) ? [{ ref, path: found.live, reason: 'open' }] : []
+			if (!found.live || !live) return []
+			if (isOpen(live)) return [{ ref, path: found.live, reason: 'open' }]
+			return isLanding(found.live, live) ? [{ ref, path: found.live, reason: 'landing' }] : []
 		})
 		const open = isOpen(read)
+		const b = branch(path, read)
 		const state: State = problems.length
 			? 'problem'
-			: fields.status === 'done' || fields.status === 'wontfix'
-				? fields.status
-				: unmet.length
-					? 'blocked'
-					: fields.scheduled && fields.scheduled > today
-						? 'later'
-						: 'ready'
+			: isLanding(path, read)
+				? 'landing'
+				: fields.status === 'done' || fields.status === 'wontfix'
+					? fields.status
+					: b
+						? 'claimed'
+						: unmet.length
+							? 'blocked'
+							: fields.scheduled && fields.scheduled > today
+								? 'later'
+								: 'ready'
 		const notes = [
 			...problems.map((p) => `problem: ${p}`),
 			...flags.map((f) => `flagged: ${f}; \`ken task lint\` names the upgrade`)
 		]
+		if (b) notes.push(...branchNotes(path, state, b.repo, b.name))
 		if (open && fields.due && fields.due < today) notes.push(`overdue: due ${fields.due}`)
 		// a problem row's note is its fix; it is never asked its age, so it cannot fail again
 		if (open && !problems.length) {
@@ -205,6 +236,43 @@ export function listTasks(
 	}
 }
 
+/** What needs you about the branch `name` of the task at `path`, in state `state`. */
+function branchNotes(path: string, state: State, repo: Repo, name: string): string[] {
+	const { key, clone } = repo
+	const notes: string[] = []
+	const finish = `\`ken task finish ${path}\` removes its worktree and branch`
+	if (state === 'landing') {
+		notes.push(
+			`landing: branch ${name} of ${key} is not on the default branch, and dependents wait until it is: ` +
+				`rebase it onto the default branch, then \`git -C ${clone} merge --no-ff ${name}\`; then ${finish}`
+		)
+	} else if (state === 'done' || state === 'wontfix') {
+		notes.push(`${state}, but its branch ${name} remains in ${key}: ${finish}`)
+	}
+	const worktree = repo.worktree(name)
+	if (state === 'claimed') {
+		const expected = codePath(key, name)
+		const held = repo.holds(expected)
+		if (held && held !== name) {
+			notes.push(
+				`claimed, but its worktree ${expected} holds branch ${held}, so work there lands on the wrong branch: ` +
+					`\`git -C ${expected} switch ${name}\``
+			)
+		} else if (!worktree || !existsSync(worktree)) {
+			notes.push(
+				`claimed, but its worktree ${expected} is missing, so no one can be working on it: ` +
+					`\`git -C ${clone} worktree prune && ken get ${key} -b ${name}\` makes it again`
+			)
+		}
+	}
+	if (worktree && existsSync(worktree) && dirty(worktree)) {
+		notes.push(
+			`uncommitted changes in ${worktree}, which finishing it would refuse to remove: commit them on ${name}, or discard them; \`git -C ${worktree} status\` shows them`
+		)
+	}
+	return notes
+}
+
 /** The rows as `ken task list` prints them: state, path, unmet blockers, then each note indented. */
 export function formatRows(rows: Row[]): string {
 	const width = Math.max(...rows.map((r) => r.state.length))
@@ -212,7 +280,7 @@ export function formatRows(rows: Row[]): string {
 		.map((row) => {
 			const waits = row.unmet.map(
 				(u) =>
-					`${u.ref} (${u.reason === 'open' ? 'open' : 'missing: no such file in the folder or its archive'})`
+					`${u.ref} (${u.reason === 'missing' ? 'missing: no such file in the folder or its archive' : u.reason})`
 			)
 			const line = `${row.state.padEnd(width)}  ${row.path}${waits.length ? `  blocked by ${waits.join(', ')}` : ''}`
 			return [line, ...row.notes.map((n) => `${' '.repeat(width + 2)}${n}`)].join('\n')

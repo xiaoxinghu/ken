@@ -2,8 +2,9 @@ import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 
 import { basename, dirname, join, relative } from 'node:path'
 import { isMap, isNode, isScalar, parse, parseDocument } from 'yaml'
 import { isKey } from './add.ts'
+import { branchOf, repos } from './git.ts'
 import { isDate, readTask } from './read.ts'
-import { resolveTask } from './resolve.ts'
+import { real, resolveTask } from './resolve.ts'
 
 /** The fields `set` writes, in the order its messages name them. */
 export const FIELDS = ['status', 'repo', 'blocked-by', 'scheduled', 'due'] as const
@@ -125,10 +126,28 @@ function check(field: string, value: string): void {
 }
 
 /**
+ * Refuse to call the task at `path` done while its branch exists in the repo `key` and is
+ * not an ancestor of the default branch: done means landed (decision 7).
+ */
+function refuseUnlanded(folder: string, path: string, key: string): void {
+	const repo = repos()(key)
+	const name = branchOf(real(folder), path)
+	if (!repo?.exists(name) || repo.landed(name)) return
+	const { clone } = repo
+	throw new Error(
+		`${path} is not landed: its branch ${name} of ${key} is not on the default branch, and done means landed, ` +
+			'since the tasks it blocks wait for its code. Land it as a rebase onto the default branch, then a merge that keeps the commits, ' +
+			`\`git -C ${clone} merge --no-ff ${name}\`; a squash merge leaves its commits off the default branch, so it is still refused. ` +
+			`\`git -C ${clone} log --oneline HEAD..${name}\` lists the commits not landed yet. Then rerun.`
+	)
+}
+
+/**
  * `ken task set`: rewrite the line of `field` in the task `arg` names to `value`, an empty
  * value removing it, and return the file's path. `blocked-by` takes comma-separated paths
  * as typed from `cwd` and writes each relative to the file; `status done` or `wontfix` also
- * writes `closed: <today>`, `status todo` or none removes it. The new text must read back as
+ * writes `closed: <today>`, `status todo` or none removes it; `status done` is refused while
+ * the task's branch is not landed. The new text must read back as
  * set, and is written beside the file, then renamed over it.
  */
 export function setTask(
@@ -166,6 +185,8 @@ export function setTask(
 			`${path} could not be fully read, so a field written into it might not read back: ${problems.join('; ')}. Then rerun.`
 		)
 	}
+	if (field === 'status' && value === 'done' && before.repo)
+		refuseUnlanded(folder, path, before.repo)
 	const refs = (field === 'blocked-by' ? value : '')
 		.split(',')
 		.map((ref) => ref.trim())

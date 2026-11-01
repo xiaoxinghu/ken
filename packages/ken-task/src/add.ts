@@ -57,6 +57,8 @@ export function addTask(
 		)
 	}
 	const path = join(folder, ext ? rel : `${rel}.md`)
+	// the normalised path may lead elsewhere than the typed one did, through a link
+	if (!inFolder(root, folder, folder, path).length) throw outside(root, folder, path)
 	const dir = dirname(path)
 	const stem = stemOf(path.slice(dir.length + 1))
 	const taken = files(dir).find((e) => stemOf(e).toLowerCase() === stem)

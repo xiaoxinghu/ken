@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readdirSync, readFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { day, env, ken, kenTask, newRoot, write } from './testing.ts'
@@ -55,6 +55,18 @@ describe('ken task add', () => {
 		const r = kenTask(root, ['add', '../elsewhere'])
 		expect(r).toMatchObject({ status: 1, stdout: '' })
 		expect(r.stderr).toContain(`is not in the task folder ${join(root, 'tasks')}`)
+	})
+
+	it('refuses a normalised path that a link leads out of the folder, writing nothing', () => {
+		const root = newRoot()
+		const away = join(root, 'away')
+		mkdirSync(away)
+		mkdirSync(join(root, 'tasks'))
+		symlinkSync(away, join(root, 'tasks/my-project'))
+		const r = kenTask(root, ['add', 'My Project/new-task'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`is not in the task folder ${join(root, 'tasks')}`)
+		expect(readdirSync(away)).toEqual([])
 	})
 
 	it('writes a blocker typed from here relative to the new file', () => {

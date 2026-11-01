@@ -56,12 +56,16 @@ Start at the front page, README.md: what this is for, its sections, its layers.
 Everything else is git, run against the path \`ken path\` prints. \`ken help\` for the rest.
 `
 
-/** The key of the repo place `target` in the root `root`; `parts` is its path from the root. */
-function keyAt(target: string, root: string, parts: string[]): string {
+/** The key of the clone `target` is, or will be, in `root`'s layout; undefined for anything else. */
+function cloneAt(target: string, root: string): string | undefined {
+	const parts = relative(root, target).split(sep)
+	if (parts.length !== 4 || parts[0] !== '.repos') return undefined
 	try {
-		return locate(target, root).key
+		// a worktree beside a clone is a branch of that repo, not a place for another root
+		const place = locate(target, root)
+		return place.kind === 'clone' ? place.key : undefined
 	} catch {
-		return parts.slice(1).join('/')
+		return undefined
 	}
 }
 
@@ -145,9 +149,9 @@ export function init(dir: string, env = process.env): string {
 	let outer: { root: string; key: string } | undefined
 	for (let a = dirname(target); a !== dirname(a); a = dirname(a)) {
 		if (existsSync(join(a, '.ken.yaml'))) {
-			const parts = relative(a, target).split(sep)
-			if (!outer && parts.length === 4 && parts[0] === '.repos') {
-				outer = { root: a, key: keyAt(target, a, parts) }
+			const key = outer ? undefined : cloneAt(target, a)
+			if (key) {
+				outer = { root: a, key }
 				continue
 			}
 			throw new Error(

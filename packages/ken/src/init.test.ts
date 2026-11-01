@@ -115,6 +115,21 @@ describe('ken init', () => {
 		expect(out).not.toContain('export KEN_ROOT')
 	})
 
+	it("refuses a worktree, made or yet to be, at a clone's side: a branch, not a place for a root", () => {
+		init(root, env)
+		const clone = join(root, '.repos/github.com/a/b')
+		mkdirSync(clone, { recursive: true })
+		const git = (...args: string[]) =>
+			spawnSync('git', ['-C', clone, ...args], { encoding: 'utf8' })
+		git('init', '-q', '-b', 'main')
+		git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x')
+		expect(git('worktree', 'add', '-q', '-b', 'feat', `${clone}.feat`).status).toBe(0)
+		for (const target of [`${clone}.feat`, `${clone}.next`]) {
+			expect(() => init(target, env)).toThrow(`is inside the ken root ${root}`)
+			expect(existsSync(join(target, '.ken.yaml'))).toBe(false)
+		}
+	})
+
 	it('gives the line that points ken at a root that is not the configured one', () => {
 		const out = init(root, { ...env, KEN_ROOT: undefined })
 		expect(out).toContain(`not the configured root, ${join(dir, 'home/ken')} (from the default)`)

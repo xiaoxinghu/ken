@@ -36,18 +36,15 @@ export function withField(text: string, field: string, value: string | undefined
 		)
 	}
 	const keys = field === 'blocked-by' ? [field, ...ALIASES] : [field]
-	const { found, indent } = span(lines.slice(1, end).join('\n'), keys)
+	const { found, comment, indent } = span(lines.slice(1, end).join('\n'), keys)
 	if (!found) {
 		lines.splice(end, 0, ...line(indent))
 		return bom + lines.join(eol)
 	}
 	const [at, next] = [found[0] + 1, found[1] + 1]
 	const old = lines[at] ?? ''
-	const rest = old.slice(old.indexOf(':') + 1)
-	const quoted = /^\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')/.exec(rest)?.[0].length ?? 0
-	const comment = /\s+#.*$/.exec(rest.slice(quoted))?.[0] ?? ''
-	const gap = /^[ \t]*/.exec(rest)?.[0] || ' '
-	const set = `${indent}${field}:${gap}${value}${comment}`
+	const gap = /^[ \t]*/.exec(old.slice(old.indexOf(':') + 1))?.[0] || ' '
+	const set = `${indent}${field}:${gap}${value}${comment ?? ''}`
 	lines.splice(at, next - at, ...(value === undefined ? [] : [set]))
 	return bom + lines.join(eol)
 }
@@ -55,10 +52,14 @@ export function withField(text: string, field: string, value: string | undefined
 /**
  * The lines of `source`, front matter, that hold the first of `keys`, as YAML reads the key
  * (quoted or not): from the key's line to past the line its value ends on, so a value over
- * several lines, with blank lines or comments between its items, goes whole; and the
- * indentation of the mapping's keys, for a line written into it.
+ * several lines, with blank lines or comments between its items, goes whole; the comment
+ * that ends the value's last line, else its key's line, to keep; and the indentation of the
+ * mapping's keys, for a line written into it.
  */
-function span(source: string, keys: string[]): { found?: [number, number]; indent: string } {
+function span(
+	source: string,
+	keys: string[]
+): { found?: [number, number]; comment?: string; indent: string } {
 	const doc = parseDocument(source)
 	const [error] = doc.errors
 	if (error)
@@ -77,7 +78,15 @@ function span(source: string, keys: string[]): { found?: [number, number]; inden
 		if (!isScalar(key) || !keys.includes(String(key.value)) || !key.range) continue
 		const value = isNode(pair.value) ? pair.value.range : undefined
 		const last = Math.max(key.range[1], value?.[1] ?? 0)
-		return { found: [line(key.range[0]), line(Math.max(last - 1, key.range[0])) + 1], indent }
+		// what follows an offset on its line, when that is a comment, after the colon if any
+		const tail = (offset: number) =>
+			/^:?([ \t]+#.*)?$/.exec(source.slice(offset).split('\n')[0] ?? '')?.[1]
+		const comment = tail(last) ?? tail(key.range[1])
+		return {
+			found: [line(key.range[0]), line(Math.max(last - 1, key.range[0])) + 1],
+			comment,
+			indent
+		}
 	}
 	return { indent }
 }

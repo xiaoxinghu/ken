@@ -65,6 +65,19 @@ describe('ken task set', () => {
 		expect(text()).toBe('---\nblocked-by: [a.md] # was\n# after\nrepo: a/b/c\n---\n')
 	})
 
+	it('keeps the comment that ends a list over lines, and no # inside a quoted item', () => {
+		const { root, set, text } = setup(
+			't.md',
+			'---\nblocked-by: [\n  "a # b.md",\n] # waiting\n---\n'
+		)
+		write(join(root, 'tasks/a.md'), '# A\n')
+		expect(set('blocked-by', 'tasks/a.md').status).toBe(0)
+		expect(text()).toBe('---\nblocked-by: [a.md] # waiting\n---\n')
+		write(join(root, 'tasks/t.md'), '---\nblocked-by: ["a # b.md"]\n---\n')
+		expect(set('blocked-by', 'tasks/a.md').status).toBe(0)
+		expect(text()).toBe('---\nblocked-by: [a.md]\n---\n')
+	})
+
 	it('keeps the indentation of the front matter fields', () => {
 		const { set, text } = setup('t.md', '---\n  status: todo # open\n  repo: a/b/c\n---\n')
 		expect(set('status', 'done').status).toBe(0)

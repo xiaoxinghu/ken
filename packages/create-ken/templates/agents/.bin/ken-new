@@ -1,0 +1,104 @@
+#!/bin/sh
+# `ken new`: start a repo, or a layer, on this machine before any remote has it. The short form
+# of `git init "$(ken path code <key>)"`, `ken index set`, `ken get` and, for a layer, `ken init`
+# and `ken layer add`. It stays local until you push it; a machine that cannot reach it sees it
+# listed and goes on without it.
+set -eu
+
+usage() {
+	cat <<'EOF'
+ken new <repo> [<desc>] [--layer [--as <name>]]
+
+Start a repo on this machine, before any remote has it, and print its path.
+  <repo>          a name, owned by the org `me` in .ken.yaml's orgs (or its only org);
+                  <org>/<name>, an org from orgs; or a key, <host>/<owner>/<name>
+  <desc>          its one line in the index; for a layer, also its front page's first line
+  --layer         make it a ken root and add it to this root as a layer; needs <desc>
+  --as <name>     the layer's name at the root, default the repo name
+
+Examples:
+  ken new notes "My notes"
+  ken new work/api "The team's API"
+  ken new notes "My private notes" --layer
+  cd "$(ken new scratch)"
+EOF
+}
+
+die() {
+	echo "ken new: $*" >&2
+	exit 1
+}
+
+repo='' desc='' layer='' as=''
+while [ $# -gt 0 ]; do
+	case $1 in
+	-h | --help) usage; exit 0 ;;
+	--layer) layer=1 ;;
+	--as) [ $# -gt 1 ] || die '--as needs a name, e.g. `--as notes`.'; as=$2; shift ;;
+	-*) die "unknown option $1. Run \`ken new --help\`." ;;
+	*)
+		if [ -z "$repo" ]; then repo=$1
+		elif [ -z "$desc" ]; then desc=$1
+		else die "takes <repo> and <desc>, then options; got a third word, \"$1\". Quote a <desc> with spaces."
+		fi
+		;;
+	esac
+	shift
+done
+[ -n "$repo" ] || { usage >&2; exit 1; }
+[ -z "$as" ] || [ -n "$layer" ] || die '--as names a layer: use it with --layer.'
+[ -z "$layer" ] || [ -n "$desc" ] ||
+	die "a layer needs a <desc>: it is the first line of its front page and of the root's front page. Run \`ken new $repo \"<what it is for>\" --layer\`."
+
+# The key: a name or <org>/<name> through .ken.yaml's orgs, a key as given.
+root=$(ken path root)
+key=$(ken config --json | node -e '
+	const [repo] = process.argv.slice(1)
+	const orgs = JSON.parse(require("fs").readFileSync(0, "utf8")).orgs ?? {}
+	const names = Object.keys(orgs)
+	const parts = repo.split("/")
+	const fail = (why) => { console.error(`ken new: ${why}`); process.exit(1) }
+	if (parts.length === 3) console.log(repo)
+	else if (parts.length === 2) {
+		if (!orgs[parts[0]]) fail(`${parts[0]} is not an org in .ken.yaml (${names.join(", ") || "it lists none"}), so ${repo} names no repo. Use a key, <host>/<owner>/${parts[1]}.`)
+		console.log(`${orgs[parts[0]]}/${parts[1]}`)
+	} else if (parts.length === 1) {
+		const org = orgs.me ? "me" : names.length === 1 ? names[0] : undefined
+		if (!org) fail(names.length
+			? `${repo} has no owner: .ken.yaml lists the orgs ${names.join(", ")} and none is "me". Run \`ken new <org>/${repo}\`.`
+			: `${repo} has no owner: .ken.yaml lists no orgs. Pass a key, \`ken new <host>/<owner>/${repo}\`, or add yours to .ken.yaml: orgs:, then me: github.com/<you>.`)
+		console.log(`${orgs[org]}/${repo}`)
+	} else fail(`${repo} is not a repo: give a name, <org>/<name> or <host>/<owner>/<name>.`)
+' "$repo")
+dir=$(ken path code "$key")
+[ ! -e "$dir" ] && [ ! -L "$dir" ] ||
+	die "$dir is already there, so $key is not new. Use it as it is: \`ken get $key\`$([ -z "$layer" ] || echo ", then \`ken layer add $key\`")."
+
+trap 'echo "ken new: stopped before the end. What is done stays: $dir. Finish by hand, or remove it with \`rm -rf '"'"'$dir'"'"'\` and run ken new again." >&2' EXIT
+git init -q "$dir"
+if [ -n "$layer" ]; then
+	ken init "$dir" >/dev/null
+	# its front page's first line, which becomes the root's line for it and its index desc
+	DESC=$desc awk 'done || !/^A knowledge base kept by you/ { print; next } { print ENVIRON["DESC"]; done = 1 }' \
+		"$dir/README.md" >"$dir/README.md.new"
+	mv "$dir/README.md.new" "$dir/README.md"
+	git -C "$dir" add -A
+	git -C "$dir" commit -qm "Start the layer: $desc"
+	ken layer add "$key" ${as:+--as "$as"} >&2
+else
+	if [ -n "$desc" ]; then
+		# a JSON string is a YAML flow scalar: the text as written, whatever it holds
+		ken index set "$key" "desc=$(node -e 'console.log(JSON.stringify(process.argv[1]))' "$desc")" >/dev/null
+	fi
+	ken get "$key" >/dev/null
+	echo "Started $key at $dir, local only." >&2
+	echo "Next: commit the root's index, \`git -C '$root' add .repos/index.yaml\`." >&2
+fi
+trap - EXIT
+
+case $key in
+github.com/*) push="\`gh repo create ${key#github.com/} --private --source '$dir' --push\`" ;;
+*) push="\`git -C '$dir' remote add origin <url> && git -C '$dir' push -u origin HEAD\`" ;;
+esac
+echo "It stays on this machine until you push it, $push; machines that cannot reach it go on without it." >&2
+echo "$dir"

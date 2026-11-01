@@ -1,11 +1,12 @@
 import { existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs'
-import { basename, dirname, join, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import { type Command, shellWord } from './command.ts'
 import { readKenYaml } from './config.ts'
 import { get } from './get.ts'
 import { gitWith } from './git.ts'
 import { codePath } from './path.ts'
 import { configPath, configuredRoot } from './root.ts'
+import { locate } from './which.ts'
 
 /** The root `.gitignore` rules: the clones and worktrees at depth three, and secrets. */
 const IGNORE = ['.repos/*/*/*/', '.env']
@@ -54,6 +55,15 @@ Start at the front page, README.md: what this is for, its sections, its layers.
 
 Everything else is git, run against the path \`ken path\` prints. \`ken help\` for the rest.
 `
+
+/** The key of the repo place `target` in the root `root`; `parts` is its path from the root. */
+function keyAt(target: string, root: string, parts: string[]): string {
+	try {
+		return locate(target, root).key
+	} catch {
+		return parts.slice(1).join('/')
+	}
+}
 
 /** The real path of `path`, which may not exist yet: its nearest existing ancestor, resolved. */
 function realPath(path: string): string {
@@ -131,12 +141,20 @@ function getLayers(root: string): string[] {
 /** Create in `dir` the skeleton ken owns, only what is missing, then get the missing layers; say what was made and what next. */
 export function init(dir: string, env = process.env): string {
 	const target = realPath(dir)
+	// a layer is a root that lives in another's layout, at a repo's place: the one root allowed inside one
+	let outer: { root: string; key: string } | undefined
 	for (let a = dirname(target); a !== dirname(a); a = dirname(a)) {
 		if (existsSync(join(a, '.ken.yaml'))) {
+			const parts = relative(a, target).split(sep)
+			if (!outer && parts.length === 4 && parts[0] === '.repos') {
+				outer = { root: a, key: keyAt(target, a, parts) }
+				continue
+			}
 			throw new Error(
 				`${target} is inside the ken root ${a} (it holds .ken.yaml), and a root inside a root ` +
 					`would split one knowledge base and its checkouts in two. Use ${a} as it is, ` +
-					'or run `ken init <dir>` on a folder outside it.'
+					'or run `ken init <dir>` on a folder outside it, or on a repo of its own at ' +
+					'`ken path code <key>`, to make a layer there.'
 			)
 		}
 	}
@@ -183,7 +201,14 @@ export function init(dir: string, env = process.env): string {
 		: [`Nothing to create: ${target} already has every file ken init makes, and none was changed.`]
 	out.push(...getLayers(target))
 	const configured = configuredRoot(env)
-	if (!existsSync(configured.path) || realpathSync.native(configured.path) !== target) {
+	if (outer) {
+		out.push(
+			'',
+			`${target} is ${outer.key} in the layout of the root ${outer.root}, where a layer lives. ` +
+				'Commit it, then add it to that root as a layer, ' +
+				`\`KEN_ROOT=${shellWord(outer.root)} ken layer add ${outer.key}\`; it stays local until you push it.`
+		)
+	} else if (!existsSync(configured.path) || realpathSync.native(configured.path) !== target) {
 		out.push(
 			'',
 			`${target} is not the configured root, ${configured.path} (from ${configured.from}), ` +

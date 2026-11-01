@@ -156,4 +156,14 @@ describe('ken task rename', () => {
 		expect(t.read('old.md')).toBe('# Old\n')
 		expect(t.read('b.md')).toBe(broken)
 	})
+
+	it('refuses a file whose text would read as other fields once it is a .md', () => {
+		const text = '---\nblocked-by: [x.md]\n---\n'
+		const t = setup({ 'old.txt': text, 'x.md': '# X\n' })
+		const r = t.rename('tasks/old.txt', 'other/new')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`${join(t.tasks, 'old.txt')} would read differently as new.md`)
+		expect(t.read('old.txt')).toBe(text)
+		expect(existsSync(join(t.tasks, 'other/new.md'))).toBe(false)
+	})
 })

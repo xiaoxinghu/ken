@@ -148,6 +148,16 @@ export function renameTask(
 		writes.set(own ? dest : path, [before, next])
 	}
 
+	// a file of another extension becomes a .md, which reads front matter its old name did not
+	const as = (name: string) => JSON.stringify(readTask(name, text).fields)
+	const read = readTask(basename(dest), text)
+	if (!writes.has(dest) && (read.problems.length || as(basename(dest)) !== as(basename(source)))) {
+		throw new Error(
+			`${source} would read differently as ${basename(dest)}: front matter, which only a .md has, would start to count, ` +
+				`and rename keeps a task as it reads. Make it a .md where it is, \`mv ${source} ${source.replace(/(.)\.[^./]*$/, '$1')}.md\`, ` +
+				`fix what \`ken task list\` then says of it, then rename that.`
+		)
+	}
 	mkdirSync(dirname(dest), { recursive: true })
 	let fd: number
 	try {

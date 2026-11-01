@@ -341,8 +341,9 @@ extension, exists in its repo (claimed, landing, or not finished), since the bra
 carries the old name: close it and run \`ken task finish\` first; an archived task; a link
 to it, which the move would break, or whose blocked-by names it, since the file behind it
 may be archived; a live task that cannot be fully read, a problem in \`ken task list\`,
-since it may name it; a target that exists, or another extension of its name; other
-punctuation in <path>.
+since it may name it; a file of another extension whose text would read as other fields
+once a .md; a target that exists, or another extension of its name; other punctuation
+in <path>.
 
 Examples:
   ken task rename tasks/fix-login tasks/fix-login-after-reset

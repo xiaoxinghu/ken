@@ -345,7 +345,8 @@ describe('ken task --help', () => {
 		[['--help'], 'list'],
 		[['list', '--help'], 'list'],
 		[['ready', '--help'], 'ready'],
-		[['path', '--help'], 'path']
+		[['path', '--help'], 'path'],
+		[['add', '--help'], 'add']
 	])('%j carries examples', (args, command) => {
 		const r = kenTask(newRoot(), args)
 		expect(r).toMatchObject({ status: 0, stderr: '' })

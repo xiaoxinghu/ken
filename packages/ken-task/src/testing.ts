@@ -13,21 +13,21 @@ mkdirSync(bin)
 symlinkSync(join(import.meta.dirname, '../../ken/src/cli.ts'), join(bin, 'ken'))
 symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-task'))
 
+/** How the tests run `ken`: its CLI under node, and the environment for the root `root`. */
+export const ken = join(import.meta.dirname, '../../ken/src/cli.ts')
+export const env = (root: string) => ({
+	...process.env,
+	KEN_ROOT: root,
+	PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH}`
+})
+
 /** `ken task <args>` in the root `root`, run from `cwd`. */
 export const kenTask = (root: string, args: string[], cwd = root) => {
-	const r = spawnSync(
-		process.execPath,
-		[join(import.meta.dirname, '../../ken/src/cli.ts'), 'task', ...args],
-		{
-			cwd,
-			encoding: 'utf8',
-			env: {
-				...process.env,
-				KEN_ROOT: root,
-				PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH}`
-			}
-		}
-	)
+	const r = spawnSync(process.execPath, [ken, 'task', ...args], {
+		cwd,
+		encoding: 'utf8',
+		env: env(root)
+	})
 	return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 }
 

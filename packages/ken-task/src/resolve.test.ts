@@ -27,7 +27,8 @@ describe('ken task path', () => {
 		['from inside the folder', () => ['print.md', join(folder, 'portal')]],
 		['from inside the folder, without .md', () => ['print', join(folder, 'portal')]],
 		['from the root', () => ['tasks/portal/print.md', join(root, 'elsewhere')]],
-		['from the root, without .md', () => ['tasks/portal/print', join(root, 'elsewhere')]]
+		['from the root, without .md', () => ['tasks/portal/print', join(root, 'elsewhere')]],
+		['from the folder', () => ['portal/print', root]]
 	])('reaches one task by any path: %s', (_, args) => {
 		const [arg = '', cwd] = args()
 		expect(path(arg, cwd)).toEqual({ status: 0, stdout: `${task}\n`, stderr: '' })
@@ -48,7 +49,7 @@ describe('ken task path', () => {
 	})
 
 	it('refuses a path outside the folder, naming the folder', () => {
-		for (const arg of ['notes.md', '../x.md', 'tasks']) {
+		for (const arg of [join(root, 'notes.md'), '../x.md', '../../x.md']) {
 			const r = path(arg)
 			expect(r).toMatchObject({ status: 1, stdout: '' })
 			expect(r.stderr).toContain(`is not in the task folder ${folder}`)

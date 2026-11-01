@@ -75,7 +75,6 @@ tasks/portal/print-web-views-to-pdf.md
 
 ```markdown
 ---
-
 status: todo
 created: 2026-11-01
 repo: github.com/xiaoxinghu/portal
@@ -160,9 +159,9 @@ while making one makes that row a problem, and nothing stops the listing.
 ## Commands
 
 Every argument that names a task is any path that reaches the file: absolute, relative to
-the shell's directory, or relative to the root, with or without the extension when exactly
-one file has that stem, live or else archived. The file must be in the folder or its
-`.archive/`; any other path is refused, naming the folder. Output paths are absolute, so
+the shell's directory, to the root, or to the folder, tried in that order, with or without
+the extension when exactly one file has that stem, live or else archived. The file must be
+in the folder or its `.archive/`; any other path is refused, naming the folder. Output paths are absolute, so
 output feeds the next command unchanged. `--json` on `list` is one array of objects, by path: `path`,
 `title`, every known field as read (`status` is `todo` when absent), `other` with the
 unknown fields as YAML reads them, `state`, `unmet` (each `{ ref, path, reason }`, `reason` `open` or
@@ -177,7 +176,7 @@ the mtime.
 | `list [--json]`                        | Every task: path, state, unmet blockers, and what needs you: overdue; open more than 90 days; landing; done but branch remains; claimed but the worktree is missing or holds another branch; uncommitted changes in the worktree; problems with their fix. Always exits 0.                                            | nothing                                                                                                                                                                             |
 | `ready`                                | Paths of ready tasks, in order. Nothing ready prints nothing, says on stderr to run `list`, and exits 0.                                                                                                                                                                                                              |                                                                                                                                                                                     |
 | `path <task>`                          | The file, live or archived. `ken path "$(ken task path <task>)"` gives the README chain.                                                                                                                                                                                                                              | a path outside the folder and its archive; a name found nowhere; a stem two files share                                                                                             |
-| `add <path> [-r <key>] [-b <task>]...` | Create the file with `status: todo`, `created`, and `repo` and `blocked-by` when given; the heading is the name with dashes as spaces; `.md` when no extension is given. The one normalisation is lowercase and spaces to dashes, printed back. Inside a clone or worktree, `-r` defaults to its key, said on stderr. | a path outside the folder; a file, or a stem, that exists; other punctuation in the name; a blocker found nowhere                                                                   |
+| `add <path> [-r <key>] [-b <task>]...` | Create the file with `status: todo`, `created`, and `repo` and `blocked-by` when given, each blocker written relative to the file; the heading is the name with dashes as spaces; `.md` when no extension is given; folders on the way are made. `<path>` is read as a task argument is, the first reading in the folder taken. The one normalisation is lowercase and spaces to dashes, said on stderr; a name is letters, digits and dashes. Inside a clone or worktree, `-r` defaults to the key `ken which` prints, said on stderr. Prints the path. | a path outside the folder; a file, or another extension of its stem, that exists; other punctuation in the name, naming the name to use; a blocker found nowhere; a `-r` that is not a repo key |
 | `set <task> <field> <value>`           | Rewrite one line of `status`, `repo`, `blocked-by`, `scheduled` or `due`, inserting front matter if there is none. `blocked-by` takes paths as typed and writes them relative to the file. `status done` or `wontfix` also writes `closed`. An empty value removes the line.                                          | `status done` on a repo task whose branch is not on the default branch; an unknown field; an invalid key, date or path; a blocker found nowhere; a file with no front matter format |
 | `rename <task> <path>`                 | Move the file, across folders too, and rewrite every live `blocked-by` that named it and the moved file's own `blocked-by` if its folder changed. The heading is content, left alone. The only command that writes a file other than the one named.                                                                   | a claimed or landing task; a target that exists                                                                                                                                     |
 | `archive <task>...`                    | Move each to `.archive/` at its relative path; a name already there gets a numeric suffix, printed. Touches one file per name.                                                                                                                                                                                        | an open task; a task whose branch exists: run `finish` first                                                                                                                        |

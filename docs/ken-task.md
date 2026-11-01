@@ -106,8 +106,8 @@ are kept byte for byte, so new metadata needs no migration. `set status todo` re
 `closed`. A file whose format has no front matter, a `.txt`, is a task with every default;
 `set` refuses it, saying to make it a `.md`. `set` also refuses a file `list` shows as a
 `problem`, front matter not closed, and front matter that is one `{...}` mapping, with the
-fix: what it writes must read back as
-written, which it checks before renaming the new text over the file.
+fix: what it writes must read back as written, which it checks before renaming the new text
+over the file.
 
 ## States
 

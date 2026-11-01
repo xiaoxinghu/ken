@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { type Dirent, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { type Dirent, readdirSync, readFileSync, statSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { type Fields, isDate, type Read, readTask } from './read.ts'
 
@@ -70,8 +70,20 @@ function archived(folder: string, rel: string): string | undefined {
 	} catch {
 		return undefined
 	}
-	const found = entries.includes(basename(rel)) ? basename(rel) : entries.find((e) => name.test(e))
-	return found && join(dir, found)
+	const found = [basename(rel), ...entries.filter((e) => name.test(e))]
+		.map((e) => join(dir, e))
+		.find((path) => modified(path))
+	return found
+}
+
+/** The mtime of the file at `path`, local; undefined when it is no file it can stat. */
+function modified(path: string): string | undefined {
+	try {
+		const stat = statSync(path, { throwIfNoEntry: false })
+		return stat?.isFile() ? localDate(stat.mtime) : undefined
+	} catch {
+		return undefined
+	}
 }
 
 /** When the root's git added each file under `folder`, by absolute path; empty outside git. */
@@ -152,11 +164,10 @@ export function listTasks(root: string, folder: string, today: string): Row[] {
 				by = 'the date git added it'
 			}
 			if (!since) {
-				// lstat, which answers for a symlink loop too
-				since = localDate(lstatSync(path).mtime)
+				since = modified(path)
 				by = 'its mtime'
 			}
-			const age = days(since, today)
+			const age = since ? days(since, today) : 0
 			if (age > 90) notes.push(`open ${age} days, since ${since} by ${by}: finish it, or close it`)
 		}
 		return { path, title, ...fields, state, unmet: open ? unmet : [], notes }

@@ -126,7 +126,9 @@ function frontMatter(lines: string[], read: Read): void {
 function list(key: string, value: string, more: string[], read: Read): string[] {
 	const canonical = 'the canonical form is one line, `blocked-by: [a.md, b.md]`'
 	if (value.startsWith('[') && value.endsWith(']') && !more.length) {
-		return value.slice(1, -1).split(',').map(scalar).filter(Boolean)
+		// each item quoted, commas and all, or up to the next comma
+		const items = value.slice(1, -1).match(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^,\s][^,]*/g)
+		return (items ?? []).map(scalar).filter(Boolean)
 	}
 	if (!value && more.every((line) => line.startsWith('-'))) {
 		if (more.length) read.flags.push(`${key} is a block list: ${canonical}`)

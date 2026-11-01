@@ -106,6 +106,12 @@ describe('ken task list', () => {
 		task('bad-month.md', `${front('due: 2026-13-01')}# Bad month\n`)
 		task('locked/hidden-inside.md', '# Locked\n')
 		chmodSync(join(folder, 'locked'), 0)
+		task('unsearchable/inside.md', '# Inside\n')
+		chmodSync(join(folder, 'unsearchable'), 0o400)
+		mkdirSync(join(folder, '.archive/c.md'), { recursive: true })
+		task('on-archive-folder.md', front('blocked-by: [c.md]'))
+		task('a,b.md', front('status: done'))
+		task('on-comma.md', front('blocked-by: ["a,b.md", x/y.md]'))
 		symlinkSync('loop.md', join(folder, 'loop.md'))
 		task(
 			'all.md',
@@ -126,6 +132,7 @@ describe('ken task list', () => {
 		task('.hidden.md', '# Hidden\n')
 		const r = kenTask(root, 'list', '--json')
 		chmodSync(join(folder, 'locked'), 0o755)
+		chmodSync(join(folder, 'unsearchable'), 0o755)
 		expect(r).toMatchObject({ status: 0, stderr: '' })
 		rows = new Map((JSON.parse(r.stdout) as Row[]).map((t) => [t.path, t]))
 	})
@@ -208,15 +215,29 @@ describe('ken task list', () => {
 		expect(row('into-archive.md')).toMatchObject({ state: 'ready', unmet: [], notes: [] })
 	})
 
+	it('takes only a file in the archive as the archived task, not a folder of its name', () => {
+		expect(row('on-archive-folder.md')).toMatchObject({
+			state: 'blocked',
+			unmet: [{ ref: 'c.md', reason: 'missing' }]
+		})
+	})
+
+	it('keeps a comma inside a quoted blocked-by item', () => {
+		expect(row('on-comma.md')).toMatchObject({
+			'blocked-by': ['a,b.md', 'x/y.md'],
+			unmet: [{ ref: 'x/y.md', reason: 'open' }]
+		})
+	})
+
 	it('keeps the title of a file with an impossible date, and names the field to fix', () => {
 		expect(row('bad-month.md')).toMatchObject({ title: 'Bad month', state: 'problem' })
 		expect(row('bad-month.md').notes.join()).toContain('`due: YYYY-MM-DD`')
 	})
 
 	it.skipIf(process.getuid?.() === 0)(
-		'lists a folder it cannot open and a symlink loop as problems, and goes on',
+		'lists a folder it cannot open, a file it cannot stat and a symlink loop as problems, and goes on',
 		() => {
-			for (const rel of ['locked', 'loop.md']) {
+			for (const rel of ['locked', 'loop.md', 'unsearchable/inside.md']) {
 				expect(row(rel).state).toBe('problem')
 				expect(row(rel).notes.join()).toContain(`\`ls -ld ${join(folder, rel)}\``)
 			}

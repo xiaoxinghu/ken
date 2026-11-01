@@ -1,7 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import { type Dirent, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { type Dirent, lstatSync, readdirSync, readFileSync, statSync } from 'node:fs'
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path'
 import { type Fields, type Read, readTask } from './read.ts'
+import { archived, real } from './resolve.ts'
 
 export type State = 'problem' | 'done' | 'wontfix' | 'blocked' | 'later' | 'ready'
 
@@ -55,36 +56,8 @@ function load(path: string): Read {
 	}
 }
 
-/** `path` as the disk names it, which on a case-insensitive disk may differ in case. */
-function real(path: string): string {
-	try {
-		return realpathSync.native(path)
-	} catch {
-		return path
-	}
-}
-
 const isOpen = (read: Read): boolean =>
 	read.problems.length > 0 || (read.fields.status !== 'done' && read.fields.status !== 'wontfix')
-
-/** The archived file for `rel`, a path relative to the folder: `.archive/<rel>`, at any numeric suffix. */
-function archived(folder: string, rel: string): string | undefined {
-	const dir = join(folder, '.archive', dirname(rel))
-	const ext = extname(rel)
-	const stem = basename(rel, ext)
-	const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-	const name = new RegExp(`^${literal(stem)}(-\\d+)?${literal(ext)}$`)
-	let entries: string[]
-	try {
-		entries = readdirSync(dir)
-	} catch {
-		return undefined
-	}
-	const found = [basename(rel), ...entries.filter((e) => name.test(e))]
-		.map((e) => join(dir, e))
-		.find((path) => statSync(path, { throwIfNoEntry: false })?.isFile())
-	return found
-}
 
 /** When the root's git added each file under `folder`, by absolute path; empty outside git. */
 function addedDates(root: string, folder: string): Map<string, string> {
@@ -110,20 +83,47 @@ function addedDates(root: string, folder: string): Map<string, string> {
 const days = (from: string, to: string): number =>
 	Math.round((Date.parse(to) - Date.parse(from)) / 864e5)
 
+/** When a task in `folder` was created, and by what: `created`, else the date git added it, else its mtime. */
+type Since = (path: string, created?: string) => [date: string, by: string]
+
+function since(root: string, folder: string): Since {
+	let added: Map<string, string> | undefined
+	return (path, created) => {
+		if (created) return [created, 'created']
+		added ??= addedDates(root, folder)
+		const git = added.get(path)
+		return git ? [git, 'the date git added it'] : [localDate(lstatSync(path).mtime), 'its mtime']
+	}
+}
+
+/**
+ * The paths of the ready tasks in `configured` as of `today`, in the order to take them:
+ * earliest `due`, then earliest created, then path, so two runs agree.
+ */
+export function readyTasks(root: string, configured: string, today: string): string[] {
+	const created = since(root, real(configured))
+	const key = (row: Row) => [row.due ?? '~', created(row.path, row.created)[0], row.path]
+	return listTasks(root, configured, today, created)
+		.filter((row) => row.state === 'ready')
+		.map((row) => ({ path: row.path, key: key(row) }))
+		.sort((a, b) => (a.key.join('\0') < b.key.join('\0') ? -1 : 1))
+		.map((row) => row.path)
+}
+
 /**
  * Every task in `folder`, a folder of the root `root`, by path, with its state as of
  * `today`. Each row is made on its own: whatever throws while making one makes that row a
  * problem, so no file can stop the listing.
  */
-export function listTasks(root: string, configured: string, today: string): Row[] {
+export function listTasks(
+	root: string,
+	configured: string,
+	today: string,
+	created: Since = since(root, real(configured))
+): Row[] {
 	// the real path, as the root is, so that every path compares as the disk names it
 	const folder = real(configured)
 	const tasks = new Map(walk(folder).map((path) => [path, load(path)]))
-	let added: Map<string, string> | undefined
-	const addedDate = (path: string) => {
-		added ??= addedDates(root, folder)
-		return added.get(path)
-	}
 	return [...tasks.entries()]
 		.sort(([a], [b]) => (a < b ? -1 : 1))
 		.map(([path, read]) => {
@@ -197,14 +197,9 @@ export function listTasks(root: string, configured: string, today: string): Row[
 		if (open && fields.due && fields.due < today) notes.push(`overdue: due ${fields.due}`)
 		// a problem row's note is its fix; it is never asked its age, so it cannot fail again
 		if (open && !problems.length) {
-			const git = fields.created ? undefined : addedDate(path)
-			const [since, by] = fields.created
-				? [fields.created, 'created']
-				: git
-					? [git, 'the date git added it']
-					: [localDate(lstatSync(path).mtime), 'its mtime']
-			const age = days(since, today)
-			if (age > 90) notes.push(`open ${age} days, since ${since} by ${by}: finish it, or close it`)
+			const [from, by] = created(path, fields.created)
+			const age = days(from, today)
+			if (age > 90) notes.push(`open ${age} days, since ${from} by ${by}: finish it, or close it`)
 		}
 		return { path, title, ...fields, state, unmet: open ? unmet : [], notes }
 	}

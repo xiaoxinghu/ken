@@ -70,7 +70,7 @@ beforeEach(() => {
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
 			'by a page (example.com/acme/web:src/app/[id]/page.ts), [example.com/acme/web:src/app.ts](design(v2).md), ' +
-			'**example.com/acme/web:src/app.ts** in bold; the team is in [the atlas](../atlas/teams/sales.md).\n',
+			'**example.com/acme/web:src/app.ts** in bold, [encoded](example.com/acme/web:src/app/%5Bid%5D/page.ts); the team is in [the atlas](../atlas/teams/sales.md).\n',
 		'.repos/example.com/acme/web/src/app.ts': 'export const start = 1\n',
 		'.repos/example.com/acme/web/src/app/[id]/page.ts': 'export default 1\n',
 		'.repos/example.com/acme/web/src/app/(auth)/page.ts': 'export default 1\n',
@@ -106,7 +106,7 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		write({
 			'systems/lost.md': 'See `example.com/acme/api:src/x.ts`, not cloned here.\n',
 			'flows/README.md':
-				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\ngit/acme/web:src/gone.ts\n',
+				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\ngit/acme/web:src/gone.ts\n\n[lost]: ../systems/lost.md\n',
 			'.repos/git/acme/web/src/app.ts': 'export const start = 1\n',
 			'systems/old.md': '# Old\n',
 			'overview.md': '# Overview\n'
@@ -139,7 +139,7 @@ describe('ken lint', { timeout: 30_000 }, () => {
 				'error flows/README.md:5', // a reference to a file not in the clone, a host with no dot
 				'error systems/join.md', // listed in two section READMEs
 				'error systems/join.md:2', // a reference to a missing file under (auth)/, on its line
-				'error systems/lost.md', // listed in none
+				'error systems/lost.md', // listed in none: a definition no link uses renders nothing
 				'note systems/old.md' // nobody links to it, untouched since 2020
 			].sort()
 		)

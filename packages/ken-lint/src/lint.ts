@@ -37,6 +37,14 @@ function trimPath(path: string): string {
 	return open && count(open) < count(close) ? trimPath(p.slice(0, -1)) : p
 }
 
+function decode(url: string): string {
+	try {
+		return decodeURIComponent(url)
+	} catch {
+		return url
+	}
+}
+
 function visit(node: Nodes, fn: (node: Nodes) => void): void {
 	fn(node)
 	if ('children' in node) for (const child of node.children as Nodes[]) visit(child, fn)
@@ -150,34 +158,51 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	}
 	const front = tops.map((t) => join(t, 'README.md')).filter((f) => existsSync(f))
 	for (const file of [...front, ...readmes, ...[...pages.values()].map((p) => p.path)]) {
+		const tree = fromMarkdown(readFileSync(file, 'utf8'))
+		// a reference link renders through its definition; a definition alone renders nothing
+		const definitions = new Map<string, string>()
+		visit(tree, (node) => {
+			if (node.type === 'definition' && !definitions.has(node.identifier)) {
+				definitions.set(node.identifier, node.url)
+			}
+		})
 		const listed = new Set<string>()
 		// code blocks are examples: neither their links nor their references are checked
-		visit(fromMarkdown(readFileSync(file, 'utf8')), (node) => {
+		visit(tree, (node) => {
 			const line = node.position?.start.line
 			if (node.type === 'text' || node.type === 'inlineCode') {
-				checkReferences(file, node.value, line)
-				return
+				return checkReferences(file, node.value, line)
 			}
-			if (node.type !== 'link' && node.type !== 'definition') return
-			const url = node.url
-			if (IS_REFERENCE.test(url)) return checkReferences(file, url, line)
+			// every definition's target is checked once, at the definition; only a rendered link,
+			// inline or through a definition, lists a page or links to it
+			const url =
+				node.type === 'link' || node.type === 'definition'
+					? node.url
+					: node.type === 'linkReference'
+						? definitions.get(node.identifier)
+						: undefined
+			const checks = node.type !== 'linkReference'
+			if (url === undefined) return
+			// a link's destination is URL-encoded: `%5Bid%5D` is `[id]`
+			if (IS_REFERENCE.test(url))
+				return checks ? checkReferences(file, decode(url), line) : undefined
 			// a URL or an anchor
 			if (/^[a-z][a-z0-9+.-]*:|^#|^\/\//i.test(url)) return
-			let path = url.replace(/[#?].*$/, '')
-			try {
-				path = decodeURIComponent(path)
-			} catch {}
+			const path = decode(url.replace(/[#?].*$/, ''))
 			const top = topOf.get(file) ?? root
 			const to = path.startsWith('/') ? join(top, path) : resolve(dirname(file), path)
 			if (!existsSync(to)) {
-				report(
-					'error',
-					file,
-					`links to ${url}, which does not exist. Fix the path, or remove the link.`,
-					line
-				)
+				if (checks) {
+					report(
+						'error',
+						file,
+						`links to ${url}, which does not exist. Fix the path, or remove the link.`,
+						line
+					)
+				}
 				return
 			}
+			if (node.type === 'definition') return
 			const real = realpathSync(to)
 			if (pages.has(real) && readmes.includes(file)) listed.add(real)
 			else if (real !== realpathSync(file)) inbound.add(real)

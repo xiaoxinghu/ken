@@ -74,6 +74,8 @@ export function renameTask(
 	const tasks = new Set(walk(folder).sort())
 	const moves = dirname(dest) !== dirname(source)
 	const writes = new Map<string, [before: string, next: string]>()
+	// each reference as written and as it will be, to check that it names the same file
+	const refs: { path: string; ref: string; next: string }[] = []
 	for (const path of tasks) {
 		const own = path === source
 		// a link's file is elsewhere, maybe in the archive, maybe the task itself: rename moves
@@ -110,7 +112,7 @@ export function renameTask(
 			)
 		}
 		let changed = false
-		const refs = read.fields['blocked-by'].map((ref) => {
+		const nexts = read.fields['blocked-by'].map((ref) => {
 			const hit = resolveRef(root, folder, tasks, path, ref)
 			const named = hit?.live === source
 			if (!named && !(own && moves)) return ref
@@ -119,6 +121,7 @@ export function renameTask(
 			const at = named ? dest : (hit?.target ?? resolve(dirname(path), ref))
 			return relative(dirname(own ? dest : path), at)
 		})
+		refs.push(...read.fields['blocked-by'].map((ref, i) => ({ path, ref, next: nexts[i] ?? ref })))
 		if (!changed) continue
 		if (!Buffer.from(before).equals(bytes)) {
 			throw new Error(
@@ -132,20 +135,35 @@ export function renameTask(
 					`replace the link with its file, \`rm ${path} && cp ${link} ${path}\`, or take the task out of its blocked-by, then rerun.`
 			)
 		}
-		const next = withField(before, 'blocked-by', flowList(refs))
+		const next = withField(before, 'blocked-by', flowList(nexts))
 		const back = readTask(basename(own ? dest : path), next)
 		const same = (r: typeof read) => JSON.stringify({ ...r.fields, 'blocked-by': [] })
 		if (
 			back.problems.length ||
 			same(back) !== same(read) ||
-			JSON.stringify(back.fields['blocked-by']) !== JSON.stringify(refs)
+			JSON.stringify(back.fields['blocked-by']) !== JSON.stringify(nexts)
 		) {
 			throw new Error(
-				`blocked-by in ${path}, written as ${flowList(refs)}, would not read back as written, so nothing is renamed: ` +
+				`blocked-by in ${path}, written as ${flowList(nexts)}, would not read back as written, so nothing is renamed: ` +
 					`write it as \`blocked-by: [<path>, ...]\` on one line by hand, then rerun`
 			)
 		}
 		writes.set(own ? dest : path, [before, next])
+	}
+	// the one promise: every reference names, after the move, the file it named before, the
+	// moved file now at its new path; the new name may shadow what a fallback found
+	const after = new Set([...tasks].filter((p) => p !== source).concat(dest))
+	for (const { path, ref, next } of refs) {
+		const was = resolveRef(root, folder, tasks, path, ref)?.file
+		const moved = path === source ? dest : path
+		const now = resolveRef(root, folder, after, moved, next)?.file
+		if ((was === source ? dest : was) !== now) {
+			throw new Error(
+				`${path} has blocked-by ${ref}, which names ${was ?? 'no task'}, but after this rename ${next === ref ? 'it' : `its rewrite ${next}`} would name ${now ?? 'no task'}, ` +
+					`and a rename must not change what a reference names: run \`ken task rename ${source} <another path>\`` +
+					`${was ? `, or write that reference as ${relative(dirname(path), was)}, the file it means, then rerun` : ''}.`
+			)
+		}
 	}
 
 	// a file of another extension becomes a .md, which reads front matter its old name did not

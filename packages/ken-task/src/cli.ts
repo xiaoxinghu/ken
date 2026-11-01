@@ -331,6 +331,8 @@ made. A task's path is its identity, so rename keeps every reference true:
   - every live task whose blocked-by names it gets that value rewritten, relative to its
     own file, the rest of the line, a comment included, kept
   - moved to another folder, its own blocked-by is rewritten so each value still resolves
+  - before anything is written, every reference must name, as it will read after the move,
+    the file it names now
 
 The heading is content and is left alone. Files in .archive/ are never touched, so a
 reference from an archived task may go stale. The new file is made first and the old one
@@ -342,7 +344,8 @@ carries the old name: close it and run \`ken task finish\` first; an archived ta
 to it, which the move would break, or whose blocked-by names it, since the file behind it
 may be archived; a live task that cannot be fully read, a problem in \`ken task list\`,
 since it may name it; a file of another extension whose text would read as other fields
-once a .md; a target that exists, or another extension of its name; other punctuation
+once a .md; a new name that would change what a reference names, as by shadowing an
+archived task; a target that exists, or another extension of its name; other punctuation
 in <path>.
 
 Examples:

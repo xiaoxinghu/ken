@@ -166,4 +166,17 @@ describe('ken task rename', () => {
 		expect(t.read('old.txt')).toBe(text)
 		expect(existsSync(join(t.tasks, 'other/new.md'))).toBe(false)
 	})
+
+	it('refuses a new name that would change what a reference names', () => {
+		// portal/new.md now names the archived task; once old.md is portal/new.md, itself
+		const text = '---\nblocked-by: [portal/new.md]\n---\n'
+		const t = setup({ 'old.md': text, '.archive/portal/new.md': '---\nstatus: done\n---\n' })
+		const r = t.rename('tasks/old.md', 'portal/new')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(
+			`has blocked-by portal/new.md, which names ${join(t.tasks, '.archive/portal/new.md')}`
+		)
+		expect(t.read('old.md')).toBe(text)
+		expect(existsSync(join(t.tasks, 'portal/new.md'))).toBe(false)
+	})
 })

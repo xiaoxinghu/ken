@@ -58,11 +58,21 @@ describe('ken task set', () => {
 	it('replaces a block list or an alias with the one-line blocked-by', () => {
 		const { root, set, text } = setup(
 			't.md',
-			'---\ndepends_on:\n  - x.md\n  - y.md\nrepo: a/b/c\n---\n'
+			'---\ndepends_on: # was\n  - x.md\n\n# between\n  - y.md\n# after\nrepo: a/b/c\n---\n'
 		)
 		write(join(root, 'tasks/a.md'), '# A\n')
 		expect(set('blocked-by', 'tasks/a.md').status).toBe(0)
-		expect(text()).toBe('---\nblocked-by: [a.md]\nrepo: a/b/c\n---\n')
+		expect(text()).toBe('---\nblocked-by: [a.md] # was\n# after\nrepo: a/b/c\n---\n')
+	})
+
+	it('finds a field whose key is quoted, writing it back plain', () => {
+		const { set, text } = setup(
+			't.md',
+			`---\n"status": done\n'closed': 2026-01-01\n"due": 2026-01-01\n---\n`
+		)
+		expect(set('due', '2026-02-02').status).toBe(0)
+		expect(set('status', 'todo').status).toBe(0)
+		expect(text()).toBe('---\nstatus: todo\ndue: 2026-02-02\n---\n')
 	})
 
 	it('refuses a blocker found nowhere, leaving the file as it was', () => {

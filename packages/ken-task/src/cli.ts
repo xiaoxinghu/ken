@@ -84,8 +84,9 @@ Examples:
 const ADD_HELP = `ken task add <path> [-r <key>] [-b <task>]...
 
 Create the task file and print its absolute path. <path> is where it goes in the folder:
-absolute, from here, from the root or from the folder; .md is added when it has no
-extension, and folders on the way are made. A task's path is its branch name, so it is
+absolute, from here, from the root or from the folder; it is a .md, the one format with
+front matter, so .md is added when it has no extension and any other is refused; folders
+on the way are made. A task's path is its branch name, so it is
 lowercased and spaces become dashes, said on stderr; other punctuation is refused with
 the name to use instead. The file is:
 

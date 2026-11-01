@@ -46,6 +46,12 @@ export function addTask(
 	// the one normalisation: lowercase, spaces to dashes
 	const rel = typed.toLowerCase().replaceAll(' ', '-')
 	const ext = EXT.exec(rel)?.[0] ?? ''
+	if (ext && ext !== '.md') {
+		throw new Error(
+			`${typed} is a ${ext}, but what add writes is front matter, which ken-task reads only in a .md, so its fields would be lost: ` +
+				`run \`ken task add ${join(folder, rel.slice(0, -ext.length))}\` for the .md. A file of another extension is a task with every default, written by hand.`
+		)
+	}
 	const parts = rel.slice(0, rel.length - ext.length).split('/')
 	if (!parts.every((p) => PART.test(p))) {
 		const name = parts

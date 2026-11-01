@@ -44,10 +44,21 @@ describe('ken task add', () => {
 		const again = kenTask(root, ['add', 'portal/fix-login'])
 		expect(again).toMatchObject({ status: 1, stdout: '' })
 		expect(again.stderr).toContain(`${md} exists`)
-		const txt = kenTask(root, ['add', 'portal/fix-login.txt'])
-		expect(txt).toMatchObject({ status: 1, stdout: '' })
-		expect(txt.stderr).toContain(`${md} exists`)
-		expect(readdirSync(join(root, 'tasks/portal'))).toEqual(['fix-login.md'])
+		// a .txt dropped in by hand holds the branch name fix-login too
+		const txt = join(root, 'tasks/fix-login.txt')
+		write(txt, 'Fix login\n')
+		const beside = kenTask(root, ['add', 'fix-login'])
+		expect(beside).toMatchObject({ status: 1, stdout: '' })
+		expect(beside.stderr).toContain(`${txt} exists`)
+		expect(readdirSync(join(root, 'tasks'))).toEqual(['fix-login.txt', 'portal'])
+	})
+
+	it('writes only a .md, since only a .md has front matter, naming the path to use', () => {
+		const root = newRoot()
+		const r = kenTask(root, ['add', 'portal/fix-login.txt', '-b', 'x.md'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`ken task add ${join(root, 'tasks/portal/fix-login')}\``)
+		expect(existsSync(join(root, 'tasks'))).toBe(false)
 	})
 
 	it('refuses a path outside the folder, naming the folder', () => {

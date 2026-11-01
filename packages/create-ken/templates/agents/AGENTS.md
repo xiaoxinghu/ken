@@ -18,7 +18,7 @@ front page, README.md. Sessions start here, at the root, where the hooks and den
 
 - `.repos/<host>/<owner>/<repo>/` is a clone on its default branch, and
   `.repos/<host>/<owner>/<repo>.<branch>/` a worktree beside it, `/` in the branch as `-`.
-- `.repos/index.yaml` lists every repo; a listed one is cloned when a tool first reads in it.
+- `.repos/index.yaml` lists every repo; `ken get <key>` one not cloned before reading it.
 - Name code as `<key>:<path>#<symbol>`, never by a line number or an absolute path.
 - `.bin/` holds `ken-<name>` scripts, run as `ken <name>`. `.agents/` holds the hooks every
   harness shares; `.claude/`, `.codex/` and `.pi/` point into it.

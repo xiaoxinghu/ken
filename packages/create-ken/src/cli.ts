@@ -168,7 +168,7 @@ async function main(): Promise<string> {
 	if (template === 'agents') {
 		out.push(
 			'',
-			'The hooks run `ken status` at session start and `ken ensure` before a read, so ken must be on the ' +
+			'The session-start hook runs `ken status`, so ken must be on the ' +
 				'PATH of the shell that starts the agent. Codex and pi run them only once this root is trusted: ' +
 				'accept the trust prompt on their first start here, then `/hooks` in Codex to trust the hooks, ' +
 				'`/trust` in pi.'

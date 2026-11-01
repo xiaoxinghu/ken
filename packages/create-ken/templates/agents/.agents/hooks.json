@@ -1,11 +1,5 @@
 {
 	"hooks": {
-		"SessionStart": [{ "hooks": [{ "type": "command", "command": "ken status" }] }],
-		"PreToolUse": [
-			{
-				"matcher": "Read|Grep|Glob|Bash",
-				"hooks": [{ "type": "command", "command": "ken ensure" }]
-			}
-		]
+		"SessionStart": [{ "hooks": [{ "type": "command", "command": "ken status" }] }]
 	}
 }

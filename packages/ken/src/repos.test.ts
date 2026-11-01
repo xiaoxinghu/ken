@@ -91,7 +91,12 @@ describe('ken repos', () => {
 		expect(r.stderr).toContain(`run \`ken init ${root}\` to clone it`)
 		const rows = byKey(JSON.parse(r.stdout))
 		expect(Object.keys(rows)).toEqual(['api', 'atlas', 'docs', 'lone', 'web', 'wiki'])
-		expect(rows.web).toMatchObject({ desc: "The root's web.", listedBy: 'root', cloned: true })
+		expect(rows.web).toMatchObject({
+			desc: "The root's web.",
+			listedBy: 'root',
+			cloned: true,
+			localOnly: false
+		})
 		expect(rows.docs).toMatchObject({ desc: 'Team docs.', listedBy: 'atlas', cloned: false })
 		expect(rows.docs?.strays).toEqual([])
 		expect(rows.atlas).toMatchObject({ listedBy: 'root', branch: 'main', strays: [] })
@@ -178,6 +183,35 @@ describe('ken repos', () => {
 		expect(r.stdout).toBe(
 			`${OWNER}/nothing  in no index, not cloned\n\nMentioned in no file under ${root}.\n`
 		)
+	})
+
+	it('marks a repo begun here and never pushed local only, which is no stray', () => {
+		const mine = join(tmp, 'mine')
+		const draft = join(mine, '.repos', OWNER, 'draft')
+		mkdirSync(draft, { recursive: true })
+		writeFileSync(indexFile(mine), `${OWNER}:\n  repos:\n    draft:\n      desc: An idea.\n`)
+		git(draft, 'init', '-q', '-b', 'main')
+		git(
+			draft,
+			'-c',
+			'user.name=t',
+			'-c',
+			'user.email=t@t',
+			'commit',
+			'-q',
+			'--allow-empty',
+			'-m',
+			'x'
+		)
+		const r = run(mine, 'repos')
+		expect(r).toMatchObject({ status: 0, stderr: '' })
+		expect(r.stdout).toBe(
+			`${OWNER}/draft  listed by root, cloned on main, local only (nothing pushed)\n  An idea.\n`
+		)
+		expect(JSON.parse(run(mine, 'repos', '--json').stdout)[0]).toMatchObject({
+			localOnly: true,
+			strays: []
+		})
 	})
 
 	it('says what to run in a root with no repos', () => {

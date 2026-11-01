@@ -22,10 +22,16 @@ import { worktree } from './worktree.ts'
  * Make the repo `input` names ready in `root` and return its clone, `.repos/<key>`: cloned when
  * missing, a clone already there used as it is (no fetch), anything else there refused. Then set
  * up for relative worktrees and repaired, so a clone moved in with `mv` works, and registered in
- * the root's index when no index lists it (PRD "The kernel", `get`). The clone runs with `env`; a
- * clone that fails throws with git's error as the `cause`.
+ * the root's index when no index lists it (PRD "The kernel", `get`), its desc what `describe`
+ * says of the clone, if anything. The clone runs with `env`; a clone that fails throws with git's
+ * error as the `cause`.
  */
-export function get(root: string, input: string, env = process.env): string {
+export function get(
+	root: string,
+	input: string,
+	env = process.env,
+	describe?: (clone: string) => string | undefined
+): string {
 	const { key, url } = parseKey(input)
 	requireGit(git(root, '--version'))
 	const { clone, layers } = readKenYaml(root)
@@ -39,13 +45,20 @@ export function get(root: string, input: string, env = process.env): string {
 			gitWith(env, root, 'clone', '-q', ...filter, '--', url, dir)
 		} catch (e) {
 			rmSync(dir, { recursive: true, force: true })
+			const layer = layers.find((l) => l.key === key)
+			const by = indexedBy(root, key, layers) ?? (layer && `.ken.yaml, as the layer ${layer.name}`)
+			const known = by
+				? ` ${key} is listed by ${by}, so it is known here even though this machine cannot get it: ` +
+					'it may not be pushed yet, or be private to accounts this machine is not signed in as. ' +
+					'The rest of the root works without it.'
+				: ''
 			const hint =
 				url === `https://${key}.git`
 					? ` A key alone clones ${url}; for another URL, such as ssh, pass it: \`ken get git@${key.replace('/', ':')}.git\`.`
 					: ''
 			throw new Error(
 				`could not clone ${redact(url)} into ${dir}, so ${key} is not here; nothing was left behind. ` +
-					`${(e as Error).message}\nFix the cause, then ${rerun(input.trim())}.${hint}`,
+					`${(e as Error).message}\nFix the cause, then ${rerun(input.trim())}.${known}${hint}`,
 				{ cause: e }
 			)
 		}
@@ -59,7 +72,7 @@ export function get(root: string, input: string, env = process.env): string {
 		git(dir, 'config', 'worktree.useRelativePaths', 'true')
 	}
 	git(dir, 'worktree', 'repair')
-	register(root, key, layers)
+	register(root, key, layers, describe?.(dir))
 	return dir
 }
 
@@ -142,15 +155,24 @@ function ownRepo(dir: string): boolean {
 	}
 }
 
+/** Whose index lists `key`: `root`, or the first layer's in .ken.yaml order; undefined when none does. */
+function indexedBy(root: string, key: string, layers: Layer[]): string | undefined {
+	if (Object.hasOwn(readIndex(indexFile(root)), key)) return 'root'
+	const layer = layers.find((l) => Object.hasOwn(readIndex(indexFile(codePath(root, l.key))), key))
+	return layer && `the layer ${layer.name}`
+}
+
 /** Write an entry for `key` into the root's index when neither it nor a layer's lists one. */
-function register(root: string, key: string, layers: Layer[]): void {
-	const dirs = [root, ...layers.map((l) => codePath(root, l.key))]
-	if (dirs.some((dir) => Object.hasOwn(readIndex(indexFile(dir)), key))) return
+function register(root: string, key: string, layers: Layer[], desc?: string): void {
+	if (indexedBy(root, key, layers)) return
 	const file = indexFile(root)
-	setFields(file, key, {})
+	setFields(file, key, desc ? { desc } : {})
 	process.stderr.write(
-		`ken: registered ${key} in ${file}, with no desc. Describe it in one line, so an agent can ` +
-			`choose it before cloning: \`ken index set ${key} desc="..."\`.\n`
+		desc
+			? `ken: registered ${key} in ${file}, with the desc ${JSON.stringify(desc)}; change it with ` +
+					`\`ken index set ${key} desc="..."\`.\n`
+			: `ken: registered ${key} in ${file}, with no desc. Describe it in one line, so an agent can ` +
+					`choose it before cloning: \`ken index set ${key} desc="..."\`.\n`
 	)
 }
 

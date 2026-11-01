@@ -87,10 +87,44 @@ describe('ken layer add', () => {
 		)
 		expect(r.stdout).toContain(`add -- atlas ${OWNER_AGENTS} .ken.yaml README.md .repos/index.yaml`)
 		expect(r.stdout).toContain('`ken repos --layer atlas`')
+		// its own entry carries the front page's line, so the layer's repo is no stray
+		expect(readIndex(indexFile(root))[KEY]).toEqual({ desc: "The sales tribe's shared knowledge." })
 
 		// the layer's index is now part of the merged one: get registers nothing for its repos
 		expect(ken('get', 'example.com/acme/web')).toMatchObject({ status: 0, stderr: '' })
 		expect(readIndex(indexFile(root))).not.toHaveProperty('example.com/acme/web')
+	})
+
+	it('adds a layer only this machine has, and a clone of the root elsewhere works without it', () => {
+		const notes = join(root, '.repos/example.com/me/notes')
+		mkdirSync(notes, { recursive: true })
+		writeFileSync(join(notes, 'README.md'), '# Notes\n\nMine alone.\n')
+		git(notes, 'init', '-q', '-b', 'main')
+		git(notes, 'add', '.')
+		git(notes, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x')
+		expect(ken('layer', 'add', 'example.com/me/notes').status).toBe(0)
+		const [row] = JSON.parse(ken('repos', '--json').stdout)
+		expect(row).toMatchObject({ key: 'example.com/me/notes', desc: 'Mine alone.', localOnly: true })
+		expect(row.strays).toEqual([])
+
+		// another machine: the root as committed, without the layer's clone, which .gitignore keeps out
+		git(root, 'init', '-q')
+		git(root, 'add', '.')
+		git(root, '-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'x')
+		const here = root
+		root = `${here}-elsewhere`
+		git(tmp, 'clone', '-q', here, root)
+		const init = ken('init', root)
+		expect(init.status).toBe(0)
+		expect(init.stderr).toContain(
+			'the layer notes (example.com/me/notes) is offline on this machine'
+		)
+		const repos = ken('repos')
+		expect(repos.status).toBe(0)
+		expect(repos.stdout).toBe('example.com/me/notes  listed by root, not cloned\n  Mine alone.\n')
+		expect(ken('get', 'example.com/me/notes').stderr).toContain(
+			'listed by root, so it is known here even though this machine cannot get it'
+		)
 	})
 
 	it("leaves the root's own owner AGENTS.md alone", () => {

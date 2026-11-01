@@ -163,7 +163,8 @@ export function addLayer(root: string, input: string, as?: string): string {
 
 	const done: string[] = []
 	const cloned = existsSync(clone)
-	get(root, input)
+	// a new index entry gets the line the front page shows, so the layer's repo is no stray
+	get(root, input, process.env, firstProse)
 	done.push(cloned ? `used the clone at .repos/${key}` : `cloned .repos/${key}`)
 	const changed: string[] = []
 	if (!stat) {

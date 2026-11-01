@@ -20,6 +20,8 @@ export type Row = {
 	cloned: boolean
 	/** The clone's branch; null when not cloned, or detached. */
 	branch: string | null
+	/** Cloned with no remote-tracking ref: nothing pushed or fetched, so no other machine can get it. */
+	localOnly: boolean
 	worktrees: Worktree[]
 	/** What is out of place, each with the command that fixes it. */
 	strays: string[]
@@ -118,10 +120,12 @@ function row(root: string, key: string, listed: Listed | undefined, cloned: bool
 		)
 	}
 	const base = { key, desc, listedBy: listed?.by ?? null, cloned }
-	if (!cloned) return { ...base, branch: null, worktrees: [], strays }
+	if (!cloned) return { ...base, branch: null, localOnly: false, worktrees: [], strays }
 	const clone = codePath(root, key)
 	const [own, ...worktrees] = checkouts(clone)
 	const branch = own?.branch ?? null
+	// not a stray: a repo starts here, and may stay here
+	const localOnly = !git(clone, 'for-each-ref', '--count=1', '--format=x', 'refs/remotes')
 	const inClone = `git -C ${shellWord(clone)}`
 	// the default branch is the remote's; a clone with no remote HEAD has none to hold
 	const defaultBranch = git(
@@ -152,7 +156,7 @@ function row(root: string, key: string, listed: Listed | undefined, cloned: bool
 			`the worktree ${path}: ${why}: run \`${inClone} worktree move ${shellWord(path)} ${shellWord(want)}\``
 		)
 	}
-	return { ...base, branch, worktrees, strays }
+	return { ...base, branch, localOnly, worktrees, strays }
 }
 
 /**
@@ -184,8 +188,9 @@ function mentions(root: string, key: string, layers: Layer[]): string[] {
 function show(r: Row): string {
 	const listed = r.listedBy ? `listed by ${r.listedBy}` : 'in no index'
 	const cloned = r.cloned ? `cloned on ${r.branch ?? 'a detached HEAD'}` : 'not cloned'
+	const local = r.localOnly ? ', local only (nothing pushed)' : ''
 	return [
-		`${r.key}  ${listed}, ${cloned}`,
+		`${r.key}  ${listed}, ${cloned}${local}`,
 		...(r.desc ? [`  ${r.desc}`] : []),
 		...r.worktrees.map((w) => `  worktree ${w.branch ?? '(detached)'}  ${w.path}`),
 		...r.strays.map((s) => `  stray: ${s}`)
@@ -204,12 +209,15 @@ export const repos: Command = {
 		'  <key>           that repo: the same, its whole entry, then the files under the root that',
 		"                  mention the key (hidden entries skipped, layers' pages through their links)",
 		"  --layer <name>  only the keys that workspace's index lists; root names the root's own",
-		'  --json          one array of {key, desc, listedBy, cloned, branch, worktrees, strays};',
+		'  --json          one array of {key, desc, listedBy, cloned, branch, localOnly, worktrees,',
+		'                  strays};',
 		'                  for a <key>, one object with entry and mentions too',
 		'',
 		'A stray is a clone no index lists, an entry with no desc, a clone not on its default branch',
 		'(origin/HEAD), a worktree whose folder does not match its branch, or a worktree outside the',
-		'layout. Offline: reads the indexes and asks git about each clone, nothing else.'
+		'layout. A clone with no remote-tracking ref is local only, not a stray: a repo starts on one',
+		'machine, and another sees it listed but cannot clone it until it is pushed somewhere it can',
+		'read. Offline: reads the indexes and asks git about each clone, nothing else.'
 	].join('\n'),
 	examples: [
 		'ken repos',

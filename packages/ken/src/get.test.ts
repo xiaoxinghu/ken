@@ -94,8 +94,24 @@ describe('ken get', () => {
 		expect(r).toMatchObject({ status: 1, stdout: '' })
 		expect(r.stderr).toContain('does not appear to be a git repository')
 		expect(r.stderr).toContain('run `ken get example.com/acme/missing` again')
+		expect(r.stderr).not.toContain('is listed by')
 		expect(existsSync(join(root, '.repos/example.com/acme/missing'))).toBe(false)
 		expect(existsSync(indexFile(root))).toBe(false)
+	})
+
+	it('says a listed repo it cannot clone may be unpushed or private, and the root works without it', () => {
+		mkdirSync(join(root, '.repos'))
+		writeFileSync(
+			indexFile(root),
+			'example.com/acme:\n  repos:\n    missing:\n      desc: Not pushed.\n'
+		)
+		const r = ken('example.com/acme/missing')
+		expect(r.status).toBe(1)
+		expect(r.stderr).toContain(
+			'example.com/acme/missing is listed by root, so it is known here even though this machine cannot get it: ' +
+				'it may not be pushed yet, or be private to accounts this machine is not signed in as. ' +
+				'The rest of the root works without it.'
+		)
 	})
 
 	it('names the URL to rerun with when it holds a user name, without showing it', () => {

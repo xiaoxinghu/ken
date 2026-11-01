@@ -3,7 +3,7 @@
 // Markdown reader sees, never a guess at where one ends.
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { Nodes } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 
@@ -68,6 +68,8 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		root,
 		...config.layers.filter((l) => l.cloned && l.linked).map((l) => join(root, l.name))
 	]
+	// not on this machine, by choice or by access: a link into one is not checked, and no error
+	const offline = config.layers.filter((l) => !l.cloned).map((l) => l.name)
 	// a task folder holds tasks, not pages: the root's, and each layer's from its own .ken.yaml;
 	// compared by real path, so a link to a folder above it does not reach it either
 	const taskFolders = new Set(
@@ -150,6 +152,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	const inbound = new Set<string>() // real paths of pages some front page or page links to
 	const paths = new Map<string, SpawnSyncReturns<string>>() // reference -> `ken path` of it
 	const uncloned = new Map<string, number>() // key -> references into it not checked
+	const intoOffline = new Map<string, number>() // offline layer -> links into it not checked
 	const checkReference = (file: string, key: string, path: string, line?: number) => {
 		const ref = `${key}:${path}`
 		const r = paths.get(ref) ?? ken(['path', ref])
@@ -215,6 +218,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 			const top = topOf.get(file) ?? root
 			const to = path.startsWith('/') ? join(top, path) : resolve(dirname(file), path)
 			if (!existsSync(to)) {
+				const layer = offline.find((name) => (to + sep).startsWith(join(root, name) + sep))
+				if (layer) {
+					if (checks) intoOffline.set(layer, (intoOffline.get(layer) ?? 0) + 1)
+					return
+				}
 				if (checks) {
 					report(
 						'error',
@@ -275,6 +283,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		const count = [...uncloned.values()].reduce((a, b) => a + b, 0)
 		problems.push(
 			`note: not checked: ${count} code references into ${keys.join(', ')}, not cloned here. To check them, run ${keys.map((k) => `\`ken get ${k}\``).join(' and ')}, then \`ken lint\` again.`
+		)
+	}
+	for (const [layer, count] of intoOffline) {
+		problems.push(
+			`note: not checked: ${count} links into the layer ${layer}, not cloned on this machine: it may not be pushed yet, or be private to accounts this machine is not signed in as. Once it can be reached, \`ken init\` clones it and \`ken lint\` checks them.`
 		)
 	}
 	const errors = problems.filter((p) => p.startsWith('error:')).length

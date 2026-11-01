@@ -4,6 +4,7 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync
 } from 'node:fs'
@@ -152,6 +153,19 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		expect(r.stdout).toContain("git mv -- 'systems/old notes.md' '.archive/systems/old notes.md'")
 		// the uncloned repo is counted, not an error
 		expect(r.stdout).toMatch(/^note: .*1 code reference.*example\.com\/acme\/api/m)
+	})
+
+	it('passes with a note when a layer is not cloned here, its links counted, not errors', () => {
+		// another machine's root: the layer's link and front-page line committed, its clone not
+		rmSync(join(root, LAYER), { recursive: true })
+		appendFileSync(join(root, 'README.md'), '- [atlas](atlas/README.md): the team.\n')
+		const r = run('ken lint')
+		expect(r.stderr).toBe('')
+		expect(r.stdout).toBe(
+			'note: not checked: 2 links into the layer atlas, not cloned on this machine: it may not be pushed yet, or be private to accounts this machine is not signed in as. Once it can be reached, `ken init` clones it and `ken lint` checks them.\n' +
+				'ken lint: no errors in 3 pages.\n'
+		)
+		expect(r.status).toBe(0)
 	})
 
 	it("stops when a layer's config cannot be read, rather than guess its task folder", () => {

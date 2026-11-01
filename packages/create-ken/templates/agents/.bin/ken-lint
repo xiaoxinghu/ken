@@ -49,16 +49,14 @@ const readmes = []
 const topOf = new Map() // file -> the root or layer it is in
 const seen = new Set()
 function walk(dir, top) {
-	if (dir === taskFolder) return
+	if (dir === taskFolder || seen.has(realpathSync(dir))) return
+	seen.add(realpathSync(dir))
 	for (const name of readdirSync(dir).sort()) {
 		const path = join(dir, name)
 		const stat = statSync(path, { throwIfNoEntry: false })
 		if (name.startsWith('.') || !stat) continue
-		if (stat.isDirectory()) {
-			if (seen.has(realpathSync(path))) continue
-			seen.add(realpathSync(path))
-			walk(path, top)
-		} else if (name === 'README.md') readmes.push(path)
+		if (stat.isDirectory()) walk(path, top)
+		else if (name === 'README.md') readmes.push(path)
 		else if (name.endsWith('.md')) pages.set(path, [])
 		topOf.set(path, top)
 	}
@@ -105,6 +103,9 @@ const trimPath = (path) => {
 	const count = (c) => p.split(c).length
 	return open && count(open) < count(p.at(-1)) ? trimPath(p.slice(0, -1)) : p
 }
+// a link in code is an example, not a link: a fenced block, to its closing fence or the end,
+// and an inline span. Not an indented block: without a parser it is a nested list item.
+const CODE = /^ {0,3}(`{3,}|~{3,}).*$[\s\S]*?(?:^ {0,3}\1.*$|(?![\s\S]))|`[^`\n]*`/gm
 const inbound = new Set() // pages some front page or page links to
 const paths = new Map() // code reference -> `ken path` of it
 const uncloned = new Map() // key -> references into it not checked
@@ -113,8 +114,7 @@ for (const file of [...front, ...readmes, ...pages.keys()]) {
 	const text = readFileSync(file, 'utf8')
 	const isSectionReadme = readmes.includes(file)
 	const listed = new Set()
-	// a link in code is an example, not a link
-	for (const m of text.replace(/```[\s\S]*?```|`[^`\n]*`/g, '').matchAll(LINK)) {
+	for (const m of text.replace(CODE, '').matchAll(LINK)) {
 		const target = m[1] ?? m[2]
 		// a URL, an anchor, or a code reference, checked below
 		if (/^[a-z][a-z0-9+.-]*:|^#|^\/\/|^[^/:]+\/[^/:]+\/[^/:]+:/i.test(target)) continue

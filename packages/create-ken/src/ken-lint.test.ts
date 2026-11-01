@@ -68,7 +68,8 @@ beforeEach(() => {
 		// reference-style, a footnote that is no link, and parentheses in a destination
 		'systems/README.md':
 			'# Systems\n\n- [join][j]: the join flow.[^1]\n- [design](design(v2).md): v2.\n\n[j]: join.md\n[^1]: Since 2025.\n',
-		'systems/design(v2).md': '# Design\n',
+		// a link in a tilde fence is an example
+		'systems/design(v2).md': '# Design\n\n~~~md\n[example](missing.md)\n~~~\n',
 		// a reference in code, in a link, and with brackets in its path inside parentheses
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
@@ -83,6 +84,8 @@ beforeEach(() => {
 		[`${LAYER}/teams/README.md`]: '# Teams\n\n- [sales](sales.md): who sells.\n',
 		[`${LAYER}/teams/sales.md`]: '# Sales\n'
 	})
+	// a link back into a section walks nothing twice
+	symlinkSync('.', join(root, 'systems/again'))
 	run(`git init -q ${LAYER}`)
 	commit(join(root, LAYER))
 	symlinkSync(LAYER, join(root, 'atlas'))

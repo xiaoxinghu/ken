@@ -459,7 +459,9 @@ layer's or to a package on `PATH` and update by `git pull` or an upgrade, while 
 files never change; Codex and pi pin hooks by hash, so a hook file that never changes is
 never re-trusted. The adapters change rarely; when they do, the re-run and `--diff` above
 carry the change into an existing root. Codex and pi load a project's hooks, skills and
-extensions only after a trust prompt, which the first-run message says. A deny rule is
+extensions only after a trust prompt, which the first-run message says; Codex then asks
+again for the hooks, pinning each by hash. pi has no way to put a `session_start` handler's
+output before the model, so the shim sends the `SessionStart` output with the first prompt. A deny rule is
 Claude Code's alone: no other harness has a declarative path deny. Nothing in the template
 puts `.bin/` on `PATH`: hooks and skills reach scripts as `ken <name>`, so only `ken` must
 be on the `PATH` of the shell that starts the harness, which every harness inherits.
@@ -472,18 +474,18 @@ are one line each. Skills are tested with golden questions: ten to twenty real p
 questions with known answers, run through a fresh session at the root and scored, rerun
 after a docs, skill or model change.
 
-| Piece                                                                            | Built from                                                                                                                                   |
-| -------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ken-status`, run by the session-start hook as `ken status`                      | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders.                                                            |
-| `ken-ensure`, run by the pre-tool hook on read, search and shell as `ken ensure` | `which` then `repos --json`; `get <key>` when the key is listed and not cloned: the lazy clone. Exits non-zero only to block.                |
-| deny rules in the root's `.claude/settings.json`, Claude Code only               | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                         |
-| `ken-doctor`                                                                     | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream. |
-| `ken-lint`                                                                       | `find -L` over the sections, the READMEs, the caps, `path` for every reference.                                                              |
-| `ken-pull`                                                                       | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                |
-| `ken-grep`                                                                       | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                |
-| `ken-promote`                                                                    | `git mv` plus `index unset` and `index set --layer`.                                                                                         |
-| `ken-jira`                                                                       | Jira issue picker into `get <key> -b <issue>`; no task file involved.                                                                        |
-| skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote`           | the flows above. A team's playbooks are skills in its layer.                                                                                 |
+| Piece                                                                            | Built from                                                                                                                                                                                                                                              |
+| -------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ken-status`, run by the session-start hook as `ken status`                      | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders.                                                                                                                                                                       |
+| `ken-ensure`, run by the pre-tool hook on read, search and shell as `ken ensure` | for a path under `.repos/` that does not exist yet, a file tool's path or a shell command's word: `which`, then `repos --json`; `get <key>` when the key is listed and not cloned: the lazy clone. Exits 0 whatever happens, so it never blocks a tool. |
+| deny rules in the root's `.claude/settings.json`, Claude Code only               | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                                                                                                                                    |
+| `ken-doctor`                                                                     | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream.                                                                                                            |
+| `ken-lint`                                                                       | `find -L` over the sections, the READMEs, the caps, `path` for every reference.                                                                                                                                                                         |
+| `ken-pull`                                                                       | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                                                                                                                           |
+| `ken-grep`                                                                       | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                                                                                                                           |
+| `ken-promote`                                                                    | `git mv` plus `index unset` and `index set --layer`.                                                                                                                                                                                                    |
+| `ken-jira`                                                                       | Jira issue picker into `get <key> -b <issue>`; no task file involved.                                                                                                                                                                                   |
+| skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote`           | the flows above. A team's playbooks are skills in its layer.                                                                                                                                                                                            |
 
 Sessions start at the root: that is where the hooks, skills and deny rules live, and the
 only layout a harness that walks down from the git root understands. A session that must

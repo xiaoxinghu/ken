@@ -117,6 +117,10 @@ describe('ken layer add', () => {
 	it.each([
 		[['--as', 'log.md'], 'log.md is reserved at the root'],
 		[['--as', 'Readme.md'], 'Readme.md is reserved at the root'],
+		// the harness folders the agents template writes
+		[['--as', '.agents'], '.agents is reserved at the root'],
+		[['--as', '.Codex'], '.Codex is reserved at the root'],
+		[['--as', '.pi'], '.pi is reserved at the root'],
 		[['--as', '../x'], 'is not a folder name for the root']
 	])('refuses %j before writing anything', (as, message) => {
 		const r = ken('layer', 'add', KEY, ...as)

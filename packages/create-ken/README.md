@@ -5,7 +5,9 @@ must be new or empty. It copies the template, runs `git init` and `ken init` (th
 own `@unclex/ken`), links `CLAUDE.md -> AGENTS.md`, and prints the next commands: `cd`,
 the first commit, starting an agent there, `ken layer add <key>` to join a team, and the
 `KEN_ROOT` to export when `<dir>` is not the configured root. The `minimal` template adds
-nothing to what `ken init` makes: the agent grows the root from there.
+nothing to what `ken init` makes: the agent grows the root from there. The `agents` template
+adds the hooks that print `ken status` at session start and clone a listed repo the first
+time a tool reads in it, and Claude Code's deny rules, for Claude Code, Codex and pi.
 
 On a terminal it asks for what was not given: the directory, offering the configured root
 (`~/ken` by default), and the template. Off a terminal `<dir>` is required and the
@@ -14,6 +16,7 @@ template is `minimal`.
 ```sh
 npm create ken ~/ken
 npm create ken ~/work -- --template minimal
+npm create ken ~/ken -- --template agents
 ```
 
 Templates are in `templates/`, described in its README. See "create-ken" in `docs/prd.md`

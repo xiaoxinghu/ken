@@ -5,11 +5,15 @@ Nothing here is a rule: a template is an opinion about what a fresh root should 
 
 - `minimal`: no folder. The root is what `ken init` makes, plus `CLAUDE.md -> AGENTS.md`,
   and assumes nothing about what it is for; an agent grows it from there.
-- `agents/`: `minimal` plus the harness files the PRD lists under "`create-ken`": `AGENTS.md`,
-  `.agents/` skills and hooks, the `.bin/` scripts they run, and one thin adapter each for
-  Claude Code, Codex and pi. Not written yet.
+- `agents/`: `minimal` plus the harness files the PRD lists under "`create-ken`": an
+  `AGENTS.md` that replaces `ken init`'s, `.agents/hooks.json`, the `.bin/` scripts the hooks
+  run (`ken-status`, `ken-ensure`), and one thin adapter each for Claude Code
+  (`.claude/settings.json`: a copy of the hooks, and the deny rules), Codex
+  (`.codex/hooks.json`, a link) and pi (`.pi/extensions/ken-hooks.ts`). `agents.test.ts` keeps
+  the two hooks objects equal and runs each script.
 
 npm drops `.gitignore` and symlinks from a published package. So a template stores its
 `.gitignore` as `gitignore`, which the copy renames, and holds no symlink: create-ken
-links `CLAUDE.md -> AGENTS.md` itself, after `ken init`. Every other file, dotfiles
+links `CLAUDE.md -> AGENTS.md` and `.codex/hooks.json -> ../.agents/hooks.json` itself, after
+`ken init`, each when its target is there. Every other file, dotfiles
 included, is copied as it is.

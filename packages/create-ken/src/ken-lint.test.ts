@@ -67,13 +67,15 @@ beforeEach(() => {
 	write({
 		// reference-style, a footnote that is no link, and parentheses in a destination
 		'systems/README.md':
-			'# Systems\n\n- [join][j]: the join flow.[^1]\n- [design](design(v2).md): v2.\n\n[j]: join.md\n[^1]: Since 2025.\n',
+			'# Systems\n\n- [join][j]: the join flow.[^1]\n- [design](design(v2).md): v2.\n- [intro](pages/intro.md): read first.\n\n[j]: join.md\n[^1]: Since 2025.\n',
+		// listed by its folder's name, walked first through a link to that folder
+		'systems/pages/intro.md': '# Intro\n',
 		// a link in a tilde fence is an example
 		'systems/design(v2).md': '# Design\n\n~~~md\n[example](missing.md)\n~~~\n',
 		// a reference in code, in a link, and with brackets in its path inside parentheses
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
-			'by a page (example.com/acme/web:src/app/[id]/page.ts); the team is in [the atlas](../atlas/teams/sales.md).\n',
+			'by a page (example.com/acme/web:src/app/[id]/page.ts), **example.com/acme/web:src/app.ts** in bold; the team is in [the atlas](../atlas/teams/sales.md).\n',
 		'.repos/example.com/acme/web/src/app.ts': 'export const start = 1\n',
 		'.repos/example.com/acme/web/src/app/[id]/page.ts': 'export default 1\n',
 		'.repos/example.com/acme/web/src/app/(auth)/page.ts': 'export default 1\n',
@@ -86,6 +88,7 @@ beforeEach(() => {
 	})
 	// a link back into a section walks nothing twice
 	symlinkSync('.', join(root, 'systems/again'))
+	symlinkSync('pages', join(root, 'systems/alias'))
 	run(`git init -q ${LAYER}`)
 	commit(join(root, LAYER))
 	symlinkSync(LAYER, join(root, 'atlas'))
@@ -99,7 +102,7 @@ describe('ken lint', { timeout: 30_000 }, () => {
 	it('passes a clean root with a layer', () => {
 		const r = run('ken lint')
 		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe('ken lint: no errors in 3 pages.\n')
+		expect(r.stdout).toBe('ken lint: no errors in 4 pages.\n')
 		expect(r.status).toBe(0)
 	})
 

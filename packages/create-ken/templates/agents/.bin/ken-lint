@@ -44,7 +44,8 @@ const cap = (file, max, why) => {
 }
 
 // The walk, as `find -L`: links followed, a folder reached twice read once.
-const pages = new Map() // page -> the section READMEs that list it
+// a page by its real path, so a link reaching it by another path still finds it
+const pages = new Map() // real path -> { path, the section READMEs that list it }
 const readmes = []
 const topOf = new Map() // file -> the root or layer it is in
 const seen = new Set()
@@ -57,7 +58,7 @@ function walk(dir, top) {
 		if (name.startsWith('.') || !stat) continue
 		if (stat.isDirectory()) walk(path, top)
 		else if (name === 'README.md') readmes.push(path)
-		else if (name.endsWith('.md')) pages.set(path, [])
+		else if (name.endsWith('.md')) pages.set(realpathSync(path), { path, listedBy: [] })
 		topOf.set(path, top)
 	}
 }
@@ -93,8 +94,8 @@ for (const readme of readmes) {
 // an inline link's target, or a reference-style link's definition, `[name]: target`, not a
 // footnote's, `[^1]: text`; balanced parentheses and backslash escapes in it, as CommonMark
 const LINK = /(?:\]\(|^ {0,3}\[(?!\^)[^\]]+\]:)\s*(?:<([^>]*)>|((?:\\.|[^()\s\\]|\([^()\s]*\))+))/gm
-// `<host>/<owner>/<repo>:<path>`, each part as `ken path` takes it
-const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s`'"<>#,;]+)/gi
+// `<host>/<owner>/<repo>:<path>`, each part as `ken path` takes it; a `*` is bold, not a path
+const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s`'"<>#,;*]+)/gi
 // a path keeps its brackets, `src/app/[id]/page.ts`, but not the punctuation after it, nor a
 // `)` or `]` that closes the prose or the link around it
 const trimPath = (path) => {
@@ -106,11 +107,11 @@ const trimPath = (path) => {
 // a link in code is an example, not a link: a fenced block, to its closing fence or the end,
 // and an inline span. Not an indented block: without a parser it is a nested list item.
 const CODE = /^ {0,3}(`{3,}|~{3,}).*$[\s\S]*?(?:^ {0,3}\1.*$|(?![\s\S]))|`[^`\n]*`/gm
-const inbound = new Set() // pages some front page or page links to
+const inbound = new Set() // real paths of pages some front page or page links to
 const paths = new Map() // code reference -> `ken path` of it
 const uncloned = new Map() // key -> references into it not checked
 const front = tops.map((t) => join(t, 'README.md')).filter((f) => existsSync(f))
-for (const file of [...front, ...readmes, ...pages.keys()]) {
+for (const file of [...front, ...readmes, ...[...pages.values()].map((p) => p.path)]) {
 	const text = readFileSync(file, 'utf8')
 	const isSectionReadme = readmes.includes(file)
 	const listed = new Set()
@@ -125,10 +126,13 @@ for (const file of [...front, ...readmes, ...pages.keys()]) {
 		const to = path.startsWith('/') ? join(topOf.get(file), path) : resolve(dirname(file), path)
 		if (!existsSync(to)) {
 			report('error', file, `links to ${target}, which does not exist. Fix the path, or remove the link.`)
-		} else if (pages.has(to) && isSectionReadme) listed.add(to)
-		else if (to !== file) inbound.add(to)
+			continue
+		}
+		const real = realpathSync(to)
+		if (pages.has(real) && isSectionReadme) listed.add(real)
+		else if (real !== realpathSync(file)) inbound.add(real)
 	}
-	for (const page of listed) pages.get(page).push(file)
+	for (const page of listed) pages.get(page).listedBy.push(file)
 	for (const m of text.matchAll(REFERENCE)) {
 		const [key, path] = [m[1], trimPath(m[2])]
 		const ref = `${key}:${path}`
@@ -147,7 +151,7 @@ for (const file of [...front, ...readmes, ...pages.keys()]) {
 	}
 }
 
-for (const [page, listedBy] of pages) {
+for (const [real, { path: page, listedBy }] of pages) {
 	if (listedBy.length === 0) {
 		report(
 			'error',
@@ -161,9 +165,9 @@ for (const [page, listedBy] of pages) {
 			`listed in ${listedBy.length} section READMEs, ${listedBy.map((f) => relative(root, f)).join(' and ')}; a page has one home. Keep its line in one and drop it from the others.`
 		)
 	}
-	if (inbound.has(page)) continue
+	if (inbound.has(real)) continue
 	const log = spawnSync('git', ['log', '-1', '--format=%ct', '--', basename(page)], {
-		cwd: dirname(realpathSync(page)),
+		cwd: dirname(real),
 		encoding: 'utf8'
 	})
 	const changed = Number(log.stdout.trim()) * 1000

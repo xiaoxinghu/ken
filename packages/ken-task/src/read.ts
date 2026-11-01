@@ -14,16 +14,25 @@ export type Fields = {
 }
 
 /**
- * A task file as read: `flags` are the tolerated deviations from the canonical shape,
- * `problems` what kept it from being fully read, each with its fix.
+ * A task file as read: `flags` are the tolerated deviations from the canonical shape, each
+ * with its upgrade, and `problems` what kept it from being fully read, each with its fix.
  */
-export type Read = { title: string; fields: Fields; flags: string[]; problems: string[] }
+export type Read = {
+	title: string
+	fields: Fields
+	flags: string[]
+	problems: string[]
+	/** How blocked-by is written other than as `blocked-by: [...]`, read anyway: an alias, a block list, a single value. */
+	reshape: string[]
+	/** The known fields the front matter gives a value, an alias as blocked-by; undefined when front matter is not closed, so nothing can be written into it. */
+	written?: string[]
+}
 
 const SCALARS = new Set(['status', 'created', 'closed', 'repo', 'scheduled', 'due'])
 const DATES = new Set(['created', 'closed', 'scheduled', 'due'])
 const ALIASES = new Set(['blocked_by', 'blockedBy', 'depends_on', 'depends-on'])
 const STATUSES = ['todo', 'done', 'wontfix']
-const CANONICAL = 'the canonical form is one line, `blocked-by: [a.md, b.md]`'
+export const CANONICAL = 'the canonical form is one line, `blocked-by: [a.md, b.md]`'
 
 export function isDate(text: string): boolean {
 	const date = new Date(`${text}T00:00:00Z`)
@@ -46,12 +55,15 @@ export function readTask(name: string, text: string): Read {
 		title: '',
 		fields: { status: 'todo', 'blocked-by': [], other: {} },
 		flags: [],
-		problems: []
+		problems: [],
+		reshape: [],
+		written: []
 	}
 	let body = 0
 	if (name.endsWith('.md') && /^---\s*$/.test(lines[0] ?? '')) {
 		const end = lines.findIndex((line, i) => i > 0 && /^---\s*$/.test(line))
 		if (end < 0) {
+			read.written = undefined
 			read.flags.push(
 				'its front matter has no closing `---`, so every field reads as absent: add a `---` line after the last field'
 			)
@@ -71,7 +83,7 @@ export function readTask(name: string, text: string): Read {
 }
 
 function frontMatter(source: string, read: Read): void {
-	const { fields, flags, problems } = read
+	const { fields, problems } = read
 	const doc = parseDocument(source)
 	let data: unknown
 	try {
@@ -111,12 +123,13 @@ function frontMatter(source: string, read: Read): void {
 		}
 		const before = seen.get(field)
 		seen.set(field, key)
+		if (value !== null) read.written?.push(field)
 		if (before !== undefined) {
 			problems.push(
 				`${field} is written twice, as ${before} and as ${key}, so which one holds is unclear: keep one`
 			)
 		} else if (field === 'blocked-by') {
-			if (key !== field) flags.push(`${key} reads as blocked-by: rename the field to blocked-by`)
+			if (key !== field) read.reshape.push(`${key} reads as blocked-by`)
 			const node = doc.get(key, true)
 			const form = isSeq(node) ? (node.flow ? 'list' : 'block list') : 'single value'
 			fields['blocked-by'] = list(key, value, form, read)
@@ -140,7 +153,7 @@ function list(key: string, value: unknown, form: string, read: Read): string[] {
 		read.problems.push(`${key} is not a list of paths: ${CANONICAL}`)
 		return []
 	}
-	if (form !== 'list') read.flags.push(`${key} is a ${form}: ${CANONICAL}`)
+	if (form !== 'list') read.reshape.push(`${key} is a ${form}`)
 	return items.map(String)
 }
 

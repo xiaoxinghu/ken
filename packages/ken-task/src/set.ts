@@ -99,7 +99,7 @@ function span(
 }
 
 /** `items` as a one-line YAML list, each item plain when YAML reads it back as written. */
-function flowList(items: string[]): string {
+export function flowList(items: string[]): string {
 	const plain = `[${items.join(', ')}]`
 	try {
 		if (JSON.stringify(parse(plain)) === JSON.stringify(items)) return plain
@@ -223,8 +223,13 @@ export function setTask(
 				`edit the line by hand, then run \`ken task list\` to check it`
 		)
 	}
-	const temp = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`)
-	writeFileSync(temp, next, { mode: stat.mode & 0o777 })
-	renameSync(temp, file)
+	replaceFile(file, next)
 	return path
+}
+
+/** Write `text` beside `file`, with its mode, then rename it over `file`, so no reader sees half of it. */
+export function replaceFile(file: string, text: string): void {
+	const temp = join(dirname(file), `.${basename(file)}.${process.pid}.tmp`)
+	writeFileSync(temp, text, { mode: statSync(file).mode & 0o777 })
+	renameSync(temp, file)
 }

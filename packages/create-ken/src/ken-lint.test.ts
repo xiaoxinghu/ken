@@ -65,10 +65,15 @@ beforeEach(() => {
 	)
 	expect(r.status).toBe(0)
 	write({
-		'systems/README.md': '# Systems\n\n- [join](join.md): the join flow.\n',
+		// reference-style, and a footnote that is no link
+		'systems/README.md':
+			'# Systems\n\n- [join][j]: the join flow.[^1]\n\n[j]: join.md\n[^1]: Since 2025.\n',
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`; the team is in [the atlas](../atlas/teams/sales.md).\n',
 		'.repos/example.com/acme/web/src/app.ts': 'export const start = 1\n',
+		// tasks, not pages, in a task folder below a section
+		'work/README.md': '# Work\n',
+		'work/tasks/fix-join.md': 'Fix the join form.\n',
 		[`${LAYER}/README.md`]: '# Atlas\n\n- [teams](teams/README.md)\n',
 		[`${LAYER}/teams/README.md`]: '# Teams\n\n- [sales](sales.md): who sells.\n',
 		[`${LAYER}/teams/sales.md`]: '# Sales\n'
@@ -78,7 +83,7 @@ beforeEach(() => {
 	symlinkSync(LAYER, join(root, 'atlas'))
 	appendFileSync(
 		join(root, '.ken.yaml'),
-		'layers:\n  - name: atlas\n    key: example.com/acme/atlas\n'
+		'task:\n  folder: work/tasks\nlayers:\n  - name: atlas\n    key: example.com/acme/atlas\n'
 	)
 }, 30_000)
 
@@ -95,7 +100,8 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		write({
 			'systems/lost.md': 'See `example.com/acme/api:src/x.ts`, not cloned here.\n',
 			'flows/README.md':
-				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\nexample.com/acme/web:src/gone.ts\n',
+				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\ngit/acme/web:src/gone.ts\n',
+			'.repos/git/acme/web/src/app.ts': 'export const start = 1\n',
 			'systems/old.md': '# Old\n'
 		})
 		appendFileSync(join(root, 'systems/README.md'), '- [old](old.md): settled long ago.\n')
@@ -103,7 +109,10 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		appendFileSync(join(root, 'README.md'), pad(60))
 		appendFileSync(join(root, 'AGENTS.md'), pad(40))
 		appendFileSync(join(root, LAYER, 'teams/README.md'), pad(150))
-		appendFileSync(join(root, LAYER, 'teams/sales.md'), '[the old team](gone.md)\n')
+		appendFileSync(
+			join(root, LAYER, 'teams/sales.md'),
+			'[the old team](gone.md)\n\n[new]: <new team.md>\n'
+		)
 
 		const r = run('ken lint')
 		expect(r.status).toBe(1)
@@ -117,7 +126,8 @@ describe('ken lint', { timeout: 30_000 }, () => {
 				'error README.md', // the front page over 60
 				'error atlas/teams/README.md', // a section README over 150, in the layer
 				'error atlas/teams/sales.md', // a link to a file that does not exist
-				'error flows/README.md', // a reference to a file not in the clone
+				'error atlas/teams/sales.md', // and a reference-style one
+				'error flows/README.md', // a reference to a file not in the clone, a host with no dot
 				'error systems/join.md', // listed in two section READMEs
 				'error systems/lost.md', // listed in none
 				'note systems/old.md' // nobody links to it, untouched since 2020

@@ -49,6 +49,7 @@ const readmes = []
 const topOf = new Map() // file -> the root or layer it is in
 const seen = new Set()
 function walk(dir, top) {
+	if (dir === taskFolder) return
 	for (const name of readdirSync(dir).sort()) {
 		const path = join(dir, name)
 		const stat = statSync(path, { throwIfNoEntry: false })
@@ -67,7 +68,7 @@ for (const top of tops) {
 	seen.add(realpathSync(top))
 	for (const name of readdirSync(top).sort()) {
 		const path = join(top, name)
-		if (name.startsWith('.') || path === taskFolder || tops.includes(path)) continue
+		if (name.startsWith('.') || tops.includes(path)) continue
 		if (statSync(path, { throwIfNoEntry: false })?.isDirectory()) walk(path, top)
 	}
 	topOf.set(join(top, 'README.md'), top)
@@ -91,8 +92,11 @@ for (const readme of readmes) {
 }
 
 // Links and code references, in the front pages, the section READMEs and the pages.
-const LINK = /\]\(\s*(?:<([^>]*)>|([^)\s]+))/g
-const REFERENCE = /(?<![\w./:-])([a-z0-9-]+(?:\.[a-z0-9-]+)+\/[\w.-]+\/[\w.-]+):([^\s`'"()<>[\]#,;]+)/gi
+// an inline link's target, or a reference-style link's definition, `[name]: target`, not a
+// footnote's, `[^1]: text`
+const LINK = /(?:\]\(|^ {0,3}\[(?!\^)[^\]]+\]:)\s*(?:<([^>]*)>|([^)\s]+))/gm
+// `<host>/<owner>/<repo>:<path>`, each part as `ken path` takes it
+const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s`'"()<>[\]#,;]+)/gi
 const inbound = new Set() // pages some front page or page links to
 const paths = new Map() // code reference -> `ken path` of it
 const uncloned = new Map() // key -> references into it not checked

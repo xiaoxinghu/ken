@@ -1,6 +1,8 @@
 import {
+	closeSync,
 	lstatSync,
 	mkdirSync,
+	openSync,
 	readFileSync,
 	realpathSync,
 	statSync,
@@ -48,7 +50,9 @@ export function renameTask(
 	}
 	// as the disk names it, the way the listing names each task
 	const source = real(found)
-	const text = readFileSync(source, 'utf8')
+	// the bytes, so a file that is not UTF-8 moves unchanged when nothing in it is rewritten
+	const sourceBytes = readFileSync(source)
+	const text = sourceBytes.toString('utf8')
 	const { fields, problems } = readTask(basename(source), text)
 	if (problems.length) {
 		throw new Error(
@@ -72,13 +76,22 @@ export function renameTask(
 	const writes = new Map<string, [before: string, next: string]>()
 	for (const path of tasks) {
 		const own = path === source
-		let before: string
+		let bytes: Buffer
 		try {
-			before = own ? text : statSync(path).isFile() ? readFileSync(path, 'utf8') : ''
-		} catch {
-			// unreadable, so it names no task; the listing shows it as a problem
-			continue
+			// walk lists a folder only when it cannot be read; a pipe or device is never read
+			if (!own && lstatSync(path).isDirectory())
+				throw new Error('it is a folder that cannot be read')
+			if (!own && !statSync(path).isFile()) continue
+			bytes = own ? sourceBytes : readFileSync(path)
+		} catch (e) {
+			// a link to nothing names no task
+			if ((e as NodeJS.ErrnoException).code === 'ENOENT') continue
+			throw new Error(
+				`${path} cannot be read (${(e as Error).message}), so whether its blocked-by names ${source} is unknown, and renaming could leave that reference stale: ` +
+					`make it readable, or move it out of the folder, then rerun; \`ls -ld ${path}\` shows it.`
+			)
 		}
+		const before = bytes.toString('utf8')
 		const read = readTask(basename(path), before)
 		let changed = false
 		const refs = read.fields['blocked-by'].map((ref) => {
@@ -91,6 +104,12 @@ export function renameTask(
 			return relative(dirname(own ? dest : path), at)
 		})
 		if (!changed) continue
+		if (!Buffer.from(before).equals(bytes)) {
+			throw new Error(
+				`${path} is not UTF-8 text, so rewriting its blocked-by would change other bytes in it: ` +
+					`convert it to UTF-8, e.g. with \`iconv\`, then rerun.`
+			)
+		}
 		// a link's file is elsewhere, maybe in the archive, maybe another task: write none
 		if (!own && lstatSync(path).isSymbolicLink()) {
 			const real = realpathSync(path)
@@ -121,18 +140,25 @@ export function renameTask(
 	}
 
 	mkdirSync(dirname(dest), { recursive: true })
+	let fd: number
 	try {
-		writeFileSync(dest, writes.get(dest)?.[1] ?? text, { flag: 'wx', mode: stat.mode & 0o777 })
+		fd = openSync(dest, 'wx', stat.mode & 0o777)
 	} catch (e) {
 		if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
 		throw new Error(
 			`${dest} exists, made since this rename looked: read it with \`cat ${dest}\`, or run \`ken task rename ${source} <another path>\`.`
 		)
 	}
-	// a move keeps the file's age, which counts from its mtime when nothing else dates it
-	utimesSync(dest, stat.atime, stat.mtime)
+	// from here the new file is this rename's own, so a failure removes it
 	const done: string[] = []
 	try {
+		try {
+			writeFileSync(fd, writes.get(dest)?.[1] ?? sourceBytes)
+		} finally {
+			closeSync(fd)
+		}
+		// a move keeps the file's age, which counts from its mtime when nothing else dates it
+		utimesSync(dest, stat.atime, stat.mtime)
 		for (const [file, [, next]] of writes) {
 			if (file === dest) continue
 			replaceFile(file, next)

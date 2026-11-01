@@ -113,4 +113,25 @@ describe('ken task rename', () => {
 		expect(t.read('.archive/b.md')).toBe(archived)
 		expect(existsSync(join(t.tasks, 'new.md'))).toBe(false)
 	})
+
+	it('refuses while a live task cannot be read, since it may name the task', () => {
+		const t = setup({ 'old.md': '# Old\n', 'b.md': '---\nblocked-by: [old.md]\n---\n' })
+		chmodSync(join(t.tasks, 'b.md'), 0o000)
+		const r = t.rename('tasks/old.md', 'new')
+		chmodSync(join(t.tasks, 'b.md'), 0o644)
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(`${join(t.tasks, 'b.md')} cannot be read`)
+		expect(t.read('old.md')).toBe('# Old\n')
+		expect(t.read('b.md')).toBe('---\nblocked-by: [old.md]\n---\n')
+		expect(existsSync(join(t.tasks, 'new.md'))).toBe(false)
+	})
+
+	it('moves a file that is not UTF-8 byte for byte', () => {
+		const t = setup({})
+		// Latin-1 "café", which UTF-8 would read as a replacement character
+		const bytes = Buffer.from([0x63, 0x61, 0x66, 0xe9, 0x0a])
+		write(join(t.tasks, 'old.txt'), bytes)
+		expect(t.rename('tasks/old.txt', 'new').status).toBe(0)
+		expect(readFileSync(join(t.tasks, 'new.md'))).toEqual(bytes)
+	})
 })

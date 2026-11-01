@@ -31,7 +31,7 @@ export const kenTask = (root: string, args: string[], cwd = root) => {
 	return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 }
 
-export const write = (file: string, text: string) => {
+export const write = (file: string, text: string | Buffer) => {
 	mkdirSync(dirname(file), { recursive: true })
 	writeFileSync(file, text)
 }

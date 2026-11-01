@@ -1,3 +1,4 @@
+import { spawnSync } from 'node:child_process'
 import { existsSync, readFileSync, symlinkSync, utimesSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
@@ -68,6 +69,20 @@ describe('ken task archive', () => {
 		expect(readFileSync(archived, 'utf8')).toBe(front('status: done'))
 		expect(kenTask(root, ['path', 'tasks/a']).stdout).toBe(`${archived}\n`)
 		expect(kenTask(root, ['ready']).stdout).toBe(`${join(root, 'tasks/b.md')}\n`)
+		// purge removes the link, never the file it reaches
+		utimesSync(join(root, 'records/a.md'), new Date(0), new Date(0))
+		expect(kenTask(root, ['purge', '--older-than', '30']).stdout).toBe(`${archived}\n`)
+		expect(existsSync(join(root, 'records/a.md'))).toBe(true)
+	})
+
+	it('refuses a pipe without reading it', () => {
+		const root = newRoot()
+		write(join(root, 'tasks/b.md'), front('status: done'))
+		spawnSync('mkfifo', [join(root, 'tasks/a.md')])
+		const r = kenTask(root, ['archive', 'tasks/b.md', 'tasks/a.md'])
+		expect(r.status).toBe(1)
+		expect(r.stderr).toContain('is not a regular file')
+		expect(existsSync(join(root, 'tasks/b.md'))).toBe(true)
 	})
 
 	it('carries examples in --help', () => {

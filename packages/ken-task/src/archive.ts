@@ -39,6 +39,12 @@ export function archiveTasks(
 				`${path} is already in the archive, so nothing is moved. Run \`ken task list\` for the live tasks; to bring it back, \`mv\` it to its path in ${folder}.`
 			)
 		}
+		if (!regular(path)) {
+			throw new Error(
+				`${path} is not a regular file, nor a link to one, so it cannot be read as closed and is not archived: \`ls -l ${path}\` shows what it is. ` +
+					'Make it a file, or remove it by hand. Nothing was moved.'
+			)
+		}
 		const { fields, problems } = readTask(basename(path), readFileSync(path, 'utf8'))
 		if (problems.length || (fields.status !== 'done' && fields.status !== 'wontfix')) {
 			throw new Error(
@@ -77,12 +83,22 @@ export function archiveTasks(
 	})
 }
 
-/** Every regular file under `dir`, at any depth; none if it cannot be read. */
+/** Whether `path` is a regular file or a link to one: a pipe or a device is never read. */
+function regular(path: string): boolean {
+	try {
+		return statSync(path).isFile()
+	} catch {
+		return false
+	}
+}
+
+/** Every regular file under `dir`, or link to one, at any depth; none if it cannot be read. */
 function files(dir: string): string[] {
 	try {
-		return readdirSync(dir, { withFileTypes: true }).flatMap((e) =>
-			e.isDirectory() ? files(join(dir, e.name)) : e.isFile() ? [join(dir, e.name)] : []
-		)
+		return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+			const path = join(dir, e.name)
+			return e.isDirectory() ? files(path) : regular(path) ? [path] : []
+		})
 	} catch {
 		return []
 	}

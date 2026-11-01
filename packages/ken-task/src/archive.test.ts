@@ -35,17 +35,19 @@ describe('ken task archive', () => {
 		expect(existsSync(join(root, 'tasks/.archive'))).toBe(false)
 	})
 
-	it('archives a second fix-login.md beside the first as fix-login-2.md, and says so', () => {
+	it('archives another fix-login.md beside those there at the next suffix, and says so', () => {
 		const root = newRoot()
 		write(join(root, 'tasks/.archive/fix-login.md'), front('status: done\nold: true'))
+		write(join(root, 'tasks/.archive/fix-login-2.md'), front('status: done\nold: true'))
 		write(join(root, 'tasks/fix-login.md'), front('status: done'))
 		const r = kenTask(root, ['archive', 'tasks/fix-login.md'])
 		expect(r).toMatchObject({
 			status: 0,
-			stdout: `${join(root, 'tasks/.archive/fix-login-2.md')}\n`
+			stdout: `${join(root, 'tasks/.archive/fix-login-3.md')}\n`
 		})
-		expect(r.stderr).toContain('fix-login-2.md')
-		expect(readFileSync(join(root, 'tasks/.archive/fix-login.md'), 'utf8')).toContain('old: true')
+		expect(r.stderr).toContain('fix-login-3.md')
+		for (const kept of ['fix-login.md', 'fix-login-2.md'])
+			expect(readFileSync(join(root, 'tasks/.archive', kept), 'utf8')).toContain('old: true')
 		expect(kenTask(root, ['archive', 'tasks/.archive/fix-login.md']).status).toBe(1)
 	})
 

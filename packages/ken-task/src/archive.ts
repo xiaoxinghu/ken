@@ -1,6 +1,8 @@
 import {
+	closeSync,
 	lstatSync,
 	mkdirSync,
+	openSync,
 	readdirSync,
 	readFileSync,
 	readlinkSync,
@@ -17,8 +19,7 @@ import { real, resolveTask } from './resolve.ts'
 
 /**
  * `ken task archive`: move each task `args` name to `.archive/<its path in the folder>`, a
- * relative link made anew so it reaches its file,
- * after every one is checked: closed, not already archived, and with no branch left on this
+ * relative link made anew so it reaches its file, after every one is checked: closed, not already archived, and with no branch left on this
  * machine. A name already archived keeps its file; the new one takes the first free numeric
  * suffix before its extension, which `renamed` says. Only the named files are touched:
  * a reference still resolves, through the archive.
@@ -64,17 +65,29 @@ export function archiveTasks(
 	return paths.map((path) => {
 		const rel = relative(folder, path)
 		const ext = extname(rel)
+		const link = lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined
+		mkdirSync(join(archive, dirname(rel)), { recursive: true })
+		// each name is taken by an exclusive create, so a concurrent archive never overwrites
+		// one: a link is made anew there, relative to its new folder so it still reaches its
+		// file; a file is renamed over the empty file that holds its name
 		let target = join(archive, rel)
-		for (let n = 2; lstatSync(target, { throwIfNoEntry: false }); n++) {
+		for (let n = 2; ; n++) {
+			try {
+				if (link === undefined) closeSync(openSync(target, 'wx'))
+				else {
+					const to = isAbsolute(link)
+						? link
+						: relative(dirname(target), resolve(dirname(path), link))
+					symlinkSync(to, target)
+				}
+				break
+			} catch (e) {
+				if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+			}
 			target = join(archive, dirname(rel), `${basename(rel, ext)}-${n}${ext}`)
 		}
-		mkdirSync(dirname(target), { recursive: true })
-		// a relative link is made anew from its new folder, so it still reaches its file
-		const link = lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined
-		if (link && !isAbsolute(link)) {
-			symlinkSync(relative(dirname(target), resolve(dirname(path), link)), target)
-			rmSync(path)
-		} else renameSync(path, target)
+		if (link === undefined) renameSync(path, target)
+		else rmSync(path)
 		const renamed =
 			target === join(archive, rel)
 				? undefined

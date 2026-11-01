@@ -102,6 +102,9 @@ describe('ken task list', () => {
 		task('later.md', front(`scheduled: ${day(1)}`))
 		task('overdue.md', front(`due: ${day(-1)}`))
 		task('bad-date.md', front('scheduled: next week'))
+		task('not-yaml.md', `${front('status: done\ntitle: Issue: 12')}# Not YAML\n`)
+		task('twice.md', front('blocked-by: [a.md]\ndepends_on: [a.md]'))
+		symlinkSync('x', join(folder, 'linked-folder'))
 		task('notes.txt', '---\nstatus: done\n---\n')
 		task('quoted.md', front('  # metadata\nstatus: "done" # finished\nrepo: \'github.com/a/b\''))
 		task('into-archive.md', front('blocked-by: [.archive/portal/b.md]'))
@@ -252,6 +255,16 @@ describe('ken task list', () => {
 		})
 	})
 
+	it('lists front matter that is not YAML as a problem naming the line, keeping the title', () => {
+		expect(row('not-yaml.md')).toMatchObject({ title: 'Not YAML', state: 'problem' })
+		expect(row('not-yaml.md').notes.join()).toContain('its front matter is not YAML (line 3: ')
+	})
+
+	it('lists blocked-by written twice, under an alias, as a problem', () => {
+		expect(row('twice.md').state).toBe('problem')
+		expect(row('twice.md').notes.join()).toContain('as blocked-by and as depends_on')
+	})
+
 	it('keeps the title of a file with an impossible date, and names the field to fix', () => {
 		expect(row('bad-month.md')).toMatchObject({ title: 'Bad month', state: 'problem' })
 		expect(row('bad-month.md').notes.join()).toContain('`due: YYYY-MM-DD`')
@@ -260,7 +273,13 @@ describe('ken task list', () => {
 	it.skipIf(process.getuid?.() === 0)(
 		'lists a folder it cannot open, a file it cannot stat, a symlink loop and a dangling one as problems, and goes on',
 		() => {
-			for (const rel of ['locked', 'loop.md', 'dangling.md', 'unsearchable/inside.md']) {
+			for (const rel of [
+				'locked',
+				'loop.md',
+				'dangling.md',
+				'linked-folder',
+				'unsearchable/inside.md'
+			]) {
 				expect(row(rel).state).toBe('problem')
 				expect(row(rel).notes.join()).toContain(`\`ls -ld ${join(folder, rel)}\``)
 			}
@@ -282,7 +301,7 @@ describe('ken task list', () => {
 			'blocked-by': ['finished.md'],
 			scheduled: day(-1),
 			due: day(5),
-			other: { owner: 'someone # kept', log: '|\n  first\n\n    indented' },
+			other: { owner: 'someone', log: 'first\n\n  indented\n' },
 			state: 'ready',
 			unmet: [],
 			notes: []

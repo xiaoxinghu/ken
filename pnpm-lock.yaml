@@ -38,6 +38,9 @@ importers:
       '@unclex/ken':
         specifier: workspace:*
         version: link:../ken
+      yaml:
+        specifier: ^2.9.1
+        version: 2.9.1
 
 packages:
 

@@ -1,7 +1,7 @@
 import { spawnSync } from 'node:child_process'
-import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { type Dirent, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
-import { type Fields, isDate, type Read, readTask } from './read.ts'
+import { type Fields, type Read, readTask } from './read.ts'
 
 export type State = 'problem' | 'done' | 'wontfix' | 'blocked' | 'later' | 'ready'
 
@@ -20,8 +20,9 @@ export const localDate = (date: Date): string =>
 	`${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`
 
 /**
- * Every task under `folder` by absolute path: every file except README.md and dot entries.
- * A folder or entry that cannot be read is kept, so that `load` lists it as a problem.
+ * Every task under `folder` by absolute path: every file or symlink except README.md and
+ * dot entries, told apart by what `readdir` says, so nothing is looked at twice. A folder
+ * that cannot be read is itself an entry, which then fails to read as a task.
  */
 function walk(folder: string): string[] {
 	let entries: Dirent[]
@@ -34,21 +35,18 @@ function walk(folder: string): string[] {
 		const path = join(folder, entry.name)
 		if (entry.name.startsWith('.') || entry.name === 'README.md') return []
 		if (entry.isDirectory()) return walk(path)
-		try {
-			return statSync(path).isFile() ? [path] : []
-		} catch {
-			return [path]
-		}
+		return entry.isFile() || entry.isSymbolicLink() ? [path] : []
 	})
 }
 
+/** The task at `path`; whatever stops it being read makes it a problem, with the fix. */
 function load(path: string): Read {
 	try {
 		return readTask(basename(path), readFileSync(path, 'utf8'))
 	} catch (e) {
 		const read = readTask(basename(path), '')
 		read.problems.push(
-			`it could not be read (${(e as Error).message}): make it a readable file or folder, or remove it; \`ls -ld ${path}\` shows it`
+			`it could not be read (${(e as Error).message}): make it a readable file, or remove it; \`ls -ld ${path}\` shows it`
 		)
 		return read
 	}
@@ -81,18 +79,8 @@ function archived(folder: string, rel: string): string | undefined {
 	}
 	const found = [basename(rel), ...entries.filter((e) => name.test(e))]
 		.map((e) => join(dir, e))
-		.find((path) => modified(path))
+		.find((path) => statSync(path, { throwIfNoEntry: false })?.isFile())
 	return found
-}
-
-/** The mtime of the file at `path`, local; undefined when it is no file it can stat. */
-function modified(path: string): string | undefined {
-	try {
-		const stat = statSync(path, { throwIfNoEntry: false })
-		return stat?.isFile() ? localDate(stat.mtime) : undefined
-	} catch {
-		return undefined
-	}
 }
 
 /** When the root's git added each file under `folder`, by absolute path; empty outside git. */
@@ -119,36 +107,75 @@ function addedDates(root: string, folder: string): Map<string, string> {
 const days = (from: string, to: string): number =>
 	Math.round((Date.parse(to) - Date.parse(from)) / 864e5)
 
-/** Every task in `folder`, a folder of the root `root`, by path, with its state as of `today`. */
-export function listTasks(root: string, folder: string, today: string): Row[] {
+/**
+ * Every task in `folder`, a folder of the root `root`, by path, with its state as of
+ * `today`. Each row is made on its own: whatever throws while making one makes that row a
+ * problem, so no file can stop the listing.
+ */
+export function listTasks(root: string, configured: string, today: string): Row[] {
+	// the real path, as the root is, so that every path compares as the disk names it
+	const folder = real(configured)
 	const tasks = new Map(walk(folder).map((path) => [path, load(path)]))
 	let added: Map<string, string> | undefined
-	return [...tasks.keys()].sort().map((path) => {
-		const read = tasks.get(path) as Read
+	const addedDate = (path: string) => {
+		added ??= addedDates(root, folder)
+		return added.get(path)
+	}
+	return [...tasks.entries()]
+		.sort(([a], [b]) => (a < b ? -1 : 1))
+		.map(([path, read]) => {
+			try {
+				return row(path, read)
+			} catch (e) {
+				const failed = readTask(basename(path), '')
+				failed.problems.push(
+					`ken-task could not list it (${(e as Error).message}): fix what that names, then rerun \`ken task list\``
+				)
+				return row(path, failed)
+			}
+		})
+
+	/**
+	 * Where `ref`, written in the file at `path`, leads: `target`, its live task unless it is
+	 * archived, and `from` what it resolved from when that is not the file; undefined if nowhere.
+	 */
+	function resolveRef(
+		path: string,
+		ref: string
+	): { target: string; live?: string; from: string } | undefined {
+		for (const [base, from] of [
+			[dirname(path), ''],
+			[folder, 'the folder'],
+			[root, 'the root']
+		] as const) {
+			const target = resolve(base, ref)
+			const rel = relative(folder, target)
+			if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) continue
+			// a reference into the archive names the archived file, at any suffix, as a live one would
+			if (rel.startsWith('.archive/')) {
+				if (archived(folder, rel.slice('.archive/'.length))) return { target, from }
+				continue
+			}
+			// the path as written, else as the disk names it, which may differ in case
+			const live = tasks.has(target) ? target : real(target)
+			if (tasks.has(live)) return { target, live, from }
+			if (archived(folder, rel)) return { target, from }
+		}
+	}
+
+	function row(path: string, read: Read): Row {
 		const { title, fields, problems } = read
 		const flags = [...read.flags]
 		const unmet = fields['blocked-by'].flatMap((ref): Unmet[] => {
-			for (const [base, from] of [
-				[dirname(path), ''],
-				[folder, 'the folder'],
-				[root, 'the root']
-			] as const) {
-				const target = resolve(base, ref)
-				const rel = relative(folder, target)
-				if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) continue
-				// a reference into the archive names the archived file, at any suffix, as a live one would
-				const name = rel.startsWith('.archive/') ? rel.slice('.archive/'.length) : undefined
-				const key = tasks.has(target) ? target : real(target)
-				const live = name === undefined ? tasks.get(key) : undefined
-				if (!live && !archived(folder, name ?? rel)) continue
-				if (from) {
-					flags.push(
-						`blocked-by ${ref} resolves from ${from}, not from this file: write it as ${relative(dirname(path), target)}`
-					)
-				}
-				return live && isOpen(live) ? [{ ref, path: key, reason: 'open' }] : []
+			const found = resolveRef(path, ref)
+			if (!found) return [{ ref, reason: 'missing' }]
+			if (found.from) {
+				flags.push(
+					`blocked-by ${ref} resolves from ${found.from}, not from this file: write it as ${relative(dirname(path), found.target)}`
+				)
 			}
-			return [{ ref, reason: 'missing' }]
+			const live = found.live && tasks.get(found.live)
+			return live && isOpen(live) ? [{ ref, path: found.live, reason: 'open' }] : []
 		})
 		const open = isOpen(read)
 		const state: State = problems.length
@@ -165,23 +192,19 @@ export function listTasks(root: string, folder: string, today: string): Row[] {
 			...flags.map((f) => `flagged: ${f}; \`ken task lint\` names the upgrade`)
 		]
 		if (open && fields.due && fields.due < today) notes.push(`overdue: due ${fields.due}`)
-		if (open) {
-			let since = fields.created && isDate(fields.created) ? fields.created : undefined
-			let by = 'created'
-			if (!since) {
-				added ??= addedDates(root, folder)
-				since = added.get(path)
-				by = 'the date git added it'
-			}
-			if (!since) {
-				since = modified(path)
-				by = 'its mtime'
-			}
-			const age = since ? days(since, today) : 0
+		// a problem row's note is its fix; it is never asked its age, so it cannot fail again
+		if (open && !problems.length) {
+			const git = fields.created ? undefined : addedDate(path)
+			const [since, by] = fields.created
+				? [fields.created, 'created']
+				: git
+					? [git, 'the date git added it']
+					: [localDate(lstatSync(path).mtime), 'its mtime']
+			const age = days(since, today)
 			if (age > 90) notes.push(`open ${age} days, since ${since} by ${by}: finish it, or close it`)
 		}
 		return { path, title, ...fields, state, unmet: open ? unmet : [], notes }
-	})
+	}
 }
 
 /** The rows as `ken task list` prints them: state, path, unmet blockers, then each note indented. */

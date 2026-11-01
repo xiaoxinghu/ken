@@ -1,3 +1,5 @@
+import { isSeq, parseDocument } from 'yaml'
+
 /** The fields of a task, as its front matter gives them, with `status` defaulting to `todo`. */
 export type Fields = {
 	status: string
@@ -7,8 +9,8 @@ export type Fields = {
 	'blocked-by': string[]
 	scheduled?: string
 	due?: string
-	/** Every other front matter field, its value as written. */
-	other: Record<string, string>
+	/** Every other front matter field, as YAML reads it. */
+	other: Record<string, unknown>
 }
 
 /**
@@ -20,7 +22,8 @@ export type Read = { title: string; fields: Fields; flags: string[]; problems: s
 const SCALARS = new Set(['status', 'created', 'closed', 'repo', 'scheduled', 'due'])
 const DATES = new Set(['created', 'closed', 'scheduled', 'due'])
 const ALIASES = new Set(['blocked_by', 'blockedBy', 'depends_on', 'depends-on'])
-export const STATUSES = ['todo', 'done', 'wontfix']
+const STATUSES = ['todo', 'done', 'wontfix']
+const CANONICAL = 'the canonical form is one line, `blocked-by: [a.md, b.md]`'
 
 export function isDate(text: string): boolean {
 	const date = new Date(`${text}T00:00:00Z`)
@@ -31,26 +34,14 @@ export function isDate(text: string): boolean {
 	)
 }
 
-/** A YAML value without its trailing comment: a `#` after a space, outside quotes. */
-const uncomment = (raw: string): string =>
-	(/^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^"'#]|["']|(?<=\S)#)*/.exec(raw)?.[0] ?? '').trim()
-
-/** A YAML value as written: its trailing comment dropped, unquoted. */
-function scalar(raw: string): string {
-	const text = uncomment(raw)
-	const double = /^"(.*)"$/.exec(text)?.[1]
-	if (double !== undefined) return double.replace(/\\(["\\])/g, '$1')
-	const single = /^'(.*)'$/.exec(text)?.[1]
-	return single === undefined ? text : single.replaceAll("''", "'")
-}
-
 /**
- * Read a task file named `name`. Only a `.md` has front matter, read one line at a time so
- * that a deviation is flagged, never refused. The title is the first `# ` heading, else
- * the name without its extension, dashes as spaces.
+ * Read a task file named `name`. Only a `.md` has front matter: YAML between `---` lines,
+ * read by a YAML parser, then held to the tolerance list of docs/ken-task.md, so that a
+ * deviation is flagged, never refused. The title is the first `# ` heading, else the name
+ * without its extension, dashes as spaces.
  */
 export function readTask(name: string, text: string): Read {
-	const lines = text.replace(/^\uFEFF/, '').split(/\r?\n/)
+	const lines = text.replace(/^﻿/, '').split(/\r?\n/)
 	const read: Read = {
 		title: '',
 		fields: { status: 'todo', 'blocked-by': [], other: {} },
@@ -65,7 +56,7 @@ export function readTask(name: string, text: string): Read {
 				'its front matter has no closing `---`, so every field reads as absent: add a `---` line after the last field'
 			)
 		} else {
-			frontMatter(lines.slice(1, end), read)
+			frontMatter(lines.slice(1, end).join('\n'), read)
 			body = end + 1
 		}
 	}
@@ -79,78 +70,69 @@ export function readTask(name: string, text: string): Read {
 	return read
 }
 
-function frontMatter(lines: string[], read: Read): void {
+function frontMatter(source: string, read: Read): void {
 	const { fields, flags, problems } = read
-	// `more` is a field's continuation lines as parsed, `raw` as written, blank lines within kept
-	const entries: { key: string; value: string; more: string[]; raw: string[] }[] = []
-	let blank: string[] = []
-	lines.forEach((line, i) => {
-		if (!line.trim()) {
-			blank.push(line)
-			return
-		}
-		const field = /^([A-Za-z_][\w.-]*)[ \t]*:(?:[ \t]+(.*))?$/.exec(line)
-		const last = entries.at(-1)
-		if (field?.[1]) entries.push({ key: field[1], value: field[2] ?? '', more: [], raw: [] })
-		else if (last && /^[\s-]/.test(line)) {
-			last.raw.push(...blank, line)
-			if (!/^\s*#/.test(line)) last.more.push(line.trim())
-		} else if (!/^\s*#/.test(line)) {
-			problems.push(
-				`line ${i + 2}, ${JSON.stringify(line)}, is not a \`field: value\` line of its front matter: make it one, or remove it`
-			)
-		}
-		blank = []
-	})
+	const doc = parseDocument(source)
+	let data: unknown
+	try {
+		const [error] = doc.errors
+		if (error) throw error
+		// an alias to no anchor is no parse error, but throws here
+		data = doc.toJS()
+	} catch (e) {
+		const { message, linePos } = e as Error & { linePos?: { line: number }[] }
+		// the front matter starts on the file's second line
+		const at = linePos?.[0] ? `line ${linePos[0].line + 1}: ` : ''
+		problems.push(
+			`its front matter is not YAML (${at}${message.split(/ at line |\n/)[0]}): fix that line, or quote its value`
+		)
+		return
+	}
+	if (data === null) return
+	if (typeof data !== 'object' || Array.isArray(data)) {
+		problems.push('its front matter is not `field: value` lines: write it as such, or remove it')
+		return
+	}
 	const seen = new Map<string, string>()
-	for (const { key, value, more, raw } of entries) {
-		const name = ALIASES.has(key) ? 'blocked-by' : key
-		if (name !== 'blocked-by' && !SCALARS.has(name)) {
-			fields.other[key] = (value ? [value, ...raw] : raw).join('\n')
+	for (const [key, value] of Object.entries(data as Record<string, unknown>)) {
+		const field = ALIASES.has(key) ? 'blocked-by' : key
+		if (field !== 'blocked-by' && !SCALARS.has(field)) {
+			fields.other[key] = value
 			continue
 		}
-		const before = seen.get(name)
+		const before = seen.get(field)
+		seen.set(field, key)
 		if (before !== undefined) {
 			problems.push(
-				`${name} is written twice, as ${before} and as ${key}, so which one holds is unclear: keep one line`
+				`${field} is written twice, as ${before} and as ${key}, so which one holds is unclear: keep one`
 			)
-			continue
-		}
-		seen.set(name, key)
-		if (name === 'blocked-by') {
-			if (key !== name) flags.push(`${key} reads as blocked-by: rename the field to blocked-by`)
-			fields['blocked-by'] = list(key, uncomment(value), more, read)
-			continue
-		}
-		const text = scalar(value)
-		if (more.length) {
-			problems.push(`${key} goes on past its line: write it on one line, \`${key}: <value>\``)
-		} else if (DATES.has(key) && text && !isDate(text)) {
+		} else if (field === 'blocked-by') {
+			if (key !== field) flags.push(`${key} reads as blocked-by: rename the field to blocked-by`)
+			const node = doc.get(key, true)
+			const form = isSeq(node) ? (node.flow ? 'list' : 'block list') : 'single value'
+			fields['blocked-by'] = list(key, value, form, read)
+		} else if (value === null) {
+			// `field:` with nothing after it is absent
+		} else if (typeof value === 'object') {
+			problems.push(`${key} is not a single value: write it as \`${key}: <value>\``)
+		} else if (DATES.has(key) && !isDate(String(value))) {
 			problems.push(
-				`${key} ${JSON.stringify(text)} is not a date: write it as \`${key}: YYYY-MM-DD\``
+				`${key} ${JSON.stringify(String(value))} is not a date: write it as \`${key}: YYYY-MM-DD\``
 			)
-		} else if (text) Object.assign(fields, { [key]: text })
+		} else Object.assign(fields, { [key]: String(value) })
 	}
 }
 
-/** `blocked-by` as written: a one-line `[a.md, b.md]`, or a scalar or a block list, flagged. */
-function list(key: string, value: string, more: string[], read: Read): string[] {
-	const canonical = 'the canonical form is one line, `blocked-by: [a.md, b.md]`'
-	if (value.startsWith('[') && value.endsWith(']') && !more.length) {
-		// each item quoted, commas and all, or up to the next comma
-		const items = value.slice(1, -1).match(/"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^,\s][^,]*/g)
-		return (items ?? []).map(scalar).filter(Boolean)
+/** `blocked-by` as read: a one-line list, or a block list or a single value, flagged. */
+function list(key: string, value: unknown, form: string, read: Read): string[] {
+	if (value === null) return []
+	const items = Array.isArray(value) ? value : [value]
+	if (items.some((item) => item === null || typeof item === 'object')) {
+		read.problems.push(`${key} is not a list of paths: ${CANONICAL}`)
+		return []
 	}
-	if (!value && more.every((line) => line.startsWith('-'))) {
-		if (more.length) read.flags.push(`${key} is a block list: ${canonical}`)
-		return more.map((line) => scalar(line.slice(1))).filter(Boolean)
-	}
-	if (value && !value.startsWith('[') && !more.length) {
-		read.flags.push(`${key} is a single value, not a list: ${canonical}`)
-		return [scalar(value)]
-	}
-	read.problems.push(`${key} is not a list that reads on its own line: ${canonical}`)
-	return []
+	if (form !== 'list') read.flags.push(`${key} is a ${form}: ${CANONICAL}`)
+	return items.map(String)
 }
 
 /** The text of the first `# ` heading of `lines`, outside fenced code. */

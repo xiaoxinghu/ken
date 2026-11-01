@@ -64,7 +64,7 @@ beforeEach(() => {
 	)
 	expect(r.stderr).toBe('')
 	expect(r.status).toBe(0)
-	for (const repo of ['web', 'api', 'docs']) {
+	for (const repo of ['web', 'api', 'docs', 'site']) {
 		remote(`example.com/acme/${repo}`)
 		expect(run(`ken index set example.com/acme/${repo} desc="The ${repo}."`).status).toBe(0)
 	}
@@ -111,6 +111,11 @@ describe('the agents template', { timeout: 30_000 }, () => {
 		const glob = hook('Glob', { pattern: '.repos/example.com/acme/docs/**/*.md' })
 		expect(glob.status).toBe(0)
 		expect(existsSync(join(clone('docs'), 'README.md'))).toBe(true)
+
+		// a glob whose pattern names the repo under its path
+		const under = hook('Glob', { path: '.repos/example.com/acme', pattern: 'site/**/*.md' })
+		expect(under.status).toBe(0)
+		expect(existsSync(join(clone('site'), 'README.md'))).toBe(true)
 
 		// a shell command's words, relative to the cwd
 		const bash = hook('Bash', { command: "rg -n 'x' .repos/example.com/acme/api/src | head" })

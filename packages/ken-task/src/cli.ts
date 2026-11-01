@@ -5,6 +5,7 @@ import { statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { addTask } from './add.ts'
 import { archiveTasks, purgeArchive } from './archive.ts'
+import { claimTask } from './claim.ts'
 import { finishTask } from './finish.ts'
 import { lintTasks } from './lint.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
@@ -32,6 +33,7 @@ Commands:
                   rewrite one front matter line: status, repo, blocked-by, scheduled, due
   rename <task> <path>
                   move a task file, rewriting every blocked-by that names it
+  claim [<task>]  give a ready repo task its branch and worktree, print the worktree
   finish <task>   remove the worktree and branch of a done or wontfix task
   lint [--fix]    every file not in the canonical shape, with the upgrade
   archive <task>...
@@ -44,6 +46,7 @@ Examples:
   ken task ready | head -1
   ken task add portal/fix-login -b portal/web-view-profiles
   ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"
+  cd "$(ken task claim)"
   ken task set tasks/portal/print-web-views-to-pdf status done
   ken task rename tasks/portal/print-web-views-to-pdf portal/print-to-pdf
   ken task finish tasks/portal/print-web-views-to-pdf
@@ -236,7 +239,7 @@ function ready(args: string[]): void {
 		)
 	}
 	const { root, folder } = settings()
-	const paths = readyTasks(root, folder, localDate(new Date()))
+	const paths = readyTasks(root, folder, localDate(new Date())).map((row) => row.path)
 	if (paths.length) process.stdout.write(`${paths.join('\n')}\n`)
 	else {
 		process.stderr.write(
@@ -352,6 +355,38 @@ Examples:
   ken task rename tasks/fix-login tasks/fix-login-after-reset
   ken task rename tasks/fix-login portal/fix-login          # into tasks/portal/
   ken task rename "$(ken task ready | head -1)" portal/next-up`
+
+const CLAIM_HELP = `ken task claim [<task>]
+
+Start work on a ready task: make its branch, its path in the folder without extension,
+in the clone of its repo, from the default branch as it stands (no fetch); then \`ken get
+<repo> -b <branch>\` makes the worktree beside the clone, copies the files the repo's
+.ken.yaml lists and runs its setup, its output on stderr. Prints only the worktree's path.
+
+Without a task: the first ready task, in \`ken task ready\` order, that has a repo cloned
+here. Making the branch is the claim: of two callers only one makes it, and the other is
+told so, or, without a task, goes on to the next.
+
+Refused: a task that is not ready, with its state and what it waits on; one with no
+repo, with the \`ken task set\` to run; one whose repo is not cloned here, with the
+\`ken get\` to run. When the worktree fails after the branch is made, the branch stays,
+so the task stays claimed, and the \`ken get -b\` to rerun is printed.
+
+Examples:
+  cd "$(ken task claim)"
+  cd "$(ken task claim tasks/portal/fix-login)"   # branch portal/fix-login
+  ken task claim portal/fix-login                  # .repos/<repo>.portal-fix-login`
+
+function claim(args: string[]): void {
+	if (args.length > 1) {
+		throw new Error(
+			`ken task claim takes at most one task, got ${args.length}. Run \`ken task claim\` for the next ready task, or \`ken task claim <task>\`.`
+		)
+	}
+	const { root, folder } = settings()
+	const path = claimTask(root, folder, process.cwd(), args[0], localDate(new Date()))
+	process.stdout.write(`${path}\n`)
+}
 
 const FINISH_HELP = `ken task finish <task>
 
@@ -498,6 +533,7 @@ const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = 
 	add: [ADD_HELP, add],
 	set: [SET_HELP, set],
 	rename: [RENAME_HELP, rename],
+	claim: [CLAIM_HELP, claim],
 	finish: [FINISH_HELP, finish],
 	lint: [LINT_HELP, lint],
 	archive: [ARCHIVE_HELP, archive],

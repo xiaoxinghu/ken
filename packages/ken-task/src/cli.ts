@@ -5,6 +5,7 @@ import { statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { addTask } from './add.ts'
 import { finishTask } from './finish.ts'
+import { lintTasks } from './lint.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
 import { resolveTask } from './resolve.ts'
 import { setTask } from './set.ts'
@@ -28,6 +29,7 @@ Commands:
   set <task> <field> <value>
                   rewrite one front matter line: status, repo, blocked-by, scheduled, due
   finish <task>   remove the worktree and branch of a done or wontfix task
+  lint [--fix]    every file not in the canonical shape, with the upgrade
 
 Examples:
   ken task list
@@ -36,6 +38,7 @@ Examples:
   ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"
   ken task set tasks/portal/print-web-views-to-pdf status done
   ken task finish tasks/portal/print-web-views-to-pdf
+  ken task lint --fix
 
 Run \`ken task <command> --help\` for one command.`
 
@@ -186,6 +189,15 @@ function settings(): { root: string; folder: string } {
 	return { root, folder: resolve(root, folder) }
 }
 
+/** Whether `folder` is a folder; one that cannot be looked at counts, so its error is a row. */
+function isFolder(folder: string): boolean {
+	try {
+		return statSync(folder, { throwIfNoEntry: false })?.isDirectory() ?? false
+	} catch {
+		return true
+	}
+}
+
 function list(args: string[]): void {
 	const json = args[0] === '--json'
 	if (args.length > (json ? 1 : 0)) {
@@ -194,17 +206,11 @@ function list(args: string[]): void {
 		)
 	}
 	const { root, folder } = settings()
-	// a folder that cannot be looked at is listed, as a problem row
-	let isFolder: boolean
-	try {
-		isFolder = statSync(folder, { throwIfNoEntry: false })?.isDirectory() ?? false
-	} catch {
-		isFolder = true
-	}
-	const rows = isFolder ? listTasks(root, folder, localDate(new Date())) : []
+	const found = isFolder(folder)
+	const rows = found ? listTasks(root, folder, localDate(new Date())) : []
 	if (!rows.length) {
 		process.stderr.write(
-			`${isFolder ? `No tasks in ${folder}` : `${folder} is not a folder, so there are no tasks`}. ` +
+			`${found ? `No tasks in ${folder}` : `${folder} is not a folder, so there are no tasks`}. ` +
 				`Add one by writing a file there, e.g. \`mkdir -p ${folder} && echo '# Do the thing' > ${folder}/do-the-thing.md\`, ` +
 				'or point task.folder in .ken.yaml at your tasks.\n'
 		)
@@ -332,13 +338,55 @@ function finish(args: string[]): void {
 	process.stderr.write(`${finishTask(root, folder, process.cwd(), args[0] ?? '')}\n`)
 }
 
+const LINT_HELP = `ken task lint [--fix]
+
+Every file in the task folder not in the canonical shape, one line per deviation: its
+absolute path, what deviates, and the upgrade, as a command or an edit. Exits 0 when
+nothing deviates, 1 otherwise, so a hook can run it. The archive is not linted.
+
+  --fix   apply the upgrades that lose nothing, each printed as done; the rest stay
+          listed, and the exit code says whether any is left
+
+Applied by --fix, through the one-line writer of \`ken task set\`, every other byte kept:
+  no status line                    status: todo
+  no created line                   created: <the date git added it, else its mtime>
+  status done or wontfix, no closed closed: <its mtime>
+  blocked_by, blockedBy, depends_on, depends-on, a single value, a block list
+                                    blocked-by: [a.md, b.md]
+  a blocked-by path that resolves only from the folder or the root
+                                    the path relative to the file
+
+Only named, for you to fix: a status other than todo, done or wontfix; front matter with
+no closing ---; a blocked-by found nowhere; a file that is not a .md; a file \`ken task
+list\` shows as a problem. The body is never touched.
+
+Examples:
+  ken task lint
+  ken task lint --fix
+  ken task lint | cut -d: -f1 | sort -u      # the files that deviate`
+
+function lint(args: string[]): void {
+	const fix = args[0] === '--fix'
+	if (args.length > (fix ? 1 : 0)) {
+		throw new Error(
+			`ken task lint takes only --fix, got ${JSON.stringify(args.join(' '))}. Run \`ken task lint\` or \`ken task lint --fix\`.`
+		)
+	}
+	const { root, folder } = settings()
+	if (!isFolder(folder)) return
+	const { lines, deviates } = lintTasks(root, folder, fix)
+	if (lines.length) process.stdout.write(`${lines.join('\n')}\n`)
+	if (deviates) process.exitCode = 1
+}
+
 const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = {
 	list: [LIST_HELP, list],
 	ready: [READY_HELP, ready],
 	path: [PATH_HELP, path],
 	add: [ADD_HELP, add],
 	set: [SET_HELP, set],
-	finish: [FINISH_HELP, finish]
+	finish: [FINISH_HELP, finish],
+	lint: [LINT_HELP, lint]
 }
 
 const [command, ...args] = process.argv.slice(2)

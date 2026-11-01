@@ -65,6 +65,12 @@ describe('ken task set', () => {
 		expect(text()).toBe('---\nblocked-by: [a.md] # was\n# after\nrepo: a/b/c\n---\n')
 	})
 
+	it('keeps the indentation of the front matter fields', () => {
+		const { set, text } = setup('t.md', '---\n  status: todo # open\n  repo: a/b/c\n---\n')
+		expect(set('status', 'done').status).toBe(0)
+		expect(text()).toBe(`---\n  status: done # open\n  repo: a/b/c\n  closed: ${today}\n---\n`)
+	})
+
 	it('finds a field whose key is quoted, writing it back plain', () => {
 		const { set, text } = setup(
 			't.md',

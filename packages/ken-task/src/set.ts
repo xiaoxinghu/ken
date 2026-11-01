@@ -23,9 +23,11 @@ export function withField(text: string, field: string, value: string | undefined
 	const bom = text.startsWith('﻿') ? '﻿' : ''
 	const eol = /^[^\n]*\r\n/.test(text) ? '\r\n' : '\n'
 	const lines = text.slice(bom.length).split(eol)
-	const line = value === undefined ? [] : [`${field}: ${value}`]
+	const line = (indent = '') => (value === undefined ? [] : [`${indent}${field}: ${value}`])
 	if (!FENCE.test(lines[0] ?? '')) {
-		return line.length ? bom + ['---', ...line, '---', ''].join(eol) + text.slice(bom.length) : text
+		return value === undefined
+			? text
+			: bom + ['---', ...line(), '---', ''].join(eol) + text.slice(bom.length)
 	}
 	const end = lines.findIndex((l, i) => i > 0 && FENCE.test(l))
 	if (end < 0) {
@@ -34,9 +36,9 @@ export function withField(text: string, field: string, value: string | undefined
 		)
 	}
 	const keys = field === 'blocked-by' ? [field, ...ALIASES] : [field]
-	const found = span(lines.slice(1, end).join('\n'), keys)
+	const { found, indent } = span(lines.slice(1, end).join('\n'), keys)
 	if (!found) {
-		lines.splice(end, 0, ...line)
+		lines.splice(end, 0, ...line(indent))
 		return bom + lines.join(eol)
 	}
 	const [at, next] = [found[0] + 1, found[1] + 1]
@@ -45,34 +47,39 @@ export function withField(text: string, field: string, value: string | undefined
 	const quoted = /^\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')/.exec(rest)?.[0].length ?? 0
 	const comment = /\s+#.*$/.exec(rest.slice(quoted))?.[0] ?? ''
 	const gap = /^[ \t]*/.exec(rest)?.[0] || ' '
-	lines.splice(at, next - at, ...(value === undefined ? [] : [`${field}:${gap}${value}${comment}`]))
+	const set = `${indent}${field}:${gap}${value}${comment}`
+	lines.splice(at, next - at, ...(value === undefined ? [] : [set]))
 	return bom + lines.join(eol)
 }
 
 /**
  * The lines of `source`, front matter, that hold the first of `keys`, as YAML reads the key
  * (quoted or not): from the key's line to past the line its value ends on, so a value over
- * several lines, with blank lines or comments between its items, goes whole.
+ * several lines, with blank lines or comments between its items, goes whole; and the
+ * indentation of the mapping's keys, for a line written into it.
  */
-function span(source: string, keys: string[]): [number, number] | undefined {
+function span(source: string, keys: string[]): { found?: [number, number]; indent: string } {
 	const doc = parseDocument(source)
 	const [error] = doc.errors
 	if (error)
 		throw new Error(`its front matter is not YAML (${error.message.split('\n')[0]}): fix it`)
-	if (!isMap(doc.contents)) return undefined
+	if (!isMap(doc.contents)) return { indent: '' }
 	if (doc.contents.flow) {
 		throw new Error(
 			'its front matter is one `{...}` mapping, so one field cannot be rewritten without the others: write each field as `field: value` on a line of its own'
 		)
 	}
 	const line = (offset: number) => source.slice(0, offset).split('\n').length - 1
+	const start = doc.contents.range?.[0] ?? 0
+	const indent = source.slice(source.lastIndexOf('\n', start - 1) + 1, start)
 	for (const pair of doc.contents.items) {
 		const key = pair.key
 		if (!isScalar(key) || !keys.includes(String(key.value)) || !key.range) continue
 		const value = isNode(pair.value) ? pair.value.range : undefined
 		const last = Math.max(key.range[1], value?.[1] ?? 0)
-		return [line(key.range[0]), line(Math.max(last - 1, key.range[0])) + 1]
+		return { found: [line(key.range[0]), line(Math.max(last - 1, key.range[0])) + 1], indent }
 	}
+	return { indent }
 }
 
 /** `items` as a one-line YAML list, each item plain when YAML reads it back as written. */

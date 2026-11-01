@@ -113,6 +113,8 @@ describe('ken init', () => {
 		)
 		expect(out).toContain(`\`KEN_ROOT=${root} ken layer add github.com/a/notes\``)
 		expect(out).not.toContain('export KEN_ROOT')
+		// no git init in between: a second run finds the folder it made, plain, and adds nothing
+		expect(init(layer, env)).toContain(`Nothing to create: ${layer}`)
 	})
 
 	it("refuses a worktree, made or yet to be, at a clone's side: a branch, not a place for a root", () => {
@@ -124,7 +126,8 @@ describe('ken init', () => {
 		git('init', '-q', '-b', 'main')
 		git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x')
 		expect(git('worktree', 'add', '-q', '-b', 'feat', `${clone}.feat`).status).toBe(0)
-		for (const target of [`${clone}.feat`, `${clone}.next`]) {
+		mkdirSync(`${clone}.plain`)
+		for (const target of [`${clone}.feat`, `${clone}.next`, `${clone}.plain`]) {
 			expect(() => init(target, env)).toThrow(`is inside the ken root ${root}`)
 			expect(existsSync(join(target, '.ken.yaml'))).toBe(false)
 		}

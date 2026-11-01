@@ -20,6 +20,26 @@ function realPath(path: string): string {
 }
 
 /**
+ * The checkout the folder `dir`, at `.repos/<host>/<owner>/<folder>`, will be, from its shape alone:
+ * `<repo>.<anything>` beside a clone `<repo>` (a .git folder, not a worktree's .git file) is its
+ * worktree, anything else a clone. Throws when the parts are no key.
+ */
+export function shapeOf(dir: string): Place {
+	const folder = basename(dir)
+	const owner = dirname(dir)
+	const keyOf = (repo: string) =>
+		parseKey(`${basename(dirname(owner))}/${basename(owner)}/${repo}`).key
+	const clone = [...folder.matchAll(/\./g)]
+		.map((m) => folder.slice(0, m.index))
+		.findLast(
+			(c) => c && statSync(join(owner, c, '.git'), { throwIfNoEntry: false })?.isDirectory()
+		)
+	return clone
+		? { key: keyOf(clone), kind: 'worktree', branch: null }
+		: { key: keyOf(folder), kind: 'clone', branch: null }
+}
+
+/**
  * The checkout `path` is in, from git when it exists and from its shape when it does not yet
  * (PRD decisions 2 and 15). Throws when the path is in no checkout under `root`.
  */
@@ -43,18 +63,7 @@ export function locate(path: string, root: string): Place {
 		)
 	}
 	const keyOf = (repo: string) => parseKey(`${host}/${owner}/${repo}`).key
-	if (!existsSync(dir)) {
-		// not checked out yet: `<repo>.<anything>` beside a clone `<repo>` (a .git folder, not a
-		// worktree's .git file) is its worktree
-		const clone = [...folder.matchAll(/\./g)]
-			.map((m) => folder.slice(0, m.index))
-			.findLast(
-				(c) => c && statSync(join(dir, '..', c, '.git'), { throwIfNoEntry: false })?.isDirectory()
-			)
-		return clone
-			? { key: keyOf(clone), kind: 'worktree', branch: null }
-			: { key: keyOf(folder), kind: 'clone', branch: null }
-	}
+	if (!existsSync(dir)) return shapeOf(dir)
 	if (!existsSync(join(dir, '.git'))) {
 		throw new Error(
 			`${dir} is where a checkout belongs, but it is not a git checkout (it has no .git), so it ` +

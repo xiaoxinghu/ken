@@ -6,7 +6,7 @@ import { get } from './get.ts'
 import { gitWith } from './git.ts'
 import { codePath } from './path.ts'
 import { configPath, configuredRoot } from './root.ts'
-import { locate } from './which.ts'
+import { locate, shapeOf } from './which.ts'
 
 /** The root `.gitignore` rules: the clones and worktrees at depth three, and secrets. */
 const IGNORE = ['.repos/*/*/*/', '.env']
@@ -61,8 +61,9 @@ function cloneAt(target: string, root: string): string | undefined {
 	const parts = relative(root, target).split(sep)
 	if (parts.length !== 4 || parts[0] !== '.repos') return undefined
 	try {
-		// a worktree beside a clone is a branch of that repo, not a place for another root
-		const place = locate(target, root)
+		// a worktree beside a clone is a branch of that repo, not a place for another root; a folder
+		// with no .git yet, such as one an earlier `ken init` made, is read by its shape
+		const place = existsSync(join(target, '.git')) ? locate(target, root) : shapeOf(target)
 		return place.kind === 'clone' ? place.key : undefined
 	} catch {
 		return undefined

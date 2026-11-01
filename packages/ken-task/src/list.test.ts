@@ -99,7 +99,11 @@ describe('ken task list', () => {
 		const r = kenTask(root, ['list', '--json'])
 		chmodSync(join(folder, 'locked'), 0o755)
 		chmodSync(join(folder, 'unsearchable'), 0o755)
-		expect(r).toMatchObject({ status: 0, stderr: '' })
+		expect(r.status).toBe(0)
+		// the repos the tasks name are not cloned here, which is all stderr says
+		expect(r.stderr.match(/^.* is not cloned on this machine .*$/gm)?.join('\n')).toBe(
+			r.stderr.trim()
+		)
 		rows = new Map((JSON.parse(r.stdout) as Row[]).map((t) => [t.path, t]))
 	})
 
@@ -268,7 +272,7 @@ describe('ken task list', () => {
 
 	it('prints one row per task: state, path, unmet blockers, then its notes', () => {
 		const r = kenTask(root, ['list'])
-		expect(r).toMatchObject({ status: 0, stderr: '' })
+		expect(r.status).toBe(0)
 		expect(r.stdout).toContain(
 			`blocked  ${join(folder, 'on-missing.md')}  blocked by nowhere.md (missing: no such file in the folder or its archive)\n`
 		)

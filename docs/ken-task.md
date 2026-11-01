@@ -123,7 +123,7 @@ reference is a stat of two paths: live in the folder, its state applies; in the 
 closed by construction, so it blocks nothing and is not opened; nowhere, missing, which
 blocks visibly, because a typo must not make work ready. In the archive means
 `.archive/<path>` or `.archive/<stem>-<n><ext>`, the name `archive` gives a second file of
-one path. **Order** among ready tasks:
+one path; a reference written into `.archive/` is looked up there the same way. **Order** among ready tasks:
 earliest `due`, then earliest `created`, then path, so two runs agree. No priority, no
 effort, no stored in-progress state.
 
@@ -145,8 +145,8 @@ A `status: done` with no `closed` is closed; `lint --fix` adds `closed` from the
 mtime. `lint --fix` never changes a value it does not understand and never touches the
 body.
 
-What a reader cannot settle makes the file a `problem`, each with its fix: the file
-cannot be read; a front matter line that is neither `field: value`, a comment, nor the
+What a reader cannot settle makes the file a `problem`, each with its fix: the file, or a
+folder in the task folder, cannot be read, which lists that path; a front matter line that is neither `field: value`, a comment, nor the
 continuation of the field above; a known field written twice, an alias counting as
 `blocked-by`; a scalar field that goes on past its line; a date that is not `YYYY-MM-DD`;
 a `blocked-by` that is none of the forms above. Unknown fields are kept as written.

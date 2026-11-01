@@ -1,5 +1,6 @@
 import { spawnSync } from 'node:child_process'
 import {
+	chmodSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -100,6 +101,12 @@ describe('ken task list', () => {
 		task('overdue.md', front(`due: ${day(-1)}`))
 		task('bad-date.md', front('scheduled: next week'))
 		task('notes.txt', '---\nstatus: done\n---\n')
+		task('quoted.md', front('status: "done" # finished\nrepo: \'github.com/a/b\''))
+		task('into-archive.md', front('blocked-by: [.archive/portal/b.md]'))
+		task('bad-month.md', `${front('due: 2026-13-01')}# Bad month\n`)
+		task('locked/hidden-inside.md', '# Locked\n')
+		chmodSync(join(folder, 'locked'), 0)
+		symlinkSync('loop.md', join(folder, 'loop.md'))
 		task(
 			'all.md',
 			`${front(
@@ -118,6 +125,7 @@ describe('ken task list', () => {
 		task('README.md', '# Conventions\n')
 		task('.hidden.md', '# Hidden\n')
 		const r = kenTask(root, 'list', '--json')
+		chmodSync(join(folder, 'locked'), 0o755)
 		expect(r).toMatchObject({ status: 0, stderr: '' })
 		rows = new Map((JSON.parse(r.stdout) as Row[]).map((t) => [t.path, t]))
 	})
@@ -187,6 +195,33 @@ describe('ken task list', () => {
 		expect(row('bad-date.md').state).toBe('problem')
 		expect(row('bad-date.md').notes.join()).toContain('`scheduled: YYYY-MM-DD`')
 	})
+
+	it('reads a quoted value with a comment after it', () => {
+		expect(row('quoted.md')).toMatchObject({
+			status: 'done',
+			repo: 'github.com/a/b',
+			state: 'done'
+		})
+	})
+
+	it('takes a reference into the archive as closed, at any suffix', () => {
+		expect(row('into-archive.md')).toMatchObject({ state: 'ready', unmet: [], notes: [] })
+	})
+
+	it('keeps the title of a file with an impossible date, and names the field to fix', () => {
+		expect(row('bad-month.md')).toMatchObject({ title: 'Bad month', state: 'problem' })
+		expect(row('bad-month.md').notes.join()).toContain('`due: YYYY-MM-DD`')
+	})
+
+	it.skipIf(process.getuid?.() === 0)(
+		'lists a folder it cannot open and a symlink loop as problems, and goes on',
+		() => {
+			for (const rel of ['locked', 'loop.md']) {
+				expect(row(rel).state).toBe('problem')
+				expect(row(rel).notes.join()).toContain(`\`ls -ld ${join(folder, rel)}\``)
+			}
+		}
+	)
 
 	it('gives a file that is not Markdown every default', () => {
 		expect(row('notes.txt')).toMatchObject({ title: 'notes', status: 'todo', state: 'ready' })

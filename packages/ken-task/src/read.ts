@@ -22,12 +22,19 @@ const DATES = new Set(['created', 'closed', 'scheduled', 'due'])
 const ALIASES = new Set(['blocked_by', 'blockedBy', 'depends_on', 'depends-on'])
 export const STATUSES = ['todo', 'done', 'wontfix']
 
-export const isDate = (text: string): boolean =>
-	/^\d{4}-\d{2}-\d{2}$/.test(text) && new Date(`${text}T00:00:00Z`).toISOString().startsWith(text)
+export function isDate(text: string): boolean {
+	const date = new Date(`${text}T00:00:00Z`)
+	return (
+		/^\d{4}-\d{2}-\d{2}$/.test(text) &&
+		!Number.isNaN(date.getTime()) &&
+		date.toISOString().startsWith(text)
+	)
+}
 
 /** A YAML value as written: its trailing comment dropped, unquoted. */
 function scalar(raw: string): string {
-	const text = (/^["']/.test(raw) ? raw : raw.replace(/(^|\s+)#.*$/, '')).trim()
+	const quoted = /^\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')\s*(#.*)?$/.exec(raw)?.[1]
+	const text = quoted ?? raw.replace(/(^|\s+)#.*$/, '').trim()
 	const double = /^"(.*)"$/.exec(text)?.[1]
 	if (double !== undefined) return double.replace(/\\(["\\])/g, '$1')
 	const single = /^'(.*)'$/.exec(text)?.[1]

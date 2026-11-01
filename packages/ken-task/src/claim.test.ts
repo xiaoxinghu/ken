@@ -171,6 +171,16 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 		)
 	})
 
+	it('refuses a task whose name git would read as an option, leaving the clone alone', () => {
+		const t = setup({ 'tasks/-m.md': `repo: ${KEY}` })
+		const r = kenTask(t.root, ['claim', 'tasks/-m.md'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain("'-m' is not a valid branch name")
+		expect(r.stderr).toContain('move the task file to a name of letters, digits and dashes')
+		expect(t.branches()).toBe('main')
+		expect(git(t.clone, 'branch', '--show-current')).toBe('main')
+	})
+
 	it('keeps the branch when the worktree fails, and names the ken get -b to rerun', () => {
 		const t = setup({ [TASK]: `repo: ${KEY}` })
 		mkdirSync(`${t.clone}.portal-fix-login`)

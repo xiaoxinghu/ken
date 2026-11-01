@@ -112,11 +112,15 @@ function claim(key: string, name: string): string | undefined {
 		)
 	}
 	try {
-		// the full ref name: the short one turns ambiguous once a tag of the same name exists
-		git(clone, 'branch', name, main)
+		// the full ref name: the short one turns ambiguous once a tag of the same name exists;
+		// `--` so a name from a file like -m.md is a name git refuses, never an option
+		git(clone, 'branch', '--', name, main)
 	} catch (e) {
-		if (git(clone, 'branch', '--list', name)) return undefined
-		throw new Error(`could not create branch ${name} in ${clone}: ${(e as Error).message}`)
+		if (git(clone, 'branch', '--list', '--', name)) return undefined
+		throw new Error(
+			`could not create branch ${name}, the task's path in the folder without extension, in ${clone}: ${(e as Error).message}\n` +
+				'If git refuses the name, move the task file to a name of letters, digits and dashes, then claim it again.'
+		)
 	}
 	return kenGet(
 		[key, '-b', name],

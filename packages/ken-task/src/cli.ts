@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import { statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { addTask } from './add.ts'
+import { archiveTasks, purgeArchive } from './archive.ts'
 import { finishTask } from './finish.ts'
 import { lintTasks } from './lint.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
@@ -30,6 +31,10 @@ Commands:
                   rewrite one front matter line: status, repo, blocked-by, scheduled, due
   finish <task>   remove the worktree and branch of a done or wontfix task
   lint [--fix]    every file not in the canonical shape, with the upgrade
+  archive <task>...
+                  move closed tasks into the folder's .archive/, print the new paths
+  purge --older-than <days>
+                  delete archived tasks closed more than <days> ago; for a person to run
 
 Examples:
   ken task list
@@ -39,6 +44,7 @@ Examples:
   ken task set tasks/portal/print-web-views-to-pdf status done
   ken task finish tasks/portal/print-web-views-to-pdf
   ken task lint --fix
+  ken task archive tasks/portal/print-web-views-to-pdf
 
 Run \`ken task <command> --help\` for one command.`
 
@@ -379,6 +385,63 @@ function lint(args: string[]): void {
 	if (deviates) process.exitCode = 1
 }
 
+const ARCHIVE_HELP = `ken task archive <task>...
+
+Move each task to <folder>/.archive/<its path in the folder> and print its new absolute
+path. Nothing else is read or written: a blocked-by naming it still resolves, through the
+archive, and an archived blocker blocks nothing. A name already in the archive keeps its
+file; the new one takes a numeric suffix before its extension, fix-login-2.md, said on
+stderr. To bring one back, \`mv\` it.
+
+Refused, every task checked before any is moved: an open task (todo, an unknown status,
+or a file that could not be fully read), since its dependents would become ready; a task
+whose branch still exists in its repo here, to remove first with \`ken task finish\`; a
+task already archived.
+
+Examples:
+  ken task archive tasks/portal/print-web-views-to-pdf
+  ken task archive tasks/portal/a.md tasks/portal/b.md
+  ken task list --json | jq -r '.[] | select(.state == "done" or .state == "wontfix") | .path' | xargs ken task archive`
+
+function archive(args: string[]): void {
+	if (!args.length) {
+		throw new Error(
+			'ken task archive takes one task or more, got none. Run `ken task archive <task>...`, e.g. `ken task archive tasks/do-the-thing.md`.'
+		)
+	}
+	const { root, folder } = settings()
+	for (const { path, renamed } of archiveTasks(root, folder, process.cwd(), args)) {
+		if (renamed) process.stderr.write(`${renamed}\n`)
+		process.stdout.write(`${path}\n`)
+	}
+}
+
+const PURGE_HELP = `ken task purge --older-than <days>
+
+Delete every file in <folder>/.archive/ whose closed date, else its mtime, is more than
+<days> days before today, and print each path deleted. Then say once whether the folder
+is in a git work tree: if it is, its history holds what was committed of them; if not,
+nothing holds a copy. --older-than has no default. The one command that deletes a task:
+run it by hand, never from a hook or an agent.
+
+Examples:
+  ken task purge --older-than 365
+  ken task purge --older-than 90 | wc -l`
+
+function purge(args: string[]): void {
+	const [flag, days] = args
+	if (args.length !== 2 || flag !== '--older-than' || !/^\d+$/.test(days ?? '')) {
+		throw new Error(
+			`ken task purge takes --older-than <days>, a whole number with no default, since it deletes; got ${JSON.stringify(args.join(' '))}. ` +
+				'Run `ken task purge --older-than <days>`, e.g. `ken task purge --older-than 365`.'
+		)
+	}
+	const { folder } = settings()
+	const { deleted, said } = purgeArchive(folder, Number(days), new Date())
+	if (deleted.length) process.stdout.write(`${deleted.join('\n')}\n`)
+	process.stderr.write(`${said}\n`)
+}
+
 const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = {
 	list: [LIST_HELP, list],
 	ready: [READY_HELP, ready],
@@ -386,7 +449,9 @@ const COMMANDS: Record<string, [help: string, run: (args: string[]) => void]> = 
 	add: [ADD_HELP, add],
 	set: [SET_HELP, set],
 	finish: [FINISH_HELP, finish],
-	lint: [LINT_HELP, lint]
+	lint: [LINT_HELP, lint],
+	archive: [ARCHIVE_HELP, archive],
+	purge: [PURGE_HELP, purge]
 }
 
 const [command, ...args] = process.argv.slice(2)

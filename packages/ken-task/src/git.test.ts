@@ -163,6 +163,21 @@ describe('repo tasks', { timeout: 30_000 }, () => {
 		expect(t.hasBranch()).toBe(true)
 	})
 
+	it('refuses to archive a done task whose branch remains, naming finish', () => {
+		const t = setup()
+		t.claim()
+		git(t.clone, 'merge', '-q', '--no-ff', '-m', 'Land', NAME)
+		expect(kenTask(t.root, ['set', TASK, 'status', 'done']).status).toBe(0)
+		const r = kenTask(t.root, ['archive', TASK])
+		expect(r.status).toBe(1)
+		expect(r.stderr).toContain(`Run \`ken task finish ${join(t.root, TASK)}\``)
+		expect(existsSync(join(t.root, TASK))).toBe(true)
+		expect(kenTask(t.root, ['finish', TASK]).status).toBe(0)
+		expect(kenTask(t.root, ['archive', TASK]).stdout).toBe(
+			`${join(t.root, 'tasks/.archive', TASK.slice('tasks/'.length))}\n`
+		)
+	})
+
 	it('notes a claimed task whose worktree is missing or holds another branch', () => {
 		const t = setup()
 		const worktree = t.claim()

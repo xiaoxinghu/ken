@@ -11,15 +11,15 @@ const ken = (...args) =>
 	execFileSync('ken', args, { encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] })
 
 try {
-	const { cwd = process.cwd(), tool_input: input = {} } = JSON.parse(readFileSync(0, 'utf8'))
-	// a file tool's path (Claude Code's file_path, pi's path), a glob's pattern alone or under
-	// its path, or the words of a shell command; a glob is answered from its shape, which ends
-	// at the repo's folder
+	const { cwd = process.cwd(), tool_name, tool_input: input = {} } = JSON.parse(
+		readFileSync(0, 'utf8')
+	)
+	// a file tool's path (Claude Code's file_path, pi's path), a Glob's pattern under its path
+	// (pi's find reaches here as Glob), or the words of a shell command. A Grep's pattern is
+	// text to find, not a path. A glob is answered from its shape, which ends at the repo's folder.
 	const candidates = [
 		[input.file_path],
-		[input.path],
-		[input.pattern],
-		[input.path, input.pattern],
+		tool_name === 'Glob' ? [input.path ?? '.', input.pattern] : [input.path],
 		...String(input.command ?? '')
 			.split(/[\s'"`;|&()<>=]+/)
 			.map((w) => [w])

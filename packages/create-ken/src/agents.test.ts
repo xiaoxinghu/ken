@@ -100,7 +100,12 @@ describe('the agents template', { timeout: 30_000 }, () => {
 		expect(outside.status).toBe(0)
 		expect(outside.stdout + outside.stderr).toBe('')
 		expect(hook('Grep', { pattern: 'x', path: join(root, '.repos') }).status).toBe(0)
-		expect(existsSync(clone('web')) || existsSync(clone('api'))).toBe(false)
+		// a Grep's pattern is text it looks for, not a path it reads
+		const text = '.repos/example.com/acme/web/README.md'
+		expect(hook('Grep', { path: 'notes', pattern: text }).status).toBe(0)
+		// a Glob's pattern is read under its path, not on its own
+		expect(hook('Glob', { path: 'notes', pattern: text }).status).toBe(0)
+		expect(existsSync(clone('web'))).toBe(false)
 
 		const read = hook('Read', { file_path: join(root, '.repos/example.com/acme/web/README.md') })
 		expect(read.status).toBe(0)

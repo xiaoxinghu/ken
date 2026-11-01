@@ -12,7 +12,7 @@ front page, README.md. Sessions start here, at the root, where the hooks and den
 - A layer is a section shared by a team: a link to the clone of its repo, made by
   `ken layer add <key>`. Change it in that repo, never here.
 - Names starting with `.`, and AGENTS.md, CLAUDE.md, log.md and README.md, are not sections.
-- Commit what you change: the root is synced by git and nothing else.
+- Run `ken lint` after changing pages, then commit: the root is synced by git and nothing else.
 
 ## Code
 

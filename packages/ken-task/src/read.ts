@@ -81,24 +81,32 @@ export function readTask(name: string, text: string): Read {
 
 function frontMatter(lines: string[], read: Read): void {
 	const { fields, flags, problems } = read
-	const entries: { key: string; value: string; more: string[] }[] = []
+	// `more` is a field's continuation lines as parsed, `raw` as written, blank lines within kept
+	const entries: { key: string; value: string; more: string[]; raw: string[] }[] = []
+	let blank: string[] = []
 	lines.forEach((line, i) => {
-		if (/^\s*(#.*)?$/.test(line)) return
+		if (!line.trim()) {
+			blank.push(line)
+			return
+		}
 		const field = /^([A-Za-z_][\w.-]*)[ \t]*:(?:[ \t]+(.*))?$/.exec(line)
 		const last = entries.at(-1)
-		if (field?.[1]) entries.push({ key: field[1], value: field[2] ?? '', more: [] })
-		else if (last && /^[\s-]/.test(line)) last.more.push(line.trim())
-		else {
+		if (field?.[1]) entries.push({ key: field[1], value: field[2] ?? '', more: [], raw: [] })
+		else if (last && /^[\s-]/.test(line)) {
+			last.raw.push(...blank, line)
+			if (!/^\s*#/.test(line)) last.more.push(line.trim())
+		} else if (!line.startsWith('#')) {
 			problems.push(
 				`line ${i + 2}, ${JSON.stringify(line)}, is not a \`field: value\` line of its front matter: make it one, or remove it`
 			)
 		}
+		blank = []
 	})
 	const seen = new Map<string, string>()
-	for (const { key, value, more } of entries) {
+	for (const { key, value, more, raw } of entries) {
 		const name = ALIASES.has(key) ? 'blocked-by' : key
 		if (name !== 'blocked-by' && !SCALARS.has(name)) {
-			fields.other[key] = [value, ...more].filter(Boolean).join('\n')
+			fields.other[key] = (value ? [value, ...raw] : raw).join('\n')
 			continue
 		}
 		const before = seen.get(name)
@@ -139,7 +147,7 @@ function list(key: string, value: string, more: string[], read: Read): string[] 
 	}
 	if (value && !value.startsWith('[') && !more.length) {
 		read.flags.push(`${key} is a single value, not a list: ${canonical}`)
-		return [value]
+		return [scalar(value)]
 	}
 	read.problems.push(`${key} is not a list that reads on its own line: ${canonical}`)
 	return []

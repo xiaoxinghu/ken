@@ -93,6 +93,7 @@ describe('ken task list', () => {
 		task('on-missing.md', front('blocked-by: [nowhere.md]'))
 		task('alias.md', front('depends_on: a.md'))
 		task('scalar.md', front('blocked-by: a.md'))
+		task('quoted-scalar.md', front('depends_on: "a.md"'))
 		task('block-list.md', front('blocked-by:\n  - a.md'))
 		task('unclosed.md', '---\nstatus: done\n# Unclosed\n')
 		task('x/y.md', '# Y\n')
@@ -129,7 +130,11 @@ describe('ken task list', () => {
 					'blocked-by: [finished.md]',
 					`scheduled: ${day(-1)}`,
 					`due: ${day(5)}`,
-					'owner: someone # kept'
+					'owner: someone # kept',
+					'log: |',
+					'  first',
+					'',
+					'    indented'
 				].join('\n')
 			)}# All the fields\n`
 		)
@@ -177,7 +182,7 @@ describe('ken task list', () => {
 	})
 
 	it('reads an alias, a scalar and a block list as one blocked-by, flagged', () => {
-		for (const rel of ['alias.md', 'scalar.md', 'block-list.md']) {
+		for (const rel of ['alias.md', 'scalar.md', 'quoted-scalar.md', 'block-list.md']) {
 			expect(row(rel)).toMatchObject({ 'blocked-by': ['a.md'], state: 'blocked' })
 			expect(row(rel).notes.every((n) => n.startsWith('flagged: '))).toBe(true)
 		}
@@ -276,7 +281,7 @@ describe('ken task list', () => {
 			'blocked-by': ['finished.md'],
 			scheduled: day(-1),
 			due: day(5),
-			other: { owner: 'someone # kept' },
+			other: { owner: 'someone # kept', log: '|\n  first\n\n    indented' },
 			state: 'ready',
 			unmet: [],
 			notes: []

@@ -105,6 +105,9 @@ describe('ken task list', () => {
 		task('not-yaml.md', `${front('status: done\ntitle: Issue: 12')}# Not YAML\n`)
 		task('twice.md', front('blocked-by: [a.md]\ndepends_on: [a.md]'))
 		symlinkSync('x', join(folder, 'linked-folder'))
+		spawnSync('mkfifo', [join(dir, 'pipe')])
+		symlinkSync(join(dir, 'pipe'), join(folder, 'linked-pipe'))
+		task('circular.md', `${front('meta: &m { self: *m }')}# Circular\n`)
 		task('notes.txt', '---\nstatus: done\n---\n')
 		task('quoted.md', front('  # metadata\nstatus: "done" # finished\nrepo: \'github.com/a/b\''))
 		task('into-archive.md', front('blocked-by: [.archive/portal/b.md]'))
@@ -260,6 +263,11 @@ describe('ken task list', () => {
 		expect(row('not-yaml.md').notes.join()).toContain('its front matter is not YAML (line 3: ')
 	})
 
+	it('lists front matter that contains itself as a problem, so --json still prints', () => {
+		expect(row('circular.md')).toMatchObject({ title: 'Circular', state: 'problem' })
+		expect(row('circular.md').notes.join()).toContain('write the value out')
+	})
+
 	it('lists blocked-by written twice, under an alias, as a problem', () => {
 		expect(row('twice.md').state).toBe('problem')
 		expect(row('twice.md').notes.join()).toContain('as blocked-by and as depends_on')
@@ -271,13 +279,14 @@ describe('ken task list', () => {
 	})
 
 	it.skipIf(process.getuid?.() === 0)(
-		'lists a folder it cannot open, a file it cannot stat, a symlink loop and a dangling one as problems, and goes on',
+		'lists an unreadable folder or file, and a link to a loop, to nothing, to a folder or to a pipe, as problems',
 		() => {
 			for (const rel of [
 				'locked',
 				'loop.md',
 				'dangling.md',
 				'linked-folder',
+				'linked-pipe',
 				'unsearchable/inside.md'
 			]) {
 				expect(row(rel).state).toBe('problem')

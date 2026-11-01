@@ -149,9 +149,10 @@ mtime. `lint --fix` never changes a value it does not understand and never touch
 body.
 
 What a reader cannot settle makes the file a `problem`, each with its fix: the file
-cannot be read (a folder that cannot be opened, a link to a folder, which is not followed,
-or a link to nothing, each listed at its path); front matter that is not YAML, or not a
-mapping, named with its line; a known field written twice, an alias counting as
+cannot be read, or is no regular file (a folder that cannot be opened, a link to nothing,
+or a link to a folder, which is not followed, or to a pipe or device, which is never read,
+each listed at its path); front matter that is not YAML, or not a mapping, named with its
+line, or that holds a value containing itself through an alias; a known field written twice, an alias counting as
 `blocked-by`; a known field that is not one value; a date that is not `YYYY-MM-DD`; a
 `blocked-by` that is not a list of paths. Each row is made on its own, so whatever fails
 while making one makes that row a problem, and nothing stops the listing.

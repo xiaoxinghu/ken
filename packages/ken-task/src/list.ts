@@ -42,6 +42,9 @@ function walk(folder: string): string[] {
 /** The task at `path`; whatever stops it being read makes it a problem, with the fix. */
 function load(path: string): Read {
 	try {
+		// a link may lead to a folder, a pipe or a device, which a read would fail on, block on
+		// or never finish
+		if (!statSync(path).isFile()) throw new Error('it is not a regular file')
 		return readTask(basename(path), readFileSync(path, 'utf8'))
 	} catch (e) {
 		const read = readTask(basename(path), '')

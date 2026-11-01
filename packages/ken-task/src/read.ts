@@ -88,6 +88,15 @@ function frontMatter(source: string, read: Read): void {
 		)
 		return
 	}
+	try {
+		// what a row carries must print as JSON; an alias inside its own anchor never would
+		data = JSON.parse(JSON.stringify(data) ?? 'null')
+	} catch {
+		problems.push(
+			'its front matter has a value that contains itself, through a YAML alias inside its own anchor: write the value out'
+		)
+		return
+	}
 	if (data === null) return
 	if (typeof data !== 'object' || Array.isArray(data)) {
 		problems.push('its front matter is not `field: value` lines: write it as such, or remove it')

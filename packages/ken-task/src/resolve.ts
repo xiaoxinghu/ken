@@ -91,27 +91,38 @@ function lookup(folder: string, rel: string): string | undefined {
 }
 
 /**
+ * Where `arg` leads in the task folder, relative to it: read as a path absolute, from `cwd`,
+ * from `root` and from the folder, in that order, keeping each reading that is in the folder.
+ */
+export function inFolder(root: string, folder: string, cwd: string, arg: string): string[] {
+	return [...new Set([resolve(cwd, arg), resolve(root, arg), resolve(folder, arg)])]
+		.map((target) => relative(folder, join(real(dirname(target)), basename(target))))
+		.filter((rel) => rel && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
+}
+
+/** `arg` reaches no path in the task folder `folder`, so it can name no task. */
+export const outside = (root: string, folder: string, arg: string) =>
+	new Error(
+		`${arg} is not in the task folder ${folder}, nor its .archive/, so it is no task: ` +
+			`name a file there, absolute, or from here, the root ${root} or the folder. Run \`ken task list\` to see the tasks.`
+	)
+
+/**
  * The absolute path of the task `arg` names, live or archived: any path that reaches the
- * file, absolute, from `cwd` or from `root`, with or without its extension. The file must be
- * in `configured`, the task folder, or its `.archive/`; anything else is refused, naming it.
+ * file, absolute, from `cwd`, from `root` or from the folder, with or without its extension.
+ * The file must be in `configured`, the task folder, or its `.archive/`; anything else is
+ * refused, naming it.
  */
 export function resolveTask(root: string, configured: string, cwd: string, arg: string): string {
 	const folder = real(configured)
-	const rels = [...new Set([resolve(cwd, arg), resolve(root, arg)])]
-		.map((target) => relative(folder, join(real(dirname(target)), basename(target))))
-		.filter((rel) => rel && rel !== '..' && !rel.startsWith('../') && !isAbsolute(rel))
-	if (!rels.length) {
-		throw new Error(
-			`${arg} is not in the task folder ${folder}, nor its .archive/, so it is no task: ` +
-				`name a file there, absolute, from here or from the root ${root}. Run \`ken task list\` to see the tasks.`
-		)
-	}
+	const rels = inFolder(root, folder, cwd, arg)
+	if (!rels.length) throw outside(root, folder, arg)
 	for (const rel of rels) {
 		const found = lookup(folder, rel)
 		if (found) return found
 	}
 	throw new Error(
-		`No task ${arg} in ${folder} or its .archive/, read as a path from here and from the root ${root}, ` +
+		`No task ${arg} in ${folder} or its .archive/, read as a path from here, from the root ${root} and from the folder, ` +
 			'with or without its extension. Run `ken task list` to see the tasks.'
 	)
 }

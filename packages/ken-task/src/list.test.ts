@@ -1,59 +1,8 @@
 import { spawnSync } from 'node:child_process'
-import {
-	chmodSync,
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	realpathSync,
-	symlinkSync,
-	utimesSync,
-	writeFileSync
-} from 'node:fs'
-import { tmpdir } from 'node:os'
-import { dirname, join } from 'node:path'
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, symlinkSync, utimesSync } from 'node:fs'
+import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
-import { localDate } from './list.ts'
-
-let dir: string
-let bin: string
-
-// `ken` and `ken-task` on PATH as a user installs them, so `ken task` goes through dispatch
-beforeAll(() => {
-	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-task-')))
-	bin = join(dir, 'bin')
-	mkdirSync(bin)
-	symlinkSync(join(import.meta.dirname, '../../ken/src/cli.ts'), join(bin, 'ken'))
-	symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-task'))
-})
-
-const kenTask = (root: string, ...args: string[]) => {
-	const r = spawnSync(
-		process.execPath,
-		[join(import.meta.dirname, '../../ken/src/cli.ts'), 'task', ...args],
-		{
-			encoding: 'utf8',
-			env: {
-				...process.env,
-				KEN_ROOT: root,
-				PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH}`
-			}
-		}
-	)
-	return { status: r.status, stdout: r.stdout, stderr: r.stderr }
-}
-
-const write = (file: string, text: string) => {
-	mkdirSync(dirname(file), { recursive: true })
-	writeFileSync(file, text)
-}
-
-const newRoot = (kenYaml = '') => {
-	const root = mkdtempSync(join(dir, 'root-'))
-	writeFileSync(join(root, '.ken.yaml'), kenYaml)
-	return root
-}
-
-const day = (offset: number) => localDate(new Date(Date.now() + offset * 864e5))
+import { day, dir, kenTask, newRoot, write } from './testing.ts'
 
 type Row = {
 	path: string
@@ -147,7 +96,7 @@ describe('ken task list', () => {
 		)
 		task('README.md', '# Conventions\n')
 		task('.hidden.md', '# Hidden\n')
-		const r = kenTask(root, 'list', '--json')
+		const r = kenTask(root, ['list', '--json'])
 		chmodSync(join(folder, 'locked'), 0o755)
 		chmodSync(join(folder, 'unsearchable'), 0o755)
 		expect(r).toMatchObject({ status: 0, stderr: '' })
@@ -318,7 +267,7 @@ describe('ken task list', () => {
 	})
 
 	it('prints one row per task: state, path, unmet blockers, then its notes', () => {
-		const r = kenTask(root, 'list')
+		const r = kenTask(root, ['list'])
 		expect(r).toMatchObject({ status: 0, stderr: '' })
 		expect(r.stdout).toContain(
 			`blocked  ${join(folder, 'on-missing.md')}  blocked by nowhere.md (missing: no such file in the folder or its archive)\n`
@@ -351,7 +300,7 @@ describe('ken task list: age', () => {
 		git('init', '-q')
 		git('add', 'tasks/committed.md')
 		git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-qm', 'add')
-		const rows = JSON.parse(kenTask(root, 'list', '--json').stdout) as Row[]
+		const rows = JSON.parse(kenTask(root, ['list', '--json']).stdout) as Row[]
 		const notes = Object.fromEntries(rows.map((r) => [r.path.slice(tasks.length + 1), r.notes]))
 		expect(notes['created.md']).toEqual([
 			`open 100 days, since ${day(-100)} by created: finish it, or close it`
@@ -368,7 +317,7 @@ describe('ken task list: no tasks', () => {
 		const root = newRoot()
 		for (const make of [false, true]) {
 			if (make) mkdirSync(join(root, 'tasks'))
-			const r = kenTask(root, 'list', '--json')
+			const r = kenTask(root, ['list', '--json'])
 			expect(r).toMatchObject({ status: 0, stdout: '[]\n' })
 			expect(r.stderr).toContain(`${join(root, 'tasks')}/do-the-thing.md`)
 		}
@@ -377,7 +326,7 @@ describe('ken task list: no tasks', () => {
 	it('lists a task folder it cannot look at as a problem row, and exits 0', () => {
 		const root = newRoot('task:\n  folder: loop\n')
 		symlinkSync('loop', join(root, 'loop'))
-		const r = kenTask(root, 'list', '--json')
+		const r = kenTask(root, ['list', '--json'])
 		expect(r).toMatchObject({ status: 0, stderr: '' })
 		expect(JSON.parse(r.stdout)).toMatchObject([{ path: join(root, 'loop'), state: 'problem' }])
 	})
@@ -385,20 +334,26 @@ describe('ken task list: no tasks', () => {
 	it('reads an absolute task.folder', () => {
 		const tasks = mkdtempSync(join(dir, 'elsewhere-'))
 		write(join(tasks, 'far.md'), '# Far\n')
-		const r = kenTask(newRoot(`task:\n  folder: ${tasks}\n`), 'list')
+		const r = kenTask(newRoot(`task:\n  folder: ${tasks}\n`), ['list'])
 		expect(r).toMatchObject({ status: 0, stdout: `ready  ${join(tasks, 'far.md')}\n` })
 	})
 })
 
 describe('ken task --help', () => {
-	it.each([[], ['--help'], ['list', '--help']])('%j carries examples', (...args) => {
-		const r = kenTask(newRoot(), ...args)
+	it.each([
+		[[], 'list'],
+		[['--help'], 'list'],
+		[['list', '--help'], 'list'],
+		[['ready', '--help'], 'ready'],
+		[['path', '--help'], 'path']
+	])('%j carries examples', (args, command) => {
+		const r = kenTask(newRoot(), args)
 		expect(r).toMatchObject({ status: 0, stderr: '' })
-		expect(r.stdout).toContain('Examples:\n  ken task list')
+		expect(r.stdout).toContain(`Examples:\n  ken task ${command}`)
 	})
 
 	it('names the help for a command it does not have', () => {
-		const r = kenTask(newRoot(), 'lsit')
+		const r = kenTask(newRoot(), ['lsit'])
 		expect(r).toMatchObject({ status: 1, stdout: '' })
 		expect(r.stderr).toContain('Run `ken task --help`')
 	})

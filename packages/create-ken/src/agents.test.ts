@@ -65,7 +65,7 @@ beforeEach(() => {
 	)
 	expect(r.stderr).toBe('')
 	expect(r.status).toBe(0)
-	for (const repo of ['web', 'api', 'docs', 'site', 'lib']) {
+	for (const repo of ['web', 'api', 'docs', 'site', 'lib', 'app']) {
 		remote(`example.com/acme/${repo}`)
 		expect(run(`ken index set example.com/acme/${repo} desc="The ${repo}."`).status).toBe(0)
 	}
@@ -91,10 +91,10 @@ describe('the agents template', { timeout: 30_000 }, () => {
 	})
 
 	it('ken ensure clones a listed repo a tool is about to read, and touches nothing else', () => {
-		const hook = (tool_name: string, tool_input: object) =>
+		const hook = (tool_name: string, tool_input: object, cwd = root) =>
 			run(
 				'ken ensure',
-				JSON.stringify({ hook_event_name: 'PreToolUse', cwd: root, tool_name, tool_input })
+				JSON.stringify({ hook_event_name: 'PreToolUse', cwd, tool_name, tool_input })
 			)
 
 		const outside = hook('Read', { file_path: join(root, 'notes/x.md') })
@@ -132,6 +132,11 @@ describe('the agents template', { timeout: 30_000 }, () => {
 		const quoted = hook('Bash', { command: `cat "${clone('lib')}/README.md"` })
 		expect(quoted.status).toBe(0)
 		expect(existsSync(join(clone('lib'), 'README.md'))).toBe(true)
+
+		// a file tool's relative path, under a cwd inside .repos/
+		const owner = dirname(clone('app'))
+		expect(hook('Read', { file_path: 'app/README.md' }, owner).status).toBe(0)
+		expect(existsSync(join(clone('app'), 'README.md'))).toBe(true)
 
 		// garbage in is no reason to block a tool
 		expect(run('ken ensure', 'not json').status).toBe(0)

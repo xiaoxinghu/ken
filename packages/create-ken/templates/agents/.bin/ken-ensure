@@ -14,14 +14,20 @@ try {
 	const { cwd = process.cwd(), tool_name, tool_input: input = {} } = JSON.parse(
 		readFileSync(0, 'utf8')
 	)
-	// the text a tool reads paths from: a file tool's path (Claude Code's file_path, pi's path),
-	// a Glob's pattern under its path (pi's find reaches here as Glob), a shell command. A
-	// Grep's pattern is text to find, not a path.
+	// the text a tool reads paths from: a file tool's path (Claude Code's file_path, pi's path)
+	// or a Glob's pattern under its path (pi's find reaches here as Glob), resolved against the
+	// cwd, which may be inside .repos/; and a shell command as written, so a relative word under
+	// a cwd inside .repos/ names no repo. A Grep's pattern is text to find, not a path.
+	const paths = [
+		[input.file_path],
+		tool_name === 'Glob' ? [input.path ?? '.', input.pattern] : [input.path]
+	]
 	const texts = [
-		input.file_path,
-		tool_name === 'Glob' ? `${input.path ?? '.'}/${input.pattern}` : input.path,
-		input.command
-	].filter((t) => typeof t === 'string')
+		...paths
+			.filter((parts) => parts.every((p) => typeof p === 'string'))
+			.map((parts) => resolve(cwd, ...parts)),
+		...(typeof input.command === 'string' ? [input.command] : [])
+	]
 	// each checkout folder named in it, .repos/<host>/<owner>/<folder>, anchored on what comes
 	// before: the root or the cwd as written, which may hold spaces, else the rest of its word
 	const SEP = `\\s'"\`;|&()<>=`

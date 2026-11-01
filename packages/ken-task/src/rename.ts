@@ -76,6 +76,15 @@ export function renameTask(
 	const writes = new Map<string, [before: string, next: string]>()
 	for (const path of tasks) {
 		const own = path === source
+		// a link's file is elsewhere, maybe in the archive, maybe the task itself: rename moves
+		// and writes only files, so a link that would break or be written through is refused
+		const link = own ? undefined : linkTo(path)
+		if (link === source) {
+			throw new Error(
+				`${path} is a link to ${source}, so the rename would leave it pointing nowhere, along with every blocked-by that names it: ` +
+					`remove it with \`rm ${path}\`, naming ${source} instead wherever it was named, then rerun.`
+			)
+		}
 		let bytes: Buffer
 		try {
 			// walk lists a folder only when it cannot be read; a pipe or device is never read
@@ -110,12 +119,10 @@ export function renameTask(
 					`convert it to UTF-8, e.g. with \`iconv\`, then rerun.`
 			)
 		}
-		// a link's file is elsewhere, maybe in the archive, maybe another task: write none
-		if (!own && lstatSync(path).isSymbolicLink()) {
-			const real = realpathSync(path)
+		if (link) {
 			throw new Error(
-				`${path} names ${source} in blocked-by, but is a link to ${real}, and rename writes only the task files themselves: ` +
-					`replace the link with its file, \`rm ${path} && cp ${real} ${path}\`, or take the task out of its blocked-by, then rerun.`
+				`${path} names ${source} in blocked-by, but is a link to ${link}, and rename writes only the task files themselves: ` +
+					`replace the link with its file, \`rm ${path} && cp ${link} ${path}\`, or take the task out of its blocked-by, then rerun.`
 			)
 		}
 		if (read.problems.length) {
@@ -182,4 +189,13 @@ export function renameTask(
 		)
 	}
 	return target
+}
+
+/** The file the link at `path` leads to, as the disk names it; undefined for no link, or a link to nothing. */
+function linkTo(path: string): string | undefined {
+	try {
+		return lstatSync(path).isSymbolicLink() ? realpathSync.native(path) : undefined
+	} catch {
+		return undefined
+	}
 }

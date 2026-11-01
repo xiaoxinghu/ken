@@ -134,4 +134,16 @@ describe('ken task rename', () => {
 		expect(t.rename('tasks/old.txt', 'new').status).toBe(0)
 		expect(readFileSync(join(t.tasks, 'new.md'))).toEqual(bytes)
 	})
+
+	it('refuses while a link leads to the task, since the move would leave it pointing nowhere', () => {
+		const t = setup({ 'old.md': '# Old\n', 'b.md': '---\nblocked-by: [alias.md]\n---\n' })
+		symlinkSync(join(t.tasks, 'old.md'), join(t.tasks, 'alias.md'))
+		const r = t.rename('tasks/old.md', 'new')
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain(
+			`${join(t.tasks, 'alias.md')} is a link to ${join(t.tasks, 'old.md')}`
+		)
+		expect(t.read('old.md')).toBe('# Old\n')
+		expect(existsSync(join(t.tasks, 'new.md'))).toBe(false)
+	})
 })

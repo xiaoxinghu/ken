@@ -14,12 +14,13 @@ export function real(path: string): string {
 	}
 }
 
+const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+
 /** The archived file for `rel`, a path relative to the folder: `.archive/<rel>`, at any numeric suffix. */
 export function archived(folder: string, rel: string): string | undefined {
 	const dir = join(folder, '.archive', dirname(rel))
 	const ext = extname(rel)
 	const stem = basename(rel, ext)
-	const literal = (text: string) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 	const name = new RegExp(`^${literal(stem)}(-\\d+)?${literal(ext)}$`)
 	let entries: string[]
 	try {
@@ -34,6 +35,24 @@ export function archived(folder: string, rel: string): string | undefined {
 
 const isTaskName = (name: string) => name !== 'README.md' && !name.startsWith('.')
 
+/** The task files in `dir` other than README.md and dot entries; none if it cannot be read. */
+function files(dir: string): string[] {
+	try {
+		return readdirSync(dir, { withFileTypes: true })
+			.filter((e) => !e.isDirectory() && isTaskName(e.name))
+			.map((e) => e.name)
+	} catch {
+		return []
+	}
+}
+
+/** `name` in `dir` stands for each of `names`; guessing would act on the wrong task. */
+const ambiguous = (dir: string, name: string, names: string[]) =>
+	new Error(
+		`${join(dir, name)} names ${names.length} files, ${names.join(', ')}, so which task is meant is unclear: ` +
+			`name one with its extension, e.g. ${join(dir, names[0] ?? '')}`
+	)
+
 /**
  * The file in `dir` that `name` names: the entry itself, else the one task file whose stem it
  * is. More than one such file is refused, naming them, since guessing would act on the wrong task.
@@ -41,21 +60,8 @@ const isTaskName = (name: string) => name !== 'README.md' && !name.startsWith('.
 function named(dir: string, name: string): string | undefined {
 	const exact = join(dir, name)
 	if (lstatSync(exact, { throwIfNoEntry: false })?.isDirectory() === false) return exact
-	let entries: string[]
-	try {
-		entries = readdirSync(dir, { withFileTypes: true })
-			.filter((e) => !e.isDirectory() && isTaskName(e.name))
-			.map((e) => e.name)
-			.filter((e) => e.replace(/(.)\.[^.]*$/, '$1') === name)
-	} catch {
-		return undefined
-	}
-	if (entries.length > 1) {
-		throw new Error(
-			`${join(dir, name)} names ${entries.length} files, ${entries.join(', ')}, so which task is meant is unclear: ` +
-				`name one with its extension, e.g. ${join(dir, entries[0] ?? '')}`
-		)
-	}
+	const entries = files(dir).filter((e) => e.replace(/(.)\.[^.]*$/, '$1') === name)
+	if (entries.length > 1) throw ambiguous(dir, name, entries)
 	return entries[0] && join(dir, entries[0])
 }
 
@@ -68,9 +74,20 @@ function lookup(folder: string, rel: string): string | undefined {
 		const live = named(join(folder, dirname(name)), basename(name))
 		if (live) return live
 	}
-	// the archive takes a name without extension as the folder does, then any numeric suffix
-	const full = named(join(folder, '.archive', dirname(name)), basename(name))
-	return archived(folder, full ? join(dirname(name), basename(full)) : name)
+	const found = archived(folder, name)
+	if (found) return found
+	// without its extension: the one extension archived under that name, at any numeric suffix
+	const dir = join(folder, '.archive', dirname(name))
+	const base = basename(name)
+	const stem = new RegExp(`^${literal(base)}(?:-\\d+)?(\\.[^.]+)$`)
+	const exts = [...new Set(files(dir).flatMap((e) => stem.exec(e)?.[1] ?? []))]
+	if (exts.length > 1)
+		throw ambiguous(
+			dir,
+			base,
+			exts.map((ext) => base + ext)
+		)
+	return exts[0] && archived(folder, name + exts[0])
 }
 
 /**

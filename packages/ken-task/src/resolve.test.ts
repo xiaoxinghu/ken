@@ -39,6 +39,14 @@ describe('ken task path', () => {
 		expect(path('tasks/.archive/old').stdout).toBe(`${join(folder, '.archive/old.md')}\n`)
 	})
 
+	it('finds an archived task without its extension, at a numeric suffix', () => {
+		expect(path('tasks/gone')).toEqual({
+			status: 0,
+			stdout: `${join(folder, '.archive/gone-2.md')}\n`,
+			stderr: ''
+		})
+	})
+
 	it('refuses a path outside the folder, naming the folder', () => {
 		for (const arg of ['notes.md', '../x.md', 'tasks']) {
 			const r = path(arg)

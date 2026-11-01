@@ -141,17 +141,17 @@ export function resolveRef(
 }
 
 /**
- * The paths of the ready tasks in `configured` as of `today`, in the order to take them:
- * earliest `due`, then earliest created, then path, so two runs agree.
+ * The ready tasks in `configured` as of `today`, in the order to take them: earliest `due`,
+ * then earliest created, then path, so two runs agree.
  */
-export function readyTasks(root: string, configured: string, today: string): string[] {
+export function readyTasks(root: string, configured: string, today: string): Row[] {
 	const created = since(root, real(configured))
 	const key = (row: Row) => [row.due ?? '~', created(row.path, row.created)[0], row.path]
 	return listTasks(root, configured, today, created)
 		.filter((row) => row.state === 'ready')
-		.map((row) => ({ path: row.path, key: key(row) }))
+		.map((row) => ({ row, key: key(row) }))
 		.sort((a, b) => (a.key.join('\0') < b.key.join('\0') ? -1 : 1))
-		.map((row) => row.path)
+		.map(({ row }) => row)
 }
 
 /**

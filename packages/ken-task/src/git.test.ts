@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { git } from './git.ts'
 import { localDate } from './list.ts'
-import { dir, env, ken, kenTask, newRoot, write } from './testing.ts'
+import { dir, kenGet, kenTask, newRoot, write } from './testing.ts'
 
 const KEY = 'example.com/acme/web'
 const NAME = 'web/fix-login'
@@ -24,20 +24,7 @@ beforeAll(() => {
 /** A root with the clone of KEY, and the task TASK in it holding `front` as front matter. */
 function setup(front = 'status: todo') {
 	const root = newRoot()
-	const kenGet = (...args: string[]) => {
-		const r = spawnSync(process.execPath, [ken, 'get', KEY, ...args], {
-			encoding: 'utf8',
-			env: {
-				...env(root),
-				GIT_CONFIG_COUNT: '1',
-				GIT_CONFIG_KEY_0: `url.file://${dir}/remotes/.insteadOf`,
-				GIT_CONFIG_VALUE_0: 'https://example.com/'
-			}
-		})
-		if (r.status !== 0) throw new Error(r.stderr)
-		return r.stdout.trim()
-	}
-	const clone = kenGet()
+	const clone = kenGet(root, KEY)
 	git(clone, 'config', 'user.name', 'T')
 	git(clone, 'config', 'user.email', 't@example.com')
 	const task = (rel: string, text: string) => write(join(root, rel), `---\n${text}\n---\n`)
@@ -48,7 +35,7 @@ function setup(front = 'status: todo') {
 		task,
 		/** Claim TASK as `claim` will: its branch and worktree, with one commit on it. */
 		claim: () => {
-			const worktree = kenGet('-b', NAME)
+			const worktree = kenGet(root, KEY, '-b', NAME)
 			writeFileSync(join(worktree, 'login.txt'), 'fixed\n')
 			git(worktree, 'add', '.')
 			git(worktree, 'commit', '-q', '-m', 'Fix login')

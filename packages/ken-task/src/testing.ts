@@ -21,6 +21,21 @@ export const env = (root: string) => ({
 	PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH}`
 })
 
+/** `ken get <key> <args>` in the root `root`; https://example.com/ clones from `dir/remotes/`. */
+export const kenGet = (root: string, key: string, ...args: string[]): string => {
+	const r = spawnSync(process.execPath, [ken, 'get', key, ...args], {
+		encoding: 'utf8',
+		env: {
+			...env(root),
+			GIT_CONFIG_COUNT: '1',
+			GIT_CONFIG_KEY_0: `url.file://${dir}/remotes/.insteadOf`,
+			GIT_CONFIG_VALUE_0: 'https://example.com/'
+		}
+	})
+	if (r.status !== 0) throw new Error(r.stderr)
+	return r.stdout.trim()
+}
+
 /** `ken task <args>` in the root `root`, run from `cwd`. */
 export const kenTask = (root: string, args: string[], cwd = root) => {
 	const r = spawnSync(process.execPath, [ken, 'task', ...args], {

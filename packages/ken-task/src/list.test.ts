@@ -119,6 +119,7 @@ describe('ken task list', () => {
 		task('Upper.md', '# Upper\n')
 		task('on-case.md', front('blocked-by: [upper.md]'))
 		symlinkSync('loop.md', join(folder, 'loop.md'))
+		symlinkSync('gone.md', join(folder, 'dangling.md'))
 		task(
 			'all.md',
 			`${front(
@@ -257,9 +258,9 @@ describe('ken task list', () => {
 	})
 
 	it.skipIf(process.getuid?.() === 0)(
-		'lists a folder it cannot open, a file it cannot stat and a symlink loop as problems, and goes on',
+		'lists a folder it cannot open, a file it cannot stat, a symlink loop and a dangling one as problems, and goes on',
 		() => {
-			for (const rel of ['locked', 'loop.md', 'unsearchable/inside.md']) {
+			for (const rel of ['locked', 'loop.md', 'dangling.md', 'unsearchable/inside.md']) {
 				expect(row(rel).state).toBe('problem')
 				expect(row(rel).notes.join()).toContain(`\`ls -ld ${join(folder, rel)}\``)
 			}

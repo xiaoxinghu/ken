@@ -35,7 +35,7 @@ function walk(folder: string): string[] {
 		if (entry.name.startsWith('.') || entry.name === 'README.md') return []
 		if (entry.isDirectory()) return walk(path)
 		try {
-			return statSync(path, { throwIfNoEntry: false })?.isFile() ? [path] : []
+			return statSync(path).isFile() ? [path] : []
 		} catch {
 			return [path]
 		}

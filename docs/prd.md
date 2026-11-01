@@ -115,7 +115,14 @@ an existing section. Everything else at the root is a section of the knowledge b
 10. **External subcommands.** `ken <name> ...` runs `ken-<name>` from the root's `.bin/`,
     each layer's `.bin/` in order, then `PATH`, with `KEN_ROOT` set. A builtin cannot be
     shadowed. That is how `ken task` reaches `ken-task`, and how a team's scripts become
-    commands by being in its layer.
+    commands by being in its layer. Two kinds, one contract: a script that belongs to a
+    root or layer lives in its `.bin/` and travels with git; a packaged tool is installed
+    by the user with whatever installs commands on their machine (npm, cargo, Homebrew,
+    mise), and `ken` reads nothing but `PATH`. `ken` never fetches, pins or declares an
+    extension: how to get one is the package managers' problem, in any language, and a root
+    or layer that relies on one names it in its `AGENTS.md`. The protocol is the process
+    model, argv, `KEN_ROOT`, inherited stdio, exit code, plus the `--json` output of the
+    builtins, so an extension never knows what the kernel is written in.
 11. **One config file, shared without knowing.** `.ken.yaml` at the root keeps any
     top-level key it does not recognise, and `ken config --json` prints them all, so tools
     built on `ken` keep their settings in the one file. Per-repo, a committed `.ken.yaml`
@@ -154,8 +161,8 @@ an existing section. Everything else at the root is a section of the knowledge b
 
 Published under the `@unclex` npm scope; the source lives at `github.com/xiaoxinghu/ken`
 and each package's `repository` field says so. `create-ken` is unscoped so the command is
-`npm create ken`. A root may pin `@unclex/ken` in its own `package.json` so everyone on a
-team layer runs the same kernel through `pnpm exec ken` or a direnv `PATH_add`.
+`npm create ken`. npm is one way to install them, not a dependency of the design: `ken`
+and an extension are commands on `PATH`, however they got there.
 
 ## The kernel: `ken`
 
@@ -382,7 +389,8 @@ accepted.
 
 Plain-text tasks in one folder of the root, one file per task, the file's path as its
 identity, tied to code by repo key and branch name. Its own package, `@unclex/ken-task`,
-reached as `ken task`; its PRD is `docs/ken-task.md`. It depends on `ken` for `config`,
+installed by the user beside `ken` and reached as `ken task` through `PATH` (decision
+10); its PRD is `docs/ken-task.md`. It depends on `ken` for `config`,
 `which`, `path code` and `get -b`, and `ken` never depends on it. The kernel knows two
 things of it: the `task:` section of `.ken.yaml`, kept and printed, and a branch named
 after a task, passed to `get -b` like any other.
@@ -496,6 +504,12 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
 - **A personal branch, a GitHub fork, or git-crypt for private content.** Private only
   socially, public by construction, and broken under worktrees, respectively.
 - **Shallow clones.** Break the second worktree and every fetch; blobless instead.
+- **Extensions as volume dependencies: declared in `.ken.yaml`, cloned into `.repos/` by
+  `init`, or pinned in a root `package.json`.** Then `ken` must say how to get one, and an
+  extension may be a folder of a monorepo, a closed-source binary, or a Homebrew formula:
+  defining acquisition is being a package manager. `.repos/` is the user's work, not
+  `node_modules`. Like `git` and `kubectl`, `ken` finds `ken-<name>` on `PATH` and the user
+  installs it as they install `ken`.
 
 ## Prior art
 

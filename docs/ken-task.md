@@ -1,10 +1,11 @@
 # ken-task — PRD
 
 Plain-text tasks in one folder of a ken root, tied to code by repo key and branch name.
-Published as `@unclex/ken-task`; its binary `ken-task` is found by `ken` dispatch, so it
-reads as `ken task <command>`. It depends on `ken` for `config`, `which`, `path code` and
-`get -b`, runs git itself for the rest. `ken` never depends on it. This document says what
-is true; git is its history.
+Published as `@unclex/ken-task`, installed by the user beside `ken`; its binary `ken-task`
+is found on `PATH` by `ken` dispatch, so it reads as `ken task <command>`. A root or layer
+that relies on it says so in its `AGENTS.md`. It depends on `ken` for `config`, `which`,
+`path code` and `get -b`, runs git itself for the rest. `ken` never depends on it. This
+document says what is true; git is its history.
 
 ## Problem
 

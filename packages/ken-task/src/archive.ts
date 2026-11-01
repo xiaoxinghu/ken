@@ -1,0 +1,166 @@
+import {
+	closeSync,
+	lstatSync,
+	mkdirSync,
+	openSync,
+	readdirSync,
+	readFileSync,
+	readlinkSync,
+	renameSync,
+	rmSync,
+	statSync,
+	symlinkSync
+} from 'node:fs'
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
+import { branchOf, git, repos } from './git.ts'
+import { localDate } from './list.ts'
+import { readTask } from './read.ts'
+import { real, resolveTask } from './resolve.ts'
+
+/**
+ * `ken task archive`: move each task `args` name to `.archive/<its path in the folder>`, a
+ * relative link made anew so it reaches its file, after every one is checked: closed, not already archived, and with no branch left on this
+ * machine. A name already archived keeps its file; the new one takes the first free numeric
+ * suffix before its extension, which `renamed` says. Only the named files are touched:
+ * a reference still resolves, through the archive.
+ */
+export function archiveTasks(
+	root: string,
+	configured: string,
+	cwd: string,
+	args: string[]
+): { path: string; renamed?: string }[] {
+	const folder = real(configured)
+	const archive = join(folder, '.archive')
+	const repo = repos()
+	const paths = [...new Set(args.map((arg) => resolveTask(root, configured, cwd, arg)))]
+	for (const path of paths) {
+		if (path.startsWith(`${archive}/`)) {
+			throw new Error(
+				`${path} is already in the archive, so nothing is moved. Run \`ken task list\` for the live tasks; to bring it back, \`mv\` it to its path in ${folder}.`
+			)
+		}
+		if (!regular(path)) {
+			throw new Error(
+				`${path} is not a regular file, nor a link to one, so it cannot be read as closed and is not archived: \`ls -l ${path}\` shows what it is. ` +
+					'Make it a file, or remove it by hand. Nothing was moved.'
+			)
+		}
+		const { fields, problems } = readTask(basename(path), readFileSync(path, 'utf8'))
+		if (problems.length || (fields.status !== 'done' && fields.status !== 'wontfix')) {
+			throw new Error(
+				`${path} is open (${problems.length ? 'it could not be fully read' : `status ${fields.status}`}), ` +
+					'and the archive holds closed tasks only: an archived task blocks nothing, so archiving open work would make its dependents ready. ' +
+					`If it is finished, run \`ken task set ${path} status done\`, then rerun. Nothing was moved.`
+			)
+		}
+		const name = branchOf(folder, path)
+		if (fields.repo && repo(fields.repo)?.exists(name)) {
+			throw new Error(
+				`${path} still has its branch ${name} in ${fields.repo}, and an archived task's branch would be left behind with nothing listing it. ` +
+					`Run \`ken task finish ${path}\` to remove its worktree and branch, then rerun. Nothing was moved.`
+			)
+		}
+	}
+	return paths.map((path) => {
+		const rel = relative(folder, path)
+		const ext = extname(rel)
+		const link = lstatSync(path).isSymbolicLink() ? readlinkSync(path) : undefined
+		mkdirSync(join(archive, dirname(rel)), { recursive: true })
+		// each name is taken by an exclusive create, so a concurrent archive never overwrites
+		// one: a link is made anew there, relative to its new folder so it still reaches its
+		// file; a file is renamed over the empty file that holds its name
+		let target = join(archive, rel)
+		for (let n = 2; ; n++) {
+			try {
+				if (link === undefined) closeSync(openSync(target, 'wx'))
+				else {
+					const to = isAbsolute(link)
+						? link
+						: relative(dirname(target), resolve(dirname(path), link))
+					symlinkSync(to, target)
+				}
+				break
+			} catch (e) {
+				if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e
+			}
+			target = join(archive, dirname(rel), `${basename(rel, ext)}-${n}${ext}`)
+		}
+		if (link === undefined) renameSync(path, target)
+		else rmSync(path)
+		const renamed =
+			target === join(archive, rel)
+				? undefined
+				: `${join(archive, rel)} was already archived, so ${path} is archived as ${target}; a reference to ${rel} still resolves to one of them.`
+		return { path: target, renamed }
+	})
+}
+
+/** Whether `path` is a regular file or a link to one: a pipe or a device is never read. */
+function regular(path: string): boolean {
+	try {
+		return statSync(path).isFile()
+	} catch {
+		return false
+	}
+}
+
+/** Every regular file under `dir`, or link to one, at any depth; none if it cannot be read. */
+function files(dir: string): string[] {
+	try {
+		return readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+			const path = join(dir, e.name)
+			return e.isDirectory() ? files(path) : regular(path) ? [path] : []
+		})
+	} catch {
+		return []
+	}
+}
+
+/**
+ * `ken task purge`: delete each file in the archive whose `closed`, else its mtime, is
+ * before `today` less `days`, and say whether the folder is in a git work tree, which then
+ * holds what was committed of them; else nothing does.
+ */
+export function purgeArchive(
+	configured: string,
+	days: number,
+	today: Date
+): { deleted: string[]; said: string } {
+	const folder = real(configured)
+	const archive = join(folder, '.archive')
+	const cutoff = localDate(new Date(today.getTime() - days * 864e5))
+	// dates compare as text, so a cutoff must be a four-digit year
+	if (!/^\d{4}-/.test(cutoff)) {
+		throw new Error(
+			`--older-than ${days} reaches before the year 1000, so no file can be that old and nothing was deleted. ` +
+				'Run `ken task purge --older-than <days>` with a number of days that ends after that, e.g. `ken task purge --older-than 365`.'
+		)
+	}
+	const deleted = files(archive).filter((path) => {
+		let closed: string | undefined
+		try {
+			closed = readTask(basename(path), readFileSync(path, 'utf8')).fields.closed
+		} catch {}
+		return (closed ?? localDate(statSync(path).mtime)) < cutoff
+	})
+	for (const path of deleted) rmSync(path)
+	if (!deleted.length) {
+		return {
+			deleted,
+			said: `Nothing in ${archive} was closed, else last modified, before ${cutoff}, so nothing was deleted.`
+		}
+	}
+	let top: string | undefined
+	try {
+		top = git(folder, 'rev-parse', '--show-toplevel')
+	} catch {}
+	const what = `Deleted ${deleted.length} archived task${deleted.length > 1 ? 's' : ''} closed, else last modified, before ${cutoff}.`
+	return {
+		deleted,
+		said: top
+			? `${what} ${folder} is in the git work tree ${top}, so its history holds what was committed of them: ` +
+				`\`git -C ${top} log --oneline -- ${archive}\` lists those commits, and \`git -C ${top} add -A ${archive}\` stages the deletion to commit.`
+			: `${what} ${folder} is in no git work tree, so nothing else holds a copy: they are gone.`
+	}
+}

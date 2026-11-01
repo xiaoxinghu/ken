@@ -109,7 +109,7 @@ an existing section. Everything else at the root is a section of the knowledge b
    page, under about 60 lines; a section's lists its pages one line each, under about 150.
    An agent reads the front page, a section, a page: three hops, the first two small.
    Nothing derivable goes in: the repo list is `ken repos`, recent changes are `log.md`.
-   The caps belong to a lint script, not to `ken`.
+   The caps belong to `ken lint`, not to the kernel.
 9. **A code reference is `<key>:<path>#<symbol>`.** Never a line number, never an absolute
    path. `ken path <ref>` resolves it to a local path when the repo is cloned, else to the
    repo's URL, `https://<key>.git`, saying on stderr to `ken get <key>`.
@@ -149,7 +149,7 @@ an existing section. Everything else at the root is a section of the knowledge b
     their output. Every message, above all every error, says what is the case, why it
     matters, and what to run next, with the real command and the real keys or paths
     filled in. `ken help` and `ken <command> --help` carry the same examples.
-18. **Its own project, in TypeScript**: a pnpm monorepo of three packages, no build step,
+18. **Its own project, in TypeScript**: a pnpm monorepo of four packages, no build step,
     node running TypeScript directly.
 
 ## Packages
@@ -158,6 +158,7 @@ an existing section. Everything else at the root is a section of the knowledge b
 | ------------------ | ---------------- | ------------------------------------------------------ |
 | `@unclex/ken`      | `ken`            | the kernel: root, layout, index, layers, dispatch      |
 | `@unclex/ken-task` | `ken task`       | plain-text tasks in one folder; `docs/ken-task.md`     |
+| `@unclex/ken-lint` | `ken lint`       | the knowledge-base lint                                |
 | `create-ken`       | `npm create ken` | templates and the scaffolding prompt; calls `ken init` |
 
 Published under the `@unclex` npm scope; the source lives at `github.com/xiaoxinghu/ken`
@@ -302,7 +303,7 @@ repo is thin, the fix is a README PR to that repo. A page on how we use a third-
 repo and where it bites is knowledge about our use of it, and belongs here.
 
 - **A `README.md` per folder is the index** (decision 8). The front page says what the
-  knowledge base is, names the few evergreen pages, gives one line per section with its
+  knowledge base is, links the few evergreen pages, which live in sections like any other, gives one line per section with its
   page count and one line per layer. A section's README lists its pages one line each;
   over the cap it splits. GitHub renders a folder's README; `ken path <file>` prints the
   chain top down.
@@ -311,10 +312,10 @@ repo and where it bites is knowledge about our use of it, and belongs here.
 - **Sections** are the root's own: a folder at the top with a `README.md` listing its
   pages, made when a topic needs one. None is made up front, since nothing is assumed about
   what the root is for; an engineering team might split by Diátaxis type into `systems/`,
-  `flows/`, `playbooks/`, `decisions/`. Pages are Markdown. Code references are `<key>:<path>#<symbol>`. No `generated/`: a generated
+  `flows/`, `playbooks/`, `decisions/`. Pages are Markdown, each in a section: none sits at the top beside the front page. Code references are `<key>:<path>#<symbol>`. No `generated/`: a generated
   overview belongs in the repo's own README.
-- **The LLM writes the index**, with judgment about grouping and what is evergreen. A lint
-  script makes that safe: every page in exactly one section README, every link and code
+- **The LLM writes the index**, with judgment about grouping and what is evergreen. `ken lint`
+  makes that safe: every page in exactly one section README, every link and code
   reference resolving, the caps, and pages nobody links to and nobody has touched in a
   year proposed for `.archive/`.
 - **A layer is a section**, complete on its own, with its own front page and READMEs.
@@ -399,6 +400,30 @@ installed by the user beside `ken` and reached as `ken task` through `PATH` (dec
 things of it: the `task:` section of `.ken.yaml`, kept and printed, and a branch named
 after a task, passed to `get -b` like any other.
 
+## `ken-lint`
+
+The knowledge-base lint, its own package, `@unclex/ken-lint`, installed beside `ken` and
+reached as `ken lint` through `PATH` (decision 10), like `ken-task`. It is a package and
+not a `.bin/` script because it parses Markdown as CommonMark (`mdast-util-from-markdown`),
+so a link, a code span and a link's label are what a Markdown reader sees, never a guess
+at where one ends. It reads `ken config --json` for the layers and the task folder, and
+runs `ken path` for every code reference.
+
+It walks the root's sections and each layer's, through the layer links as `find -L` does,
+each folder once, skipping hidden entries and the task folders: the root's, and each
+layer's from its own `.ken.yaml` (`KEN_ROOT=<layer> ken config --json`), compared by
+real path; a config it cannot read stops it with `ken`'s message. Each problem names its file,
+and its line when it has one, and what to do. Errors, exit 1: a page in no section
+`README.md` or in more than one; a `.md` at the top of the root or a layer other than
+`README.md`, `AGENTS.md`, `CLAUDE.md` and `log.md`, a page in no section; a Markdown link or
+reference definition to a file that does not exist; a code reference, in prose or a code
+span, that `ken path` resolves to a file not in the clone; the front page over 60 lines, a
+section README over 150, the root `AGENTS.md` over 40, constants at the top of its source.
+Notes, exit 0: references into repos not cloned, counted with the `ken get` to run; a page
+nobody links to (a section README's listing does not count) and unchanged in a year by
+`git log -1`, with the `git mv` into `.archive/`. Links and references in code blocks are
+examples and not checked.
+
 ## `create-ken`
 
 `npm create ken [<dir>] [--template <name>]` asks for what it was not given, copies the
@@ -479,7 +504,6 @@ after a docs, skill or model change.
 | `ken-status`, run by the session-start hook as `ken status`            | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders. A repo it shows as not cloned is the agent's to `ken get` before reading in it: no hook clones behind a tool. |
 | deny rules in the root's `.claude/settings.json`, Claude Code only     | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                                                                            |
 | `ken-doctor`                                                           | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream.                                                    |
-| `ken-lint`                                                             | `find -L` over the sections, the READMEs, the caps, `path` for every reference.                                                                                                                 |
 | `ken-pull`                                                             | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                                                                   |
 | `ken-grep`                                                             | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                                                                   |
 | `ken-promote`                                                          | `git mv` plus `index unset` and `index set --layer`.                                                                                                                                            |

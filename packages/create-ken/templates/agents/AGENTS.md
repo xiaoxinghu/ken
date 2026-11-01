@@ -8,11 +8,11 @@ front page, README.md. Sessions start here, at the root, where the hooks and den
 
 - A section is a folder at the top with a README.md listing its pages, one line each. Make
   one when a topic needs it, and add its line under `## Sections` in README.md.
-- A page is a Markdown file in one section, linked from its README.md by relative path.
-- A layer is a section shared by a team: a link to the clone of its repo, made by
-  `ken layer add <key>`. Change it in that repo, never here.
+- A page is a Markdown file in a section, never at the top, linked from the section's README.md.
+- A layer is a team's shared section, linked by `ken layer add <key>`: change it in its repo.
 - Names starting with `.`, and AGENTS.md, CLAUDE.md, log.md and README.md, are not sections.
-- Commit what you change: the root is synced by git and nothing else.
+- After changing pages, run `ken lint` (`@unclex/ken-lint`, installed beside `ken`), then
+  commit: the root is synced by git and nothing else.
 
 ## Code
 

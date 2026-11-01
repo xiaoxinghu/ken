@@ -1,0 +1,35 @@
+{
+	"name": "@unclex/ken-lint",
+	"version": "0.0.0",
+	"description": "The knowledge-base lint of a ken root: every page in one section README, every link and code reference resolving, the caps. Reached as `ken lint`.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/xiaoxinghu/ken.git",
+		"directory": "packages/ken-lint"
+	},
+	"homepage": "https://unclex.net",
+	"bin": {
+		"ken-lint": "./src/cli.ts"
+	},
+	"files": [
+		"src",
+		"!src/**/*.test.ts"
+	],
+	"engines": {
+		"node": ">=24"
+	},
+	"peerDependencies": {
+		"@unclex/ken": "workspace:*"
+	},
+	"dependencies": {
+		"mdast-util-from-markdown": "^2.1.0"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"devDependencies": {
+		"@types/mdast": "^4.0.4"
+	}
+}

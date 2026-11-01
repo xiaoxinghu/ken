@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The task system, an external subcommand of ken: see docs/ken-task.md.
 import { spawnSync } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { realpathSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { formatRows, listTasks, localDate } from './list.ts'
 
@@ -83,8 +83,17 @@ function list(args: string[]): void {
 		)
 	}
 	const { root, folder } = settings()
-	const isFolder = statSync(folder, { throwIfNoEntry: false })?.isDirectory()
-	const rows = isFolder ? listTasks(root, folder, localDate(new Date())) : []
+	// the real path, as the root is, so that a path compares as the disk names it; a folder
+	// that cannot be looked at is listed, as a problem row
+	let real: string | undefined
+	try {
+		const isFolder = statSync(folder, { throwIfNoEntry: false })?.isDirectory()
+		real = isFolder ? realpathSync.native(folder) : undefined
+	} catch {
+		real = folder
+	}
+	const isFolder = real !== undefined
+	const rows = real ? listTasks(root, real, localDate(new Date())) : []
 	if (!rows.length) {
 		process.stderr.write(
 			`${isFolder ? `No tasks in ${folder}` : `${folder} is not a folder, so there are no tasks`}. ` +

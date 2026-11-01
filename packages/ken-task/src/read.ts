@@ -31,10 +31,13 @@ export function isDate(text: string): boolean {
 	)
 }
 
+/** A YAML value without its trailing comment: a `#` after a space, outside quotes. */
+const uncomment = (raw: string): string =>
+	(/^(?:"(?:[^"\\]|\\.)*"|'(?:[^']|'')*'|[^"'#]|["']|(?<=\S)#)*/.exec(raw)?.[0] ?? '').trim()
+
 /** A YAML value as written: its trailing comment dropped, unquoted. */
 function scalar(raw: string): string {
-	const quoted = /^\s*("(?:[^"\\]|\\.)*"|'(?:[^']|'')*')\s*(#.*)?$/.exec(raw)?.[1]
-	const text = quoted ?? raw.replace(/(^|\s+)#.*$/, '').trim()
+	const text = uncomment(raw)
 	const double = /^"(.*)"$/.exec(text)?.[1]
 	if (double !== undefined) return double.replace(/\\(["\\])/g, '$1')
 	const single = /^'(.*)'$/.exec(text)?.[1]
@@ -108,7 +111,7 @@ function frontMatter(lines: string[], read: Read): void {
 		seen.set(name, key)
 		if (name === 'blocked-by') {
 			if (key !== name) flags.push(`${key} reads as blocked-by: rename the field to blocked-by`)
-			fields['blocked-by'] = list(key, scalar(value), more, read)
+			fields['blocked-by'] = list(key, uncomment(value), more, read)
 			continue
 		}
 		const text = scalar(value)

@@ -1,5 +1,5 @@
 import { spawnSync } from 'node:child_process'
-import { type Dirent, readdirSync, readFileSync, statSync } from 'node:fs'
+import { type Dirent, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path'
 import { type Fields, isDate, type Read, readTask } from './read.ts'
 
@@ -51,6 +51,15 @@ function load(path: string): Read {
 			`it could not be read (${(e as Error).message}): make it a readable file or folder, or remove it; \`ls -ld ${path}\` shows it`
 		)
 		return read
+	}
+}
+
+/** `path` as the disk names it, which on a case-insensitive disk may differ in case. */
+function real(path: string): string {
+	try {
+		return realpathSync.native(path)
+	} catch {
+		return path
 	}
 }
 
@@ -129,14 +138,15 @@ export function listTasks(root: string, folder: string, today: string): Row[] {
 				if (rel === '..' || rel.startsWith('../') || isAbsolute(rel)) continue
 				// a reference into the archive names the archived file, at any suffix, as a live one would
 				const name = rel.startsWith('.archive/') ? rel.slice('.archive/'.length) : undefined
-				const live = name === undefined ? tasks.get(target) : undefined
+				const key = tasks.has(target) ? target : real(target)
+				const live = name === undefined ? tasks.get(key) : undefined
 				if (!live && !archived(folder, name ?? rel)) continue
 				if (from) {
 					flags.push(
 						`blocked-by ${ref} resolves from ${from}, not from this file: write it as ${relative(dirname(path), target)}`
 					)
 				}
-				return live && isOpen(live) ? [{ ref, path: target, reason: 'open' }] : []
+				return live && isOpen(live) ? [{ ref, path: key, reason: 'open' }] : []
 			}
 			return [{ ref, reason: 'missing' }]
 		})

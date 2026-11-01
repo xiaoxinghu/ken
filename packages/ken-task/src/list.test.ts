@@ -1,6 +1,7 @@
 import { spawnSync } from 'node:child_process'
 import {
 	chmodSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
@@ -112,6 +113,10 @@ describe('ken task list', () => {
 		task('on-archive-folder.md', front('blocked-by: [c.md]'))
 		task('a,b.md', front('status: done'))
 		task('on-comma.md', front('blocked-by: ["a,b.md", x/y.md]'))
+		task('a # b.md', front('status: done'))
+		task('on-hash.md', front('blocked-by: ["a # b.md"] # the hash is the name\'s'))
+		task('Upper.md', '# Upper\n')
+		task('on-case.md', front('blocked-by: [upper.md]'))
 		symlinkSync('loop.md', join(folder, 'loop.md'))
 		task(
 			'all.md',
@@ -222,6 +227,18 @@ describe('ken task list', () => {
 		})
 	})
 
+	it('keeps a hash inside a quoted blocked-by item, and drops the comment after it', () => {
+		expect(row('on-hash.md')).toMatchObject({ 'blocked-by': ['a # b.md'], state: 'ready' })
+	})
+
+	it('finds a live blocker whose name differs in case on a case-insensitive disk', (ctx) => {
+		if (!existsSync(join(folder, 'upper.md'))) ctx.skip()
+		expect(row('on-case.md')).toMatchObject({
+			state: 'blocked',
+			unmet: [{ ref: 'upper.md', path: join(folder, 'Upper.md'), reason: 'open' }]
+		})
+	})
+
 	it('keeps a comma inside a quoted blocked-by item', () => {
 		expect(row('on-comma.md')).toMatchObject({
 			'blocked-by': ['a,b.md', 'x/y.md'],
@@ -321,6 +338,14 @@ describe('ken task list: no tasks', () => {
 			expect(r).toMatchObject({ status: 0, stdout: '[]\n' })
 			expect(r.stderr).toContain(`${join(root, 'tasks')}/do-the-thing.md`)
 		}
+	})
+
+	it('lists a task folder it cannot look at as a problem row, and exits 0', () => {
+		const root = newRoot('task:\n  folder: loop\n')
+		symlinkSync('loop', join(root, 'loop'))
+		const r = kenTask(root, 'list', '--json')
+		expect(r).toMatchObject({ status: 0, stderr: '' })
+		expect(JSON.parse(r.stdout)).toMatchObject([{ path: join(root, 'loop'), state: 'problem' }])
 	})
 
 	it('reads an absolute task.folder', () => {

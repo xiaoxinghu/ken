@@ -121,17 +121,23 @@ Decided in this order, derived on every run:
 A blocker holds a task back until it is landed, not merely done. **Resolution** of a
 reference is a stat of two paths: live in the folder, its state applies; in the archive,
 closed by construction, so it blocks nothing and is not opened; nowhere, missing, which
-blocks visibly, because a typo must not make work ready. **Order** among ready tasks:
+blocks visibly, because a typo must not make work ready. In the archive means
+`.archive/<path>` or `.archive/<stem>-<n><ext>`, the name `archive` gives a second file of
+one path; a reference written into `.archive/` is looked up there the same way. **Order** among ready tasks:
 earliest `due`, then earliest `created`, then path, so two runs agree. No priority, no
 effort, no stored in-progress state.
 
 ## Tolerance
 
-Read, never written. Each is listed normally, flagged in `list`, named with its upgrade
-by `lint`, and fixed by `lint --fix` when the fix loses nothing:
+Read, never written. Front matter is read by a YAML parser, and tolerance is applied to
+the values it gives: every deviation below is one of meaning, never of syntax, so YAML
+decides quoting, comments and lists, and no home-made grammar can disagree with it. Each
+is listed normally, named with its upgrade by `lint`, and fixed
+by `lint --fix` when the fix loses nothing. All but the first and the last are flagged in
+`list`: those two are how a file is dropped in, so they are no mistake.
 
 - no front matter, or no `status`: open
-- a `status` value that is not one of the three: open, flagged
+- a `status` value that is not one of the three: open
 - `blocked_by`, `blockedBy`, `depends_on`, `depends-on`: `blocked-by`
 - a scalar where a list belongs; a YAML block list
 - a path in `blocked-by` that resolves from the folder or the root but not from the file
@@ -142,12 +148,27 @@ A `status: done` with no `closed` is closed; `lint --fix` adds `closed` from the
 mtime. `lint --fix` never changes a value it does not understand and never touches the
 body.
 
+What a reader cannot settle makes the file a `problem`, each with its fix: the file
+cannot be read, or is no regular file (a folder that cannot be opened, a link to nothing,
+or a link to a folder, which is not followed, or to a pipe or device, which is never read,
+each listed at its path); front matter that is not YAML, or not a mapping, named with its
+line, or that holds a value containing itself through an alias; a known field written twice, an alias counting as
+`blocked-by`; a known field that is not one value; a date that is not `YYYY-MM-DD`; a
+`blocked-by` that is not a list of paths. Each row is made on its own, so whatever fails
+while making one makes that row a problem, and nothing stops the listing.
+
 ## Commands
 
 Every argument that names a task is any path that reaches the file: absolute, relative to
 the shell's directory, or relative to the root. Output paths are absolute, so output feeds
-the next command unchanged. `--json` on `list` is one array of objects carrying every
-parsed field, the state, the unmet blockers and the notes.
+the next command unchanged. `--json` on `list` is one array of objects, by path: `path`,
+`title`, every known field as read (`status` is `todo` when absent), `other` with the
+unknown fields as YAML reads them, `state`, `unmet` (each `{ ref, path, reason }`, `reason` `open` or
+`missing`, only on an open task) and `notes`. Without `--json` a row is the state, the path
+and the unmet blockers, each note indented under it. A missing or empty folder lists
+nothing, says on stderr how to add a task, and exits 0. Open more than 90 days counts from
+`created`, else the date the root's git first added the path (renames not followed), else
+the mtime.
 
 | Command                                | Does                                                                                                                                                                                                                                                                                                                  | Refuses                                                                                                                                                                             |
 | -------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |

@@ -1,6 +1,7 @@
 import { readFileSync, realpathSync, renameSync, statSync, writeFileSync } from 'node:fs'
 import { basename, dirname, join, relative } from 'node:path'
 import { isMap, isNode, isScalar, parse, parseDocument } from 'yaml'
+import { isKey } from './add.ts'
 import { isDate, readTask } from './read.ts'
 import { resolveTask } from './resolve.ts'
 
@@ -9,7 +10,6 @@ export const FIELDS = ['status', 'repo', 'blocked-by', 'scheduled', 'due'] as co
 const STATUSES = ['todo', 'done', 'wontfix']
 const ALIASES = ['blocked_by', 'blockedBy', 'depends_on', 'depends-on']
 const FENCE = /^---\s*$/
-const PART = /^[a-z0-9._-]+$/
 
 /**
  * `text` with the front matter line of `field` set to `value`, or removed when `value` is
@@ -119,11 +119,7 @@ function check(field: string, value: string): void {
 	if ((field === 'scheduled' || field === 'due') && !isDate(value)) {
 		throw refuse('a date, YYYY-MM-DD', '2026-11-30')
 	}
-	const parts = value.split('/')
-	if (
-		field === 'repo' &&
-		!(parts.length === 3 && parts.every((p) => PART.test(p) && p !== '.' && p !== '..'))
-	) {
+	if (field === 'repo' && !isKey(value)) {
 		throw refuse('a repo key, <host>/<owner>/<repo> in lowercase', 'github.com/acme/join-web')
 	}
 }

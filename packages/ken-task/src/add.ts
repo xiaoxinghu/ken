@@ -7,6 +7,10 @@ import { inFolder, outside, real, resolveTask } from './resolve.ts'
 const PART = /^[\p{L}\p{N}][\p{L}\p{N}-]*$/u
 const EXT = /\.[\p{L}\p{N}]+$/u
 const KEY = /^[a-z0-9._-]+\/[a-z0-9._-]+\/[a-z0-9._-]+$/
+
+/** Whether `text` is a repo key, `<host>/<owner>/<repo>` in lowercase, naming a folder under .repos/. */
+export const isKey = (text: string) =>
+	KEY.test(text) && text.split('/').every((p) => p !== '.' && p !== '..')
 const stemOf = (name: string) => name.replace(/(.)\.[^.]*$/, '$1')
 
 export type Added = {
@@ -31,10 +35,7 @@ export function addTask(
 	opts: { repo?: string; blockedBy: string[]; today: string }
 ): Added {
 	const { repo, blockedBy, today } = opts
-	if (
-		repo !== undefined &&
-		!(KEY.test(repo) && repo.split('/').every((p) => p !== '.' && p !== '..'))
-	) {
+	if (repo !== undefined && !isKey(repo)) {
 		throw new Error(
 			`-r ${JSON.stringify(repo)} is not a repo key, so \`ken task claim\` could not find its clone: ` +
 				'a key is <host>/<owner>/<repo> in lowercase, e.g. `-r github.com/acme/portal`, as `ken which` prints it inside the clone.'

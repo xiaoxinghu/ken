@@ -128,8 +128,8 @@ Fields:
   status      todo, done or wontfix; done or wontfix also writes closed: <today>, todo
               removes closed
   repo        a repo key, <host>/<owner>/<repo>, e.g. github.com/acme/join-web
-  blocked-by  comma-separated tasks, each any path that reaches the file from here or
-              from the root, found live or archived; written relative to the file
+  blocked-by  comma-separated tasks, each any path that reaches the file from here, the
+              root or the folder, found live or archived; written relative to the file
   scheduled   YYYY-MM-DD, the day the task becomes ready
   due         YYYY-MM-DD, its deadline
 

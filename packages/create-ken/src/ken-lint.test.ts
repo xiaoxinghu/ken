@@ -71,7 +71,8 @@ beforeEach(() => {
 		// listed by its folder's name, walked first through a link to that folder
 		'systems/pages/intro.md': '# Intro\n',
 		// a link in a tilde fence is an example
-		'systems/design(v2).md': '# Design\n\n~~~md\n[example](missing.md)\n~~~\n',
+		'systems/design(v2).md':
+			'# Design\n\n~~~md\n[example](missing.md)\n~~~\n\nOr inline: ``[example](missing.md)``, `a`.\n',
 		// a reference in code, in a link, and with brackets in its path inside parentheses
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +

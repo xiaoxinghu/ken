@@ -105,8 +105,10 @@ const trimPath = (path) => {
 	return open && count(open) < count(p.at(-1)) ? trimPath(p.slice(0, -1)) : p
 }
 // a link in code is an example, not a link: a fenced block, to its closing fence or the end,
-// and an inline span. Not an indented block: without a parser it is a nested list item.
-const CODE = /^ {0,3}(`{3,}|~{3,}).*$[\s\S]*?(?:^ {0,3}\1.*$|(?![\s\S]))|`[^`\n]*`/gm
+// and an inline span, closed by a run of as many backticks within its paragraph. Not an
+// indented block: without a parser it is a nested list item.
+const CODE =
+	/^ {0,3}(`{3,}|~{3,}).*$[\s\S]*?(?:^ {0,3}\1.*$|(?![\s\S]))|(?<!`)(`+)(?!`)(?:(?!\n\s*\n)[\s\S])*?[^`]\2(?!`)/gm
 const inbound = new Set() // real paths of pages some front page or page links to
 const paths = new Map() // code reference -> `ken path` of it
 const uncloned = new Map() // key -> references into it not checked

@@ -1215,8 +1215,9 @@ EOF
 $list
 
 EOF
-			def=$(git -C "$clone" symbolic-ref -q --short refs/remotes/origin/HEAD) || def=''
-			def=${def#origin/}
+			# the full ref, as --short turns origin/main into remotes/origin/main beside a tag origin/main
+			def=$(git -C "$clone" symbolic-ref -q refs/remotes/origin/HEAD) || def=''
+			def=${def#refs/remotes/origin/}
 			if [ -n "$def" ] && [ "$on" != "$def" ]; then
 				was='a detached HEAD' fix="git -C $(q "$clone") switch $(q "$def")"
 				if [ -n "$on" ]; then was="the branch $on" fix="$fix\`, then \`ken get $key -b $(q "$on")"; fi

@@ -1289,6 +1289,8 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			git(app, 'worktree', 'add', '-q', '--detach', '../app.pinned')
 			git(app, 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
 			git(app, 'worktree', 'move', '../app.feat-x', '../app.renamed')
+			// a tag named as the remote HEAD's short form, which git then shortens to remotes/origin/main
+			git(app, 'tag', 'origin/main')
 		})
 		const noDesc =
 			'stray: no desc, and a desc is what lets an agent choose a repo before cloning it. Run'

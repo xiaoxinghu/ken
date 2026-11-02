@@ -391,6 +391,137 @@ reachable() {
 	done
 }
 
+# The relative way up from a folder $1 levels below root $2 to the top: ../.. and one .. more
+# for each part of $2 below the top. find_root has run.
+up_to_top() {
+	up=.. i=1 rest=${2#"$TOP"}
+	while [ $i -lt "$1" ]; do up=$up/.. i=$((i + 1)); done
+	while [ -n "$rest" ]; do up=$up/.. rest=${rest%/*}; done
+	printf '%s\n' "$up"
+}
+
+# Whether a folder of the three above $1, up to .repos or .agents, is a link, said on stdout:
+# reconcile neither makes nor removes anything under one, which would act elsewhere.
+linked_above() {
+	for above in "${1%/*}" "${1%/*/*}" "${1%/*/*/*}"; do
+		if [ -L "$above" ]; then
+			printf 'Left %s alone: %s is a link, so ken makes or removes nothing inside it.\n' "$1" "$above"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Links $1 to $2, relative, when nothing is at $1 and no folder above it is a link, and says so.
+link_in() {
+	if linked_above "$1" || ! absent "$1" || ! mkdir -p "${1%/*}" || ! ln -s "$2" "$1"; then return 1; fi
+	printf 'Linked %s -> %s\n' "$1" "$2"
+}
+
+# Makes what is derived from .ken match it at the scope (PRD, "Reconcile", decisions 21, 22):
+# walks the scope's layers, each followed by its own, a key visited once, cloning each missing
+# one unattended at the top as get does; one that cannot be cloned is offline, said on stderr,
+# and the walk goes on. Then links each layer's layers into its .repos/, excluded locally, and
+# at the scope each reachable layer's owner AGENTS.md and each direct layer's skills where the
+# scope has none, removing such links into what is no longer reachable. find_root has run; it
+# runs in a subshell, so call as reconcile || exit 1.
+reconcile() (
+	GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
+	GIT_HTTP_LOW_SPEED_LIMIT=${GIT_HTTP_LOW_SPEED_LIMIT:-1000} GIT_HTTP_LOW_SPEED_TIME=${GIT_HTTP_LOW_SPEED_TIME:-30}
+	export GIT_TERMINAL_PROMPT GIT_ASKPASS GIT_HTTP_LOW_SPEED_LIMIT GIT_HTTP_LOW_SPEED_TIME
+	# ssh takes an option's first value, so ours go right after the ssh word of the user's command
+	ssh=${GIT_SSH_COMMAND:-$(git config --get core.sshCommand 2>/dev/null || :)}
+	if [ -n "$ssh" ] || [ -z "${GIT_SSH-}" ]; then
+		ssh_opts='-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+		ssh=${ssh:-ssh}
+		GIT_SSH_COMMAND=$(printf '%s\n' "$ssh" |
+			sed -E "s#(^|[[:space:]])(\"([^\"]*/)?ssh\"|'([^']*/)?ssh'|([^[:space:]\"']*/)?ssh)([[:space:]]|\$)#\\1\\2 $ssh_opts\\6#")
+		if [ "$GIT_SSH_COMMAND" = "$ssh" ]; then GIT_SSH_COMMAND="$ssh $ssh_opts"; fi
+		export GIT_SSH_COMMAND
+	fi
+	todo=$(layer_lines "$SCOPE") || exit 1
+	direct=" $(printf '%s\n' "$todo" | cut -f2 | tr '\n' ' ')" seen=' ' walked=' '
+	while [ -n "$todo" ]; do
+		line=${todo%%"$nl"*}
+		case $todo in *"$nl"*) todo=${todo#*"$nl"} ;; *) todo='' ;; esac
+		name=${line%%"$tab"*} key=${line#*"$tab"}
+		if [ -z "$line" ]; then continue; fi
+		case $seen in *" $key "*) continue ;; esac
+		seen="$seen$key "
+		clone=$TOP/.repos/$key
+		# only a real clone counts as there; anything else is get's to refuse, naming the mv aside
+		if [ "$(real "$clone" 2>/dev/null)" = "$clone" ] &&
+			[ "$(git -C "$clone" rev-parse --absolute-git-dir 2>/dev/null)" = "$clone/.git" ]; then
+			printf 'Layer %s: %s is cloned already, at %s; left as it is, no fetch.\n' "$name" "$key" "$clone"
+		elif err=$( (KEN_ROOT=$SCOPE && cmd_get "$key") 2>&1 >/dev/null); then
+			printf 'Layer %s: cloned %s at %s.\n' "$name" "$key" "$clone"
+			if [ -n "$err" ]; then printf '%s\n' "$err" >&2; fi
+		else
+			why="it could not be cloned, so its pages, index, commands and skills are left out and its own"
+			why="$why layers are unknown; the rest is installed. Once it can be cloned, run"
+			printf 'ken: layer %s, %s, is offline on this machine: %s `ken init %s` again. %s\n' \
+				"$name" "$key" "$why" "$(q "$SCOPE")" "${err#ken: }" >&2
+			continue
+		fi
+		walked="$walked$key "
+		mine=$(layer_lines "$clone") || exit 1
+		if [ -n "$mine" ]; then todo=$(printf '%s\n' "$mine" | sed "s|^|$name/|")$nl$todo; fi
+	done
+	# each layer's tracked link <name> -> .repos/<key> resolves through a link to the hoisted clone
+	for root in "$SCOPE" $walked; do
+		case $root in /*) ;; *) root=$TOP/.repos/$root ;; esac
+		if [ "$root" = "$TOP" ]; then continue; fi
+		up=$(up_to_top 3 "$root")
+		exclude=$(git -C "$root" rev-parse --path-format=absolute --git-common-dir 2>/dev/null)/info/exclude ||
+			exclude=
+		for key in $(layer_lines "$root" | cut -f2); do
+			link_in "$root/.repos/$key" "$up/.repos/$key" || :
+			if [ -n "$exclude" ] && ! grep -qxF "/.repos/$key" "$exclude" 2>/dev/null; then
+				mkdir -p "${exclude%/*}"
+				if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude")" ]; then printf '\n' >>"$exclude"; fi
+				printf '/.repos/%s\n' "$key" >>"$exclude"
+			fi
+		done
+	done
+	# at the scope: links into what is no longer reachable go first, so a new layer can take their place
+	up3=$(up_to_top 3 "$SCOPE") up2=$(up_to_top 2 "$SCOPE") track='' skilled=' '
+	for key in $walked; do
+		case $direct in *" $key "*) skilled="$skilled$key " ;; esac
+	done
+	for at in "$SCOPE"/.repos/*/*/AGENTS.md "$SCOPE"/.agents/skills/*; do
+		if [ ! -L "$at" ] || linked_above "$at"; then continue; fi
+		to=$(readlink "$at")
+		case $at in
+		*/.agents/skills/*) up=$up2 keep=$skilled why='a direct layer cloned here, whose skills alone are linked' ;;
+		*) up=$up3 keep=$walked why='reachable from here' ;;
+		esac
+		case $to in "$up/.repos/"*) ;; *) continue ;; esac
+		key=$(printf '%s\n' "${to#"$up/.repos/"}" | cut -d/ -f1-3)
+		case $keep in *" $key "*) continue ;; esac
+		rm -f "$at"
+		printf 'Removed %s, a link into %s, which is no longer %s.\n' "$at" "$key" "$why"
+		track="$track $(q "${at#"$SCOPE/"}")"
+	done
+	for key in $walked; do
+		for at in "$TOP/.repos/$key"/.repos/*/*/AGENTS.md; do
+			owner=${at#"$TOP/.repos/$key/.repos/"} && owner=${owner%/AGENTS.md}
+			if [ -f "$at" ] && link_in "$SCOPE/.repos/$owner/AGENTS.md" "$up3/.repos/$key/.repos/$owner/AGENTS.md"; then
+				track="$track $(q ".repos/$owner/AGENTS.md")"
+			fi
+		done
+		case $skilled in *" $key "*) ;; *) continue ;; esac
+		for at in "$TOP/.repos/$key"/.agents/skills/*; do
+			if [ ! -e "$at" ]; then continue; fi
+			if link_in "$SCOPE/.agents/skills/${at##*/}" "$up2/.repos/$key/.agents/skills/${at##*/}"; then
+				track="$track $(q ".agents/skills/${at##*/}")"
+			fi
+		done
+	done
+	if [ -n "$track" ]; then
+		printf 'Track the links at %s with `git -C %s add -A --%s`.\n' "$SCOPE" "$(q "$SCOPE")" "$track"
+	fi
+)
+
 # --- builtins: each one's help, then what it runs
 
 # Sets usage, summary, details and examples for the builtin $1; fails for any other name.
@@ -405,7 +536,9 @@ about() {
   .bin/ken        a copy of this ken, so the kernel travels with the root
   .gitignore      .repos/*/*/*/ (the checkouts) and .env, added to one that lacks them
 No page, no AGENTS.md: those belong to a template. No git init. A <dir> inside another root
-is refused unless it is a checkout, <root>/.repos/<host>/<owner>/<repo>.'
+is refused unless it is a checkout, <root>/.repos/<host>/<owner>/<repo>. Then the layers .ken
+lists, and theirs, are cloned at the top when missing and linked: the layers of each inside it,
+owner AGENTS.md from each and skills from the direct ones where the root has none.'
 		examples='ken init ~/ken
 git clone <root> ~/ken && ~/ken/.bin/ken init
 cd "$(ken path code github.com/acme/atlas)" && ken init'
@@ -583,7 +716,7 @@ cmd_init() {
 	else
 		printf '%s is a root already with every file ken owns: nothing was created.\n' "$dir"
 	fi
-	# reconcile its layers here (PRD, "Reconcile") once ken has it
+	(KEN_ROOT=$dir && find_root && reconcile) || exit 1
 	here=$(find_root 2>/dev/null && printf '%s\n' "$SCOPE") || here=
 	if [ "$here" != "$dir" ]; then
 		printf '%s\n' "ken run from here acts on ${here:-no root}, not $dir; inside $dir it finds it by" \
@@ -812,9 +945,8 @@ get_worktree() {
 		die "could not make the worktree of $branch at $wt: $err${nl}So $branch has no worktree.$undone" \
 			"Fix that, then run \`$again\` again."
 	fi
-	if [ -f "$wt/.ken" ]; then
-		: # a worktree of a root is a root: reconcile it here (PRD, "Reconcile") once ken has it
-	fi
+	# a worktree of a root is a root: reconciled, saying so on stderr, as stdout is the path alone
+	if [ -f "$wt/.ken" ]; then (KEN_ROOT=$wt && find_root && reconcile) >&2 || exit 1; fi
 	printf '%s\n' "$wt"
 }
 

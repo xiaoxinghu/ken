@@ -18,7 +18,7 @@ unset CDPATH
 nl='
 '
 tab=$(printf '\t')
-BUILTINS='init path which index help'
+BUILTINS='init path which get index help'
 
 # --- prelude
 
@@ -305,14 +305,90 @@ index_read() {
 
 # Rewrites the index file $2 by the pass in mode $1 (set, unset or drop): written beside it and
 # renamed over, so a reader never sees half of it, and nothing written when it cannot be read.
+# Writers take turns: the lock is $2.lock, a symlink to the holder's PID that ln -s makes in one
+# step, so each write reads the index as the last one left it. Only its holder removes it: a
+# lock whose holder is gone is refused, since removing it could race a writer taking it anew.
 index_write() {
 	mkdir -p "$(dir_of "$2")"
+	lock=$2.lock
+	# checked before each ln -s, which would make its link inside a folder in the way
+	while :; do
+		if [ ! -L "$lock" ] && ! absent "$lock"; then
+			die "$lock is in the way of the lock on $2, a symlink to its writer's PID, so no write" \
+				"could take turns there. Move it aside, e.g. \`mv $(q "$lock") $(q "$lock.old")\`, then rerun."
+		fi
+		if ln -s "$$" "$lock" 2>/dev/null; then break; fi
+		if absent "$lock"; then
+			if made=$(ln -s "$$" "$lock" 2>&1); then break; fi
+			if absent "$lock"; then die "could not take the lock $lock: $made. Fix that, then rerun."; fi
+		fi
+		holder=$(readlink "$lock" 2>/dev/null) || continue
+		if kill -0 "$holder" 2>/dev/null; then
+			sleep 1
+		elif [ "$(readlink "$lock" 2>/dev/null)" = "$holder" ]; then
+			die "$lock is the lock on $2, left by process $holder, which ended before releasing it," \
+				"so no write waiting on it would ever start. Check that no ken is running, then run" \
+				"\`rm $(q "$lock")\` and rerun."
+		fi
+	done
 	tmp=$2.tmp.$$
-	if ! index_read "$@" >"$tmp"; then
-		rm -f "$tmp"
+	if ! (index_read "$@") >"$tmp"; then
+		rm -f "$tmp" "$lock"
 		exit 1
 	fi
 	mv -f "$tmp" "$2"
+	rm -f "$lock"
+}
+
+# --- layers: the layer.<name>=<key> lines of a root's .ken (docs/files.md)
+
+# Prints the layers root $1's .ken lists, "<name><tab><key>" in file order, a name repeated
+# read as its last line. A line it cannot read stops it: call as x=$(layer_lines "$r") || exit 1.
+layer_lines() {
+	found=''
+	if [ -f "$1/.ken" ]; then
+		while read -r n && read -r line; do
+			name=${line%%=*} key=${line#*=}
+			name=${name#layer.}
+			case $line in *=*) ;; *) key= ;; esac
+			case $name in '' | *[!A-Za-z0-9_.-]*) key= ;; esac
+			if ! is_key "$key"; then
+				die "$1/.ken line $n, $(q "$(redact "$line")"), is not a layer line ken can read," \
+					"so ken cannot tell which repo that layer is, nor where its commands and index are." \
+					"It expects layer.<name>=<host>/<owner>/<repo>, lowercase, such as" \
+					"layer.sales-atlas=github.com/acme/sales-atlas. Fix or delete that line."
+			fi
+			kept=''
+			while IFS=$tab read -r was its; do
+				if [ -n "$was" ] && [ "$was" != "$name" ]; then kept=$kept$nl$was$tab$its; fi
+			done <<EOF
+$found
+EOF
+			found=$kept$nl$name$tab$key
+		done <<EOF
+$(sed -n '/^layer\./{=;p;}' "$1/.ken")
+EOF
+	fi
+	if [ -n "$found" ]; then printf '%s\n' "${found#"$nl"}"; fi
+}
+
+# Prints the key of each layer reachable from root $1 and cloned at the top, in walk order:
+# each layer, then its own (PRD decision 22), a cycle visited once; an offline layer is left
+# out with its layers. find_root has run. Call as x=$(reachable "$r") || exit 1.
+reachable() {
+	todo=$(layer_lines "$1") || exit 1
+	seen=' '
+	while [ -n "$todo" ]; do
+		line=${todo%%"$nl"*}
+		case $todo in *"$nl"*) todo=${todo#*"$nl"} ;; *) todo='' ;; esac
+		key=${line#*"$tab"}
+		case $seen in *" $key "*) continue ;; esac
+		seen="$seen$key "
+		if [ -z "$line" ] || [ ! -d "$TOP/.repos/$key" ]; then continue; fi
+		printf '%s\n' "$key"
+		mine=$(layer_lines "$TOP/.repos/$key") || exit 1
+		todo=$mine$nl$todo
+	done
 }
 
 # --- builtins: each one's help, then what it runs
@@ -364,6 +440,19 @@ ken path github.com/acme/join-web:src/join.ts#submit'
 		examples='ken which
 ken which "$(ken path code github.com/acme/join-web feat/login)"   # github.com/acme/join-web worktree feat/login
 ken which "$(ken path code github.com/acme/api)/src/x.ts"   # not cloned yet: github.com/acme/api clone'
+		;;
+	get)
+		usage='get <url|key>'
+		summary='Make a repo ready at the top and print its clone, <top>/.repos/<key>, the only thing on stdout.'
+		details='  <url|key>   <host>/<owner>/<repo>, cloned from https://<key>.git, or a git URL.
+Missing, the repo is cloned there: blobless, unless the scope'"'"'s .ken says
+clone.blobless=false; a failed clone leaves no folder. A clone already there is used as
+it is, no fetch; anything else there is refused untouched. Every time: the clone gets
+worktree.useRelativePaths and `git worktree repair`, and when no index of the scope or of
+its layers lists the key, an entry in the scope'"'"'s .repos/index. Needs git 2.48 or newer.'
+		examples='ken get github.com/acme/join-web
+ken get git@github.com:acme/join-web.git
+cd "$(ken get github.com/acme/join-web)"'
 		;;
 	index)
 		usage='index set <key> <field>=<value>... | unset <key> [<field>...]'
@@ -622,6 +711,133 @@ cmd_which() {
 		"\`git -C $(q "$clone") worktree move $(q "$dir") $(q "${clone%/*}/$folder")\`."
 }
 
+# Sets worktree.useRelativePaths in the repo $1 when it is unset.
+relative_paths() {
+	git -C "$1" config --get worktree.useRelativePaths >/dev/null ||
+		git -C "$1" config worktree.useRelativePaths true
+}
+
+cmd_get() {
+	if [ $# -ne 1 ] || [ "${1#-}" != "$1" ]; then
+		die "ken get takes one repo key or git URL, got $(q "$(redact "$*")")." \
+			'Run e.g. `ken get github.com/acme/join-web`, or `ken get --help`.'
+	fi
+	parse_key "$1"
+	version=$(git --version 2>/dev/null) ||
+		die "git is not on PATH, and ken get clones with it. Install git 2.48 or newer" \
+			"(e.g. \`brew install git\`), then run \`ken get $KEY\` again."
+	major=${version#git version } minor=${version#git version *.}
+	major=${major%%[!0-9]*} minor=${minor%%[!0-9]*}
+	if [ "${major:-0}" -lt 2 ] || { [ "$major" -eq 2 ] && [ "${minor:-0}" -lt 48 ]; }; then
+		die "$version is too old: ken needs git 2.48 or newer, for worktree.useRelativePaths, which" \
+			"lets a whole <owner>/ folder move. Install it (e.g. \`brew install git\`), check" \
+			"\`git --version\`, then run \`ken get $KEY\` again."
+	fi
+	find_root
+	filter=--filter=blob:none
+	case $(sed -n '/^clone\.blobless=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//;p;}' "$SCOPE/.ken" 2>/dev/null | tail -n 1) in
+	'' | true) ;;
+	false) filter= ;;
+	*) die "$SCOPE/.ken sets clone.blobless to neither true nor false, so ken cannot tell how to clone." \
+		"Fix that line to clone.blobless=false or true, then run \`ken get $KEY\` again." ;;
+	esac
+	clone=$TOP/.repos/$KEY parent=$TOP/.repos/${KEY%/*}
+	for at in "$TOP/.repos" "${parent%/*}" "$parent"; do
+		if [ -L "$at" ]; then
+			to=$(readlink "$at")
+			case $to in /*) ;; *) to=$(dir_of "$at")/$to ;; esac
+			die "$at is a symlink to $to, so a clone under it would be outside the top root $TOP," \
+				"whose .repos/ holds every checkout so that context cascades along its real path." \
+				"Put the folder in its place, \`rm $(q "$at") && mv $(q "$to") $(q "$at")\`, or start an" \
+				"empty one, \`rm $(q "$at")\`; then run \`ken get $KEY\` again."
+		fi
+	done
+	# every get marks itself before the claim, so one that loses the mkdir waits while the
+	# winner lives: its clone is whole once the mark is gone
+	mark=$parent/.${KEY##*/}.ken-get.$$
+	if ! mkdir -p -- "$mark"; then
+		die "could not make $parent (the reason is above), so $KEY has no folder to be cloned into." \
+			"Fix that, then run \`ken get $KEY\` again."
+	fi
+	trap 'rmdir "$mark" 2>/dev/null || :' EXIT
+	if made=$(mkdir -- "$clone" 2>&1); then
+		trap 'rm -rf "$clone"; exit 1' INT TERM HUP
+		if ! err=$(git clone -q ${filter:+"$filter"} -- "$URL" "$clone" 2>&1); then
+			rm -rf "$clone"
+			hint=
+			case $1 in *:*) ;; *)
+				hint="A key alone clones https://$KEY.git; for another remote pass its URL, e.g."
+				hint="$hint \`ken get git@${KEY%%/*}:${KEY#*/}.git\`. "
+				;;
+			esac
+			die "could not clone $(redact "$URL") into $clone, so it was removed again. git said:" \
+				"$(redact "$err")$nl${hint}Fix the cause, then run \`ken get $(q "$(redact "$1")")\` again."
+		fi
+		trap - INT TERM HUP
+	else
+		rmdir "$mark"
+		if absent "$clone"; then
+			die "could not make $clone: $made. Fix that, then run \`ken get $KEY\` again."
+		fi
+		busy=1
+		while [ -n "$busy" ]; do
+			busy=
+			for at in "$parent/.${KEY##*/}.ken-get."*; do
+				pid=${at##*.}
+				case $pid in '' | *[!0-9]*) continue ;; esac
+				if kill -0 "$pid" 2>/dev/null; then busy=1; fi
+			done
+			if [ -n "$busy" ]; then sleep 1; fi
+		done
+	fi
+	what=
+	if [ -L "$clone" ]; then
+		what="a symlink to $(readlink "$clone")"
+	elif absent "$clone"; then
+		die "$clone is gone: another \`ken get $KEY\` was cloning into it and failed, saying why in" \
+			"its own output. Run \`ken get $KEY\` again to clone it here."
+	elif [ ! -d "$clone" ]; then
+		what='a file'
+	elif absent "$clone/.git"; then
+		what='a folder with no .git'
+	elif [ -L "$clone/.git" ] || [ ! -d "$clone/.git" ]; then
+		what='a checkout whose .git is not a folder: a worktree, or a repo kept elsewhere'
+	elif [ "$(git -C "$clone" rev-parse --absolute-git-dir 2>/dev/null)" != "$clone/.git" ]; then
+		what='a folder whose .git git does not take as its repo'
+	fi
+	if [ -n "$what" ]; then
+		init=
+		if [ "$what" = 'a folder with no .git' ]; then
+			init=" To make this folder the repo instead, run \`git init $(q "$clone")\` then \`ken get $KEY\`."
+		fi
+		die "$clone is where the clone of $KEY belongs, but it is $what, so ken neither uses nor" \
+			"replaces it. Move it aside, e.g. \`mv $(q "$clone") ~/${KEY##*/}.aside\`, then run" \
+			"\`ken get $KEY\` again.$init"
+	fi
+	# another get of an existing repo may hold git's config lock, setting the same: wait, recheck
+	if ! relative_paths "$clone" 2>/dev/null && ! { sleep 1 && relative_paths "$clone"; }; then
+		die "could not set worktree.useRelativePaths in $clone (the reason is above), which lets" \
+			"its <owner>/ folder move. Run \`git -C $(q "$clone") config worktree.useRelativePaths true\`," \
+			"then \`ken get $KEY\` again."
+	fi
+	git -C "$clone" worktree repair >&2
+	file=$SCOPE/.repos/index
+	listed=$(index_read stanza "$file" "$KEY") || exit 1
+	if [ -z "$listed" ]; then
+		layers=$(reachable "$SCOPE") || exit 1
+		for layer in $layers; do
+			listed=$(index_read stanza "$TOP/.repos/$layer/.repos/index" "$KEY") || exit 1
+			if [ -n "$listed" ]; then break; fi
+		done
+	fi
+	if [ -z "$listed" ]; then
+		index_write set "$file" "$KEY" ''
+		printf 'ken: %s %s\n' "registered $KEY in $file with no desc, and a desc is what lets an agent" \
+			"choose a repo before cloning it. Run \`ken index set $KEY desc=\"...\"\` with what it is, in a line." >&2
+	fi
+	printf '%s\n' "$clone"
+}
+
 cmd_index() {
 	sub=${1-}
 	case $sub in set | unset) ;; *)
@@ -753,33 +969,12 @@ EOF
 # the scope's .bin/, each direct layer's in .ken order, then PATH. find_root has run.
 places() {
 	PLACES="$SCOPE/.bin${tab}the scope"
-	layers=''
-	if [ -f "$SCOPE/.ken" ]; then
-		lines=$(sed -n '/^layer\./{=;p;}' "$SCOPE/.ken")
-		while read -r n && read -r line; do
-			layer=${line%%=*} key=${line#*=}
-			layer=${layer#layer.}
-			case $line in *=*) ;; *) key= ;; esac
-			case $layer in '' | *[!A-Za-z0-9_.-]*) key= ;; esac
-			if ! is_key "$key"; then
-				die "$SCOPE/.ken line $n, $(q "$(redact "$line")"), is not a layer line ken can read," \
-					"so ken cannot tell where that layer's commands are. It expects" \
-					"layer.<name>=<host>/<owner>/<repo>, lowercase, such as" \
-					"layer.sales-atlas=github.com/acme/sales-atlas. Fix or delete that line."
-			fi
-			# a repeated key reads as its last line (docs/files.md): drop the earlier one
-			kept=''
-			while IFS=$tab read -r dir from; do
-				if [ -n "$dir" ] && [ "$from" != "layer $layer" ]; then kept=$kept$nl$dir$tab$from; fi
-			done <<EOF
+	layers=$(layer_lines "$SCOPE") || exit 1
+	while IFS=$tab read -r layer key; do
+		if [ -n "$layer" ]; then PLACES=$PLACES$nl$TOP/.repos/$key/.bin${tab}layer\ $layer; fi
+	done <<EOF
 $layers
 EOF
-			layers=$kept$nl$TOP/.repos/$key/.bin${tab}layer\ $layer
-		done <<EOF
-$lines
-EOF
-	fi
-	PLACES=$PLACES$layers
 	set -f
 	IFS=:
 	# an empty PATH entry is the current folder, as in any shell; the : added keeps a last one

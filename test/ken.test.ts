@@ -189,6 +189,10 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain('climbs out of')
 			expect(existsSync(join(root, `around-${shell}`))).toBe(false)
+			for (const shallow of [`dot-${shell}/./repo`, `slash-${shell}//repo`]) {
+				expect(ken(['init', `${root}/.repos/${shallow}`], { cwd: outside() }).status).toBe(1)
+			}
+			expect(existsSync(join(root, `.repos/dot-${shell}`))).toBe(false)
 		})
 
 		it('accepts a checkout at <root>/.repos/<host>/<owner>/<repo>, through every root above', () => {

@@ -184,6 +184,11 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				expect(existsSync(join(inside, '.ken'))).toBe(false)
 			}
 			expect(existsSync(join(root, `notes/new-${shell}`))).toBe(false)
+			const around = `${dir}/missing-${shell}/../root/around-${shell}`
+			const r = ken(['init', around], { cwd: outside() })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain('climbs out of')
+			expect(existsSync(join(root, `around-${shell}`))).toBe(false)
 		})
 
 		it('accepts a checkout at <root>/.repos/<host>/<owner>/<repo>, through every root above', () => {

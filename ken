@@ -416,7 +416,14 @@ cmd_init() {
 	want=${1:-.}
 	case $want in /*) ;; *) want=$(pwd -P)/$want ;; esac
 	want=${want%/} rest=
-	while [ ! -d "${want:-/}" ]; do rest=/${want##*/}$rest want=${want%/*}; done
+	while [ ! -d "${want:-/}" ]; do
+		if [ "${want##*/}" = .. ]; then
+			die "$(q "$1") climbs out of ${want%/*} with .., but that folder does not exist, so" \
+				'ken cannot tell where the root would be, nor whether it is inside another root.' \
+				'Write the path without .. after a missing folder, e.g. `ken init ~/ken`.'
+		fi
+		rest=/${want##*/}$rest want=${want%/*}
+	done
 	dir=$(real "${want:-/}")
 	dir=${dir%/}$rest
 	# a root inside another only as a checkout in its .repos/, as find_root walks to the top

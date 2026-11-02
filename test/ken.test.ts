@@ -78,9 +78,13 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				stdout: `${root}/.repos/github.com/acme/join-web.feat-login\n`,
 				stderr: ''
 			})
-			expect(ken(['path', 'code', 'ssh://git@github.com:22/Acme/Join-Web.git']).stdout).toBe(
-				`${root}/.repos/github.com/acme/join-web\n`
-			)
+			for (const url of [
+				'ssh://git@github.com:22/Acme/Join-Web.git',
+				'git@github.com:Acme/Join-Web.git',
+				'github.com:acme/join-web.git'
+			]) {
+				expect(ken(['path', 'code', url]).stdout).toBe(`${root}/.repos/github.com/acme/join-web\n`)
+			}
 		})
 
 		it('refuses a URL with userinfo as a key or a branch, never printing the secret', () => {
@@ -113,6 +117,12 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(0)
 			expect(r.stdout).toBe('https://github.com/acme/api.git\n')
 			expect(r.stderr).toContain('Run `ken get github.com/acme/api` to clone it')
+			const leak = ken([
+				'path',
+				'github.com/acme/api:https://me:s3cret@x.io/a#https://me:s3cret@x.io'
+			])
+			expect(leak.stderr).toContain('ken get github.com/acme/api')
+			expect(leak.stderr).not.toContain('s3cret')
 		})
 
 		it('refuses a reference that climbs out of its repo', () => {

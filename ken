@@ -117,8 +117,9 @@ is_key() {
 	esac
 }
 
-# Sets KEY and URL from a key or a git URL (https, ssh or scp-style). A URL is kept as given,
-# for git, and loses its .git in the key; a key alone clones from https://<key>.git.
+# Sets KEY and URL from a key or a git URL (https, ssh or scp-style [user@]host:path). A URL
+# is kept as given, for git, and loses its .git in the key; a key alone clones from
+# https://<key>.git.
 # shellcheck disable=SC2034 # URL is read by the commands that clone
 parse_key() {
 	KEY=$(lower "$1") URL=$1
@@ -127,7 +128,7 @@ parse_key() {
 	[a-z]*://*)
 		KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^[a-z][a-z0-9+.-]*://([^/]*@)?([^/:@]*)(:[0-9]*)?/#\2/#' -e 's#\.git$##')
 		;;
-	*@*:*) KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^[^/:]*@([^@:/]+):#\1/#' -e 's#\.git$##') ;;
+	*:*) KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^([^/:]*@)?([^@:/]+):#\2/#' -e 's#\.git$##') ;;
 	*) URL=https://$KEY.git ;;
 	esac
 	if ! is_key "$KEY"; then
@@ -245,8 +246,8 @@ cmd_path() {
 		else
 			printf 'https://%s.git\n' "$KEY"
 			printf 'ken: %s is not cloned here, so %s has no local path; printed its URL instead. %s\n' \
-				"$KEY" "${rel:-its root}" \
-				"Run \`ken get $KEY\` to clone it, then \`ken path $(q "$1")\` again." >&2
+				"$KEY" "$(redact "${rel:-its root}")" \
+				"Run \`ken get $KEY\` to clone it, then \`ken path $(q "$(redact "$1")")\` again." >&2
 		fi
 		;;
 	*)

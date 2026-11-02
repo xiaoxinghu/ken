@@ -1151,10 +1151,15 @@ cmd_repos() {
 $layers
 EOF
 	if [ "$SCOPE" = "$TOP" ]; then
-		for at in "$TOP"/.repos/*/*/*/.git "$TOP"/.repos/*/*/.[!.]*/.git; do
-			key=${at%/.git}
-			key=${key#"$TOP/.repos/"}
-			if [ -d "$at" ] && is_key "$key"; then all=$all$nl$key; fi
+		# every name at each level, hidden ones too: a key part may start with a dot
+		for host in "$TOP"/.repos/* "$TOP"/.repos/.[!.]* "$TOP"/.repos/..?*; do
+			for owner in "$host"/* "$host"/.[!.]* "$host"/..?*; do
+				for at in "$owner"/*/.git "$owner"/.[!.]*/.git "$owner"/..?*/.git; do
+					key=${at%/.git}
+					key=${key#"$TOP/.repos/"}
+					if [ -d "$at" ] && is_key "$key"; then all=$all$nl$key; fi
+				done
+			done
 		done
 	fi
 	all=$(printf '%s\n' "$all" | awk -F "$tab" 'NF && !seen[$1]++' | LC_ALL=C sort -t "$tab" -k 1,1)

@@ -1259,7 +1259,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		// (the root's entry wins), tool, and docs, its own layer, which lists manual with no desc;
 		// the layer gone has no clone. On disk: app on main with a worktree where its branch
 		// puts it, a detached one, and one moved off its folder; lib switched to side; loose, a
-		// clone no index lists. Clones of src-lib have origin/HEAD, the others none.
+		// clone no index lists, and example.com/.dot/..tools, one whose key parts start with dots. Clones of src-lib have origin/HEAD, the others none.
 		beforeAll(() => {
 			const o = own()
 			write(
@@ -1283,6 +1283,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			git(dir, 'clone', '-q', 'src-lib', join(o, 'lib'))
 			git(join(o, 'lib'), 'switch', '-q', '-c', 'side')
 			repo(join(o, 'loose'))
+			repo(join(at(), '.repos/example.com/.dot/..tools'))
 			const app = join(o, 'app')
 			git(app, 'worktree', 'add', '-q', '-b', 'feat/ok', '../app.feat-ok')
 			git(app, 'worktree', 'add', '-q', '--detach', '../app.pinned')
@@ -1302,6 +1303,8 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(0)
 			expect(r.stdout).toBe(
 				[
+					'example.com/.dot/..tools  listed by no index, cloned on main',
+					'  stray: no index lists it, so nothing says what it is and only this disk knows it. Run `ken index set example.com/.dot/..tools desc="..."`.',
 					'example.com/acme/app  listed by root, cloned on main',
 					'  The app.',
 					`  worktree feat/ok  ${o}/app.feat-ok`,
@@ -1338,6 +1341,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 					.split('\n')
 					.map((line) => line.split('\t'))
 			).toEqual([
+				['example.com/.dot/..tools', '', '', 'true', 'main'],
 				['example.com/acme/app', 'The app.', 'root', 'true', 'main'],
 				['example.com/acme/docs', 'The docs layer.', 'team', 'true', 'main'],
 				['example.com/acme/lib', '', 'root', 'true', 'side'],

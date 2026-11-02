@@ -18,7 +18,7 @@ unset CDPATH
 nl='
 '
 tab=$(printf '\t')
-BUILTINS='path help'
+BUILTINS='path which help'
 
 # --- prelude
 
@@ -38,6 +38,28 @@ q() {
 # The real path of the folder $1: symlinks resolved, and on a case-insensitive disk the
 # case as stored, so roots compare as real paths (PRD decision 15).
 real() { (cd -P -- "$1" && pwd -P); }
+
+# The real path of $1, which need not exist: its longest existing folder as a real path, then
+# the rest as written, . and .. taken. Call as p=$(real_path "$1") || exit 1.
+real_path() {
+	case $1 in /*) head=$1 ;; *) head=$(pwd -P)/$1 ;; esac
+	rest=
+	while [ -n "$head" ] && [ ! -d "$head" ]; do
+		rest=${head##*/}/$rest head=${head%/*}
+	done
+	head=$(real "${head:-/}") || return 1
+	head=${head%/}
+	set -f
+	IFS=/
+	for part in $rest; do
+		case $part in
+		'' | .) ;;
+		..) head=${head%/*} ;;
+		*) head=$head/$part ;;
+		esac
+	done
+	printf '%s\n' "${head:-/}"
+}
 
 lower() { printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'; }
 
@@ -178,6 +200,20 @@ ken path code github.com/acme/join-web feat/login   # .../join-web.feat-login
 cd "$(ken path code git@github.com:acme/join-web.git PROJ-123)"
 ken path github.com/acme/join-web:src/join.ts#submit'
 		;;
+	which)
+		usage='which [<path>]'
+		summary='The reverse of `ken path code`: the key of the checkout a path is in, and its branch.'
+		details='  <path>   default the current folder, compared as a real path against .repos/ in the
+           top, so a path through a layer link resolves, and a layer is a checkout of
+           the root above it. Prints `<key> <clone|worktree> <branch>`. A checkout is
+           asked of git, a worktree keyed by its clone; a path not checked out yet is
+           answered from its shape with no branch: <repo>.<x> beside a clone <repo> is
+           its worktree. A detached HEAD prints no branch. Outside a checkout folder,
+           .repos/<host>/<owner>/<folder>, it exits 1 saying so and what to run.'
+		examples='ken which
+ken which "$(ken path code github.com/acme/join-web feat/login)"   # github.com/acme/join-web worktree feat/login
+ken which "$(ken path code github.com/acme/api)/src/x.ts"   # not cloned yet: github.com/acme/api clone'
+		;;
 	help)
 		usage='help [<command>]'
 		summary='Print every command with examples, or one in full as `ken <command> --help` does.'
@@ -255,6 +291,68 @@ cmd_path() {
 			'or a code reference <key>:<path>[#<symbol>]. Run `ken path --help` for what each prints.'
 		;;
 	esac
+}
+
+cmd_which() {
+	if [ $# -gt 1 ]; then
+		die "ken which takes one path, got $#: quote a path with spaces." 'Run e.g. `ken which .`.'
+	fi
+	find_root
+	at=$(real_path "${1:-.}") || exit 1
+	nowhere="$at is in the ken root $TOP but in no checkout, so it has no key: a checkout is"
+	nowhere="$nowhere a folder $TOP/.repos/<host>/<owner>/<repo>, or <repo>.<branch> beside it."
+	nowhere="$nowhere Run \`ken path code <key> [<branch>]\` for the folder of one."
+	case $at/ in
+	"$TOP"/.repos/*/*/*/) rest=${at#"$TOP"/.repos/} ;;
+	"$TOP"/*) die "$nowhere" ;;
+	*)
+		die "$at is outside the top root $TOP, whose .repos/ holds every checkout, so it has no key." \
+			"Run \`ken which\` again from inside the root that holds it, or with KEN_ROOT set to it."
+		;;
+	esac
+	host=${rest%%/*} rest=${rest#*/}
+	owner=${rest%%/*} rest=${rest#*/}
+	folder=${rest%%/*}
+	dir=$TOP/.repos/$host/$owner/$folder
+	if [ ! -e "$dir" ]; then
+		# not checked out yet: <repo>.<x> beside a clone <repo>, a .git folder, is its worktree
+		repo=$folder kind=clone try=$folder
+		while [ "${try%.*}" != "$try" ]; do
+			try=${try%.*}
+			if [ -n "$try" ] && [ -d "${dir%/*}/$try/.git" ]; then
+				repo=$try kind=worktree
+				break
+			fi
+		done
+		parse_key "$host/$owner/$repo"
+		printf '%s %s\n' "$KEY" "$kind"
+		return
+	fi
+	if [ ! -d "$dir" ]; then die "$nowhere"; fi
+	parse_key "$host/$owner/$folder"
+	if [ ! -e "$dir/.git" ]; then
+		die "$dir is where a checkout belongs, but it has no .git, so it is no checkout and has no" \
+			"branch. Look inside; if nothing there is needed, remove it and run \`ken get $KEY\`."
+	fi
+	dirs=$(git -C "$dir" rev-parse --path-format=absolute --git-dir --git-common-dir) ||
+		die "git cannot read the checkout $dir (above), so ken cannot tell its key or branch." \
+			"Run \`git -C $(q "$dir") status\` to see what is wrong."
+	branch=$(git -C "$dir" branch --show-current) || exit 1
+	if [ "${dirs%%"$nl"*}" = "${dirs#*"$nl"}" ]; then
+		printf '%s clone%s\n' "$KEY" "${branch:+ $branch}"
+		return
+	fi
+	# a worktree's key is its clone's, wherever the worktree's folder is
+	clone=$(real "${dirs#*"$nl"}") || exit 1
+	clone=${clone%/*}
+	key=${clone#"$TOP/.repos/"}
+	if [ "$key" != "$clone" ] && is_key "$key"; then
+		printf '%s worktree%s\n' "$key" "${branch:+ $branch}"
+		return
+	fi
+	die "$dir is a worktree of $clone, a clone outside $TOP/.repos/<host>/<owner>/<repo>, so it" \
+		"has no key, and a worktree in .repos/ must belong to a clone there. Move it beside its clone:" \
+		"\`git -C $(q "$clone") worktree move $(q "$dir") $(q "${clone%/*}/$folder")\`."
 }
 
 cmd_help() {

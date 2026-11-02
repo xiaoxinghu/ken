@@ -40,13 +40,14 @@ q() {
 real() { (cd -P -- "$1" && pwd -P); }
 
 # The real path of $1, which need not exist: its longest existing folder as a real path, a
-# symlink to a file followed, then the rest as written, . and .. taken.
-# Call as p=$(real_path "$1") || exit 1.
+# symlink to a file or to nothing followed (40 at most, so a cycle ends), then the rest as
+# written, . and .. taken. Call as p=$(real_path "$1") || exit 1.
 real_path() {
 	case $1 in /*) head=$1 ;; *) head=$(pwd -P)/$1 ;; esac
-	rest=
+	rest='' hops=0
 	while [ -n "$head" ] && [ ! -d "$head" ]; do
-		if [ -L "$head" ] && [ -e "$head" ]; then
+		if [ -L "$head" ] && [ $hops -lt 40 ]; then
+			hops=$((hops + 1))
 			link=$(readlink "$head")
 			case $link in /*) head=$link ;; *) head=${head%/*}/$link ;; esac
 		else

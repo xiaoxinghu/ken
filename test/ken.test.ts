@@ -80,6 +80,8 @@ beforeAll(() => {
 	git(app, 'worktree', 'add', '-q', '-b', 'feat+fix', '../app.feat+fix')
 	write(join(app, 'src/a.ts'), '')
 	symlinkSync('.repos/github.com/acme/app/src/a.ts', join(root, 'a.ts'))
+	symlinkSync('.repos/github.com/acme/offline', join(root, 'offline'))
+	symlinkSync('loop', join(root, 'loop'))
 	repo(join(dir, 'away'))
 	git(
 		join(dir, 'away'),
@@ -203,6 +205,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('a symlink to a file is followed to the checkout the file is in', () => {
 			expect(r('a.ts')).toEqual(ok('github.com/acme/app clone main'))
+		})
+
+		it("an offline layer's dangling link is followed and answered from its shape", () => {
+			expect(r('offline/x.md')).toEqual(ok('github.com/acme/offline clone'))
+		})
+
+		it('a symlink cycle ends, as a path in the root outside a checkout', () => {
+			expect(r('loop').stderr).toContain(
+				`${root}/loop is in the ken root ${root} but in no checkout`
+			)
 		})
 
 		it('a layer is a checkout of the root above it, through its link and from inside it', () => {

@@ -1,11 +1,13 @@
-import { spawnSync } from 'node:child_process'
+import { spawn, spawnSync } from 'node:child_process'
 import {
 	copyFileSync,
 	existsSync,
+	lstatSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
+	readlinkSync,
 	realpathSync,
 	statSync,
 	symlinkSync,
@@ -56,7 +58,8 @@ const repo = (path: string) => {
 // A root with one direct layer and its link, a clone with a worktree beside it and a detached
 // one elsewhere, a folder with no .git where a checkout belongs, a worktree of a clone outside
 // the root, a nested root that is not a layer, a folder on PATH, and a HOME with no ~/ken, so
-// nothing outside the temp folder is ever found.
+// nothing outside the temp folder is ever found. HOME's git config sends https://example.com/
+// to bare repos under remotes/, which serve blobless clones, and old-git/ holds a git 2.47.
 beforeAll(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-')))
 	root = join(dir, 'root')
@@ -72,6 +75,16 @@ beforeAll(() => {
 	script(join(atlas, '.bin/ken-team'), 'echo layer')
 	mkdirSync(join(atlas, 'sub'))
 	mkdirSync(join(dir, 'home'))
+	write(
+		join(dir, 'home/.gitconfig'),
+		`[url "file://${dir}/remotes/"]\n\tinsteadOf = https://example.com/\n[uploadpack]\n\tallowFilter = true\n`
+	)
+	repo(join(dir, 'src-lib'))
+	write(join(dir, 'src-lib/README.md'), 'lib\n')
+	git(join(dir, 'src-lib'), 'add', 'README.md')
+	git(join(dir, 'src-lib'), 'commit', '-q', '-m', 'readme')
+	git(dir, 'clone', '-q', '--bare', 'src-lib', 'remotes/acme/lib.git')
+	script(join(dir, 'old-git/git'), 'echo "git version 2.47.1"')
 	repo(atlas)
 	symlinkSync('.repos/github.com/acme/atlas', join(root, 'atlas'))
 	const app = join(root, '.repos/github.com/acme/app')
@@ -104,6 +117,12 @@ beforeAll(() => {
 })
 
 describe.each(SHELLS)('ken under %s', (shell) => {
+	const env = (more?: Record<string, string>) => ({
+		PATH: `${pathBin}:${process.env.PATH}`,
+		HOME: join(dir, 'home'),
+		GIT_CONFIG_NOSYSTEM: '1',
+		...more
+	})
 	const ken = (
 		args: string[],
 		opts: { cwd?: string; env?: Record<string, string>; file?: string } = {}
@@ -111,11 +130,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		const r = spawnSync(shell, [opts.file ?? KEN, ...args], {
 			cwd: opts.cwd ?? root,
 			encoding: 'utf8',
-			env: {
-				PATH: `${pathBin}:${process.env.PATH}`,
-				HOME: join(dir, 'home'),
-				...opts.env
-			}
+			env: env(opts.env)
 		})
 		return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 	}
@@ -606,10 +621,201 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 	})
 
+	describe('get', () => {
+		const KEY = 'example.com/acme/lib'
+		let n = 0
+		// A fresh root whose .ken holds `settings`.
+		const fresh = (settings = '') => {
+			const at = join(dir, `get-${shell}-${n++}`)
+			write(join(at, '.ken'), settings)
+			return at
+		}
+		const cloneOf = (at: string, key = KEY) => join(at, '.repos', key)
+		const config = (repo: string, name: string) =>
+			spawnSync('git', ['-C', repo, 'config', '--get', name], { encoding: 'utf8', env: env() })
+				.stdout
+		const registered = (index: string) => `ken: registered ${KEY} in ${index} with no desc`
+		const kenAsync = (args: string[], cwd: string) =>
+			new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+				const child = spawn(shell, [KEN, ...args], { cwd, env: env() })
+				let stdout = ''
+				let stderr = ''
+				child.stdout.on('data', (d) => {
+					stdout += d
+				})
+				child.stderr.on('data', (d) => {
+					stderr += d
+				})
+				child.on('close', (status) => resolve({ status, stdout, stderr }))
+			})
+		// What is at `p`, to tell that a refusal left it untouched.
+		const shape = (p: string) => {
+			const s = lstatSync(p)
+			if (s.isSymbolicLink()) return `link ${readlinkSync(p)}`
+			if (s.isFile()) return `file ${readFileSync(p, 'utf8')}`
+			return `folder ${readdirSync(p).sort().join(' ')}`
+		}
+
+		it('clones blobless at the top, registers the key and says to describe it; again is silent', () => {
+			const at = fresh()
+			const clone = cloneOf(at)
+			const first = ken(['get', KEY], { cwd: join(dir, 'outside'), env: { KEN_ROOT: at } })
+			expect(first.status).toBe(0)
+			expect(first.stdout).toBe(`${clone}\n`)
+			expect(first.stderr).toContain(registered(`${at}/.repos/index`))
+			expect(first.stderr).toContain(`Run \`ken index set ${KEY} desc="..."\``)
+			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+			expect(readFileSync(join(clone, 'README.md'), 'utf8')).toBe('lib\n')
+			expect(config(clone, 'worktree.useRelativePaths')).toBe('true\n')
+			expect(config(clone, 'remote.origin.partialclonefilter')).toBe('blob:none\n')
+			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual(['lib'])
+			expect(ken(['get', `https://${KEY}.git`], { cwd: at })).toEqual({
+				status: 0,
+				stdout: first.stdout,
+				stderr: ''
+			})
+		})
+
+		it('clones whole when the scope says clone.blobless=false', () => {
+			const at = fresh('clone.blobless=false\n')
+			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
+			expect(config(cloneOf(at), 'remote.origin.partialclonefilter')).toBe('')
+		})
+
+		it('uses a repo made with git init where the clone belongs, as it is', () => {
+			const at = fresh()
+			repo(cloneOf(at))
+			const r = ken(['get', KEY], { cwd: at })
+			expect(r.stdout).toBe(`${cloneOf(at)}\n`)
+			expect(r.stderr).toContain(registered(`${at}/.repos/index`))
+			expect(config(cloneOf(at), 'worktree.useRelativePaths')).toBe('true\n')
+			expect(config(cloneOf(at), 'remote.origin.url')).toBe('')
+		})
+
+		it("from inside a layer clones at the top and registers in the layer's index", () => {
+			const at = fresh('layer.team=example.com/acme/team\n')
+			const team = cloneOf(at, 'example.com/acme/team')
+			write(join(team, '.ken'), '')
+			const r = ken(['get', KEY], { cwd: team })
+			expect(r.stdout).toBe(`${cloneOf(at)}\n`)
+			expect(r.stderr).toContain(registered(`${team}/.repos/index`))
+			expect(readFileSync(join(team, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+			expect(existsSync(join(at, '.repos/index'))).toBe(false)
+		})
+
+		it("registers nothing when the scope's index or a reachable layer's lists the key", () => {
+			const listed = fresh()
+			const index = `# The index.\n\nrepo: ${KEY}\ndesc: Lib.\n`
+			write(join(listed, '.repos/index'), index)
+			expect(ken(['get', KEY], { cwd: listed }).stderr).toBe('')
+			expect(readFileSync(join(listed, '.repos/index'), 'utf8')).toBe(index)
+			// an offline layer is skipped, and a layer's own layer reached, through a cycle back
+			const at = fresh('layer.gone=example.com/acme/gone\nlayer.team=example.com/acme/team\n')
+			write(join(cloneOf(at, 'example.com/acme/team'), '.ken'), 'layer.hb=example.com/acme/hb\n')
+			write(join(cloneOf(at, 'example.com/acme/hb'), '.ken'), 'layer.team=example.com/acme/team\n')
+			write(join(cloneOf(at, 'example.com/acme/hb'), '.repos/index'), `repo: ${KEY}\n`)
+			expect(ken(['get', KEY], { cwd: at })).toEqual({
+				status: 0,
+				stdout: `${cloneOf(at)}\n`,
+				stderr: ''
+			})
+			expect(existsSync(join(at, '.repos/index'))).toBe(false)
+		})
+
+		it('refuses a folder, a file, a link or a worktree in the way, and leaves it as it is', () => {
+			const inTheWay: [string, (clone: string) => void][] = [
+				['a folder with no .git', (c) => write(join(c, 'notes.md'), 'mine')],
+				['a file', (c) => write(c, 'mine')],
+				[
+					`a symlink to ${join(dir, 'src-lib')}`,
+					(c) => {
+						mkdirSync(join(c, '..'), { recursive: true })
+						symlinkSync(join(dir, 'src-lib'), c)
+					}
+				],
+				[
+					'a checkout whose .git is not a folder: a worktree',
+					(c) => git(join(dir, 'src-lib'), 'worktree', 'add', '-q', '--detach', c)
+				]
+			]
+			for (const [what, make] of inTheWay) {
+				const at = fresh()
+				const clone = cloneOf(at)
+				make(clone)
+				const before = shape(clone)
+				const r = ken(['get', KEY], { cwd: at })
+				expect(r.status).toBe(1)
+				expect(r.stdout).toBe('')
+				expect(r.stderr).toContain(
+					`${clone} is where the clone of ${KEY} belongs, but it is ${what}`
+				)
+				expect(r.stderr).toContain(`\`mv ${clone} ~/lib.aside\``)
+				expect(shape(clone)).toBe(before)
+				expect(existsSync(join(at, '.repos/index'))).toBe(false)
+			}
+			const plain = fresh()
+			mkdirSync(cloneOf(plain), { recursive: true })
+			expect(ken(['get', KEY], { cwd: plain }).stderr).toContain(
+				`run \`git init ${cloneOf(plain)}\` then \`ken get ${KEY}\``
+			)
+		})
+
+		it('refuses .repos, or the owner folder, as a symlink, which leads out of the top', () => {
+			const at = fresh()
+			const away = join(dir, `away-${shell}-${n}`)
+			mkdirSync(away)
+			symlinkSync(away, join(at, '.repos'))
+			const r = ken(['get', KEY], { cwd: at })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`${at}/.repos is a symlink to ${away}`)
+			expect(r.stderr).toContain(`\`rm ${at}/.repos && mv ${away} ${at}/.repos\``)
+			expect(readdirSync(away)).toEqual([])
+			const owner = fresh()
+			mkdirSync(join(owner, '.repos/example.com'), { recursive: true })
+			symlinkSync(away, join(owner, '.repos/example.com/acme'))
+			expect(ken(['get', KEY], { cwd: owner }).stderr).toContain(
+				`${owner}/.repos/example.com/acme is a symlink to ${away}`
+			)
+			expect(readdirSync(away)).toEqual([])
+		})
+
+		it('a failed clone leaves no folder, says what git said and what to rerun', () => {
+			const at = fresh()
+			const r = ken(['get', 'example.com/acme/missing'], { cwd: at })
+			expect(r.status).toBe(1)
+			expect(r.stdout).toBe('')
+			expect(r.stderr).toContain('does not appear to be a git repository')
+			expect(r.stderr).toContain('A key alone clones https://example.com/acme/missing.git')
+			expect(r.stderr).toContain('run `ken get example.com/acme/missing` again')
+			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual([])
+			expect(existsSync(join(at, '.repos/index'))).toBe(false)
+		})
+
+		it('two gets at once: one clones, the other waits for it, and both print the path', async () => {
+			const at = fresh()
+			const both = await Promise.all([kenAsync(['get', KEY], at), kenAsync(['get', KEY], at)])
+			for (const r of both) expect([r.status, r.stdout]).toEqual([0, `${cloneOf(at)}\n`])
+			expect(both.filter((r) => r.stderr.includes('ken: registered')).length).toBe(1)
+			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual(['lib'])
+			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+		})
+
+		it('refuses a git older than 2.48 before touching anything', () => {
+			const at = fresh()
+			const r = ken(['get', KEY], {
+				cwd: at,
+				env: { PATH: `${join(dir, 'old-git')}:${process.env.PATH}` }
+			})
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain('git version 2.47.1 is too old: ken needs git 2.48 or newer')
+			expect(existsSync(join(at, '.repos'))).toBe(false)
+		})
+	})
+
 	describe('help', () => {
 		it('carries the same examples as <command> --help, and the external commands found', () => {
 			const all = ken(['help']).stdout
-			for (const name of ['init', 'path', 'which', 'index']) {
+			for (const name of ['init', 'path', 'which', 'get', 'index']) {
 				const page = ken([name, '--help'])
 				expect(page.status).toBe(0)
 				expect(ken(['help', name]).stdout).toBe(page.stdout)

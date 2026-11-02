@@ -197,8 +197,8 @@ branch_folder() {
 # validates the whole file, failing at the first line it cannot read, and in I_MODE:
 #   stanza  prints the stanza of repo I_KEY, its comments left out (nothing when none)
 #   field   prints the value of field I_FIELD of repo I_KEY
-#   list    prints "<key><tab>I_KEY<tab>I_FIELD<tab><desc>" for every repo, a tab in desc as a
-#           space: I_KEY and I_FIELD say which root listed it, for ken repos
+#   list    prints "<key><tab>I_KEY<tab><desc>" for every repo, a tab in desc as a space:
+#           I_KEY labels the root that lists it, for ken repos
 #   set     prints the file with I_LIST, <name>=<value> lines, set in I_KEY's stanza: a line
 #           replaced, or appended at the stanza's end, or a new stanza at the end of the file
 #   unset   prints the file without the fields of I_KEY named in I_LIST, space-separated
@@ -216,7 +216,7 @@ function fail(what) {
 	exit
 }
 function finish() {
-	if (mode == "list" && rk != "") print rk "\t" key "\t" ENVIRON["I_FIELD"] "\t" d
+	if (mode == "list" && rk != "") print rk "\t" key "\t" d
 	if (mode == "set" && here)
 		for (i = 1; i <= n; i++)
 			if (!(names[i] in done)) print names[i] ": " value[names[i]]
@@ -1140,12 +1140,12 @@ cmd_repos() {
 	done
 	find_root
 	layers=$(reachable "$SCOPE" say) || exit 1
-	# the merged index, "<key><tab><listed by><tab><the root that lists it><tab><desc>", then at
-	# the top each clone, a folder whose .git is one, the first line of a key winning
-	all=$(index_read list "$SCOPE/.repos/index" root "$SCOPE") || exit 1
+	# the merged index, "<key><tab><listed by><tab><desc>", no path in it to hold a tab or a
+	# newline; then at the top each clone, a folder whose .git is one; the first line of a key wins
+	all=$(index_read list "$SCOPE/.repos/index" root) || exit 1
 	while IFS=$tab read -r section layer; do
 		if [ -z "$layer" ]; then continue; fi
-		mine=$(index_read list "$TOP/.repos/$layer/.repos/index" "$section" "$TOP/.repos/$layer") || exit 1
+		mine=$(index_read list "$TOP/.repos/$layer/.repos/index" "$section") || exit 1
 		all=$all$nl$mine
 	done <<EOF
 $layers
@@ -1171,21 +1171,22 @@ EOF
 		return
 	fi
 	# each key a row, of fields that only trail empty, since read joins tabs as it joins spaces
-	while IFS=$tab read -r key by from desc; do
+	while IFS=$tab read -r key by desc; do
 		clone=$TOP/.repos/$key cloned=false on='' trees='' strays=''
 		if [ -z "$by" ]; then
 			strays="$strays$nl  stray: no index lists it, so nothing says what it is and only this disk knows it."
 			strays="$strays Run \`ken index set $key desc=\"...\"\`."
 		elif [ -z "$desc" ]; then
-			cd=
-			if [ "$from" != "$SCOPE" ]; then cd="cd $(q "$from") && "; fi
+			cd=$(printf '%s\n' "$layers" | awk -F "$tab" -v s="$by" '$1 == s { print $2 }')
+			if [ -n "$cd" ]; then cd="cd $(q "$TOP/.repos/$cd") && "; fi
 			strays="$strays$nl  stray: no desc, and a desc is what lets an agent choose a repo before cloning it."
 			strays="$strays Run \`${cd}ken index set $key desc=\"...\"\`."
 		fi
 		if [ -d "$clone/.git" ]; then
 			cloned=true
-			# one record per worktree, the clone first, a line per attribute; a newline in a path as ?
-			list=$(git -C "$clone" worktree list --porcelain -z | tr '\n\000' '?\n')
+			# one record per worktree, the clone first, a line per attribute; a newline in a path as
+			# \001, shown as ? and given back for the path the commands name
+			list=$(git -C "$clone" worktree list --porcelain -z | tr '\n\000' '\001\n')
 			first=1 path='' branch='' gone=''
 			while IFS= read -r line; do
 				case $line in
@@ -1196,11 +1197,13 @@ EOF
 					if [ -n "$first" ]; then
 						first='' on=$branch
 					elif [ -n "$path" ] && [ -z "$gone" ]; then
-						trees="$trees$nl  worktree ${branch:-(detached)}  $path"
+						shown=$(printf '%s\n' "$path" | tr '\001' '?')
+						path=$(printf '%s\n' "$path" | tr '\001' '\n')
+						trees="$trees$nl  worktree ${branch:-(detached)}  $shown"
 						at=$(real "$path" 2>/dev/null) || at=$path
 						want=$clone.$(printf '%s\n' "$branch" | tr / -)
 						if [ -n "$branch" ] && [ "$at" != "$want" ]; then
-							strays="$strays$nl  stray: the worktree of $branch is at $at, not $want, where \`ken get -b\`"
+							strays="$strays$nl  stray: the worktree of $branch is at $shown, not $want, where \`ken get -b\`"
 							strays="$strays and \`ken path code\` look for it. Run \`git -C $(q "$clone") worktree move $(q "$at") $(q "$want")\`."
 						fi
 					fi

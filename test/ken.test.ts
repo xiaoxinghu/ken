@@ -1373,6 +1373,38 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			})
 		})
 
+		it('a root path with a tab and a newline, a worktree moved to a folder with a newline: rows whole, fixes that run', () => {
+			const odd = join(dir, `repos-${shell}-odd\t\nroot`)
+			const o = join(odd, '.repos/example.com/acme')
+			write(join(odd, '.ken'), 'layer.team=example.com/acme/team\n')
+			write(join(odd, '.repos/index'), 'repo: example.com/acme/app\ndesc: The app.\n')
+			repo(join(o, 'team'))
+			write(join(o, 'team/.ken'), '')
+			write(join(o, 'team/.repos/index'), 'repo: example.com/acme/tool\n')
+			git(dir, 'clone', '-q', 'src-lib', join(o, 'app'))
+			git(join(o, 'app'), 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
+			git(join(o, 'app'), 'worktree', 'move', '../app.feat-x', '../app.odd\nname')
+			const porcelain = ken(['repos', '--porcelain'], { cwd: odd })
+			expect(
+				porcelain.stdout
+					.replace(/\n$/, '')
+					.split('\n')
+					.map((line) => line.split('\t'))
+			).toEqual([
+				['example.com/acme/app', 'The app.', 'root', 'true', 'main'],
+				['example.com/acme/team', '', '', 'true', 'main'],
+				['example.com/acme/tool', '', 'team', 'false', '']
+			])
+			const r = ken(['repos'], { cwd: odd })
+			expect(r.stdout).toContain(
+				`Run \`cd '${o}/team' && ken index set example.com/acme/tool desc="..."\`.`
+			)
+			const move = r.stdout.match(/Run `(git -C [^`]*)`/)?.[1] ?? ''
+			expect(move).toBe(`git -C '${o}/app' worktree move '${o}/app.odd\nname' '${o}/app.feat-x'`)
+			expect(spawnSync('sh', ['-c', move], { env: env() }).status).toBe(0)
+			expect(ken(['repos'], { cwd: odd }).stdout).not.toContain('worktree move')
+		})
+
 		it('with no repo at all says so and what to run', () => {
 			const empty = join(dir, `repos-empty-${shell}`)
 			write(join(empty, '.ken'), '')

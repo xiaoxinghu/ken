@@ -4,8 +4,7 @@
 base, every git checkout inside it, shared knowledge arriving as layers, and a kernel CLI
 that enforces the few rules which never change. This document is the kernel's: what it does
 and why. It changes in the same PR as the behaviour; git is its history. The kernel it
-describes is the shell script; `packages/ken` is its TypeScript predecessor until the port
-lands.
+describes is the shell script `ken` at the repo's root.
 
 What is built on the kernel has its own document: [`ken-task`](ken-task.md), the task
 system; [`ken-lint`](ken-lint.md), the knowledge-base lint; [templates](templates.md), the

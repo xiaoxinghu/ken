@@ -8,11 +8,18 @@ worktree per branch beside the clone. Shared knowledge arrives as layers: other 
 the same shape, cloned in and linked at the top as sections. A kernel CLI enforces the
 few fixed rules; everything else is scripts and skills built on it.
 
-| Package            | Command          | What                                                 |
-| ------------------ | ---------------- | ---------------------------------------------------- |
-| `@unclex/ken`      | `ken`            | the kernel: layout, index, layers, dispatch          |
-| `@unclex/ken-task` | `ken task`       | plain-text tasks in one folder, a worktree per task  |
-| `@unclex/ken-lint` | `ken lint`       | the knowledge-base lint: indexes, links, references  |
-| `create-ken`       | `npm create ken` | scaffold a root from a template; any root is a layer |
+| What                              | Command    | Does                                                |
+| --------------------------------- | ---------- | --------------------------------------------------- |
+| [`ken`](ken), one POSIX `sh` file | `ken`      | the kernel: layout, index, layers, dispatch         |
+| `@unclex/ken-task`, `packages/`   | `ken task` | plain-text tasks in one folder, a worktree per task |
+| `@unclex/ken-lint`, `packages/`   | `ken lint` | the knowledge-base lint: indexes, links, references |
 
-The design is `docs/prd.md`, and `docs/ken-task.md` for `ken-task`.
+Install: `sh ken init ~/ken` makes a root holding a copy at `~/ken/.bin/ken`, then
+`ln -s ~/ken/.bin/ken ~/.local/bin/ken`. Its only dependency is git 2.48 or newer. Its tests are `test/ken.test.ts`, one command
+at a time, and `test/workspace.test.ts`, a layer that has a layer walked end to end; both
+run it under `sh` and `dash`.
+
+The design is [`docs/prd.md`](docs/prd.md), with [`docs/files.md`](docs/files.md) for the
+two files the kernel reads and writes, and [`docs/templates.md`](docs/templates.md) for the
+roots to start from. What is built on it: [`docs/ken-task.md`](docs/ken-task.md),
+[`docs/ken-lint.md`](docs/ken-lint.md), [`docs/built-on-top.md`](docs/built-on-top.md).

@@ -27,9 +27,33 @@ const write = (file: string, body: string, mode = 0o644) => {
 }
 const script = (file: string, body: string, mode = 0o755) =>
 	write(file, `#!/bin/sh\n${body}\n`, mode)
+// git with no config but its own, so the user's (signing, hooks, default branch) never leaks in
+const git = (cwd: string, ...args: string[]) => {
+	const r = spawnSync('git', args, {
+		cwd,
+		encoding: 'utf8',
+		env: {
+			PATH: process.env.PATH,
+			HOME: join(dir, 'home'),
+			GIT_CONFIG_NOSYSTEM: '1',
+			GIT_AUTHOR_NAME: 't',
+			GIT_AUTHOR_EMAIL: 't@t',
+			GIT_COMMITTER_NAME: 't',
+			GIT_COMMITTER_EMAIL: 't@t'
+		}
+	})
+	if (r.status !== 0) throw new Error(r.stderr)
+}
+const repo = (path: string) => {
+	mkdirSync(path, { recursive: true })
+	git(path, 'init', '-q', '-b', 'main')
+	git(path, 'commit', '-q', '--allow-empty', '-m', 'init')
+}
 
-// A root with one direct layer, a cloned repo, a nested root that is not a layer, a folder on
-// PATH, and a HOME with no ~/ken, so nothing outside the temp folder is ever found.
+// A root with one direct layer and its link, a clone with a worktree beside it and a detached
+// one elsewhere, a folder with no .git where a checkout belongs, a worktree of a clone outside
+// the root, a nested root that is not a layer, a folder on PATH, and a HOME with no ~/ken, so
+// nothing outside the temp folder is ever found.
 beforeAll(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-')))
 	root = join(dir, 'root')
@@ -44,12 +68,34 @@ beforeAll(() => {
 	script(join(atlas, '.bin/ken-both'), 'echo layer')
 	script(join(atlas, '.bin/ken-team'), 'echo layer')
 	mkdirSync(join(atlas, 'sub'))
+	mkdirSync(join(dir, 'home'))
+	repo(atlas)
+	symlinkSync('.repos/github.com/acme/atlas', join(root, 'atlas'))
+	const app = join(root, '.repos/github.com/acme/app')
+	repo(app)
+	mkdirSync(join(app, 'src/deep'), { recursive: true })
+	git(app, 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
+	mkdirSync(join(app, '../app.feat-x/src/deep'), { recursive: true })
+	git(app, 'worktree', 'add', '-q', '--detach', '../../other/elsewhere')
+	git(app, 'worktree', 'add', '-q', '-b', 'feat+fix', '../app.feat+fix')
+	write(join(app, 'src/a.ts'), '')
+	symlinkSync('.repos/github.com/acme/app/src/a.ts', join(root, 'a.ts'))
+	symlinkSync('.repos/github.com/acme/offline', join(root, 'offline'))
+	symlinkSync('loop', join(root, 'loop'))
+	repo(join(dir, 'away'))
+	git(
+		join(dir, 'away'),
+		'worktree',
+		'add',
+		'-q',
+		'--detach',
+		join(root, '.repos/github.com/acme/stray')
+	)
 	mkdirSync(join(root, '.repos/github.com/acme/web/src'), { recursive: true })
 	write(join(root, 'notes/inner/.ken'), '')
 	script(join(pathBin, 'ken-both'), 'echo path')
 	script(join(pathBin, 'ken-team'), 'echo path')
 	script(join(pathBin, 'ken-far'), 'echo far')
-	mkdirSync(join(dir, 'home'))
 	mkdirSync(join(dir, 'outside'))
 	symlinkSync(root, join(dir, 'link'))
 })
@@ -128,6 +174,91 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('refuses a reference that climbs out of its repo', () => {
 			expect(ken(['path', 'github.com/acme/web:src/../../atlas/x']).status).toBe(1)
 			expect(ken(['path', 'github.com/acme/web:src/../a.ts']).status).toBe(0)
+		})
+	})
+
+	describe('which', () => {
+		const r = (path: string, cwd = root) => ken(['which', path], { cwd })
+		const ok = (stdout: string) => ({ status: 0, stdout: `${stdout}\n`, stderr: '' })
+
+		it('a clone and a worktree beside it, at their roots and deep inside, from git', () => {
+			const at = join(root, '.repos/github.com/acme')
+			expect(ken(['which'], { cwd: join(at, 'app') })).toEqual(ok('github.com/acme/app clone main'))
+			expect(r('.repos/github.com/acme/app/src/deep')).toEqual(ok('github.com/acme/app clone main'))
+			expect(r('src/deep', join(at, 'app.feat-x'))).toEqual(
+				ok('github.com/acme/app worktree feat/x')
+			)
+			expect(ken(['which'], { cwd: join(at, 'app.feat-x/src/deep') })).toEqual(
+				ok('github.com/acme/app worktree feat/x')
+			)
+		})
+
+		it('a worktree is keyed by its clone wherever its folder is, detached with no branch', () => {
+			expect(r('.repos/github.com/other/elsewhere')).toEqual(ok('github.com/acme/app worktree'))
+		})
+
+		it('a worktree whose branch has a character no key may hold is keyed by its clone', () => {
+			expect(r('.repos/github.com/acme/app.feat+fix')).toEqual(
+				ok('github.com/acme/app worktree feat+fix')
+			)
+		})
+
+		it('a symlink to a file is followed to the checkout the file is in', () => {
+			expect(r('a.ts')).toEqual(ok('github.com/acme/app clone main'))
+		})
+
+		it("an offline layer's dangling link is followed and answered from its shape", () => {
+			expect(r('offline/x.md')).toEqual(ok('github.com/acme/offline clone'))
+		})
+
+		it('a symlink cycle ends, as a path in the root outside a checkout', () => {
+			expect(r('loop').stderr).toContain(
+				`${root}/loop is in the ken root ${root} but in no checkout`
+			)
+		})
+
+		it('a layer is a checkout of the root above it, through its link and from inside it', () => {
+			expect(r('atlas/sub')).toEqual(ok('github.com/acme/atlas clone main'))
+			expect(r('missing/../atlas/sub')).toEqual(ok('github.com/acme/atlas clone main'))
+			expect(ken(['which'], { cwd: join(root, 'atlas/sub') })).toEqual(
+				ok('github.com/acme/atlas clone main')
+			)
+		})
+
+		it('a path not checked out yet is answered from its shape, with no branch', () => {
+			expect(r('.repos/github.com/Acme/api/src/x.ts')).toEqual(ok('github.com/acme/api clone'))
+			expect(r('.repos/github.com/acme/app.other/src')).toEqual(ok('github.com/acme/app worktree'))
+			// a worktree's .git is a file, so app.feat-x is not a clone to be a worktree of
+			expect(r('.repos/github.com/acme/app.feat-x.y')).toEqual(ok('github.com/acme/app worktree'))
+			expect(r('.repos/github.com/acme/new/../api/x')).toEqual(ok('github.com/acme/api clone'))
+		})
+
+		it('a folder where a checkout belongs with no .git is refused, with the ken get to run', () => {
+			const res = r('.repos/github.com/acme/web/src')
+			expect(res.status).toBe(1)
+			expect(res.stderr).toContain(`${root}/.repos/github.com/acme/web is where a checkout belongs`)
+			expect(res.stderr).toContain('`ken get github.com/acme/web`')
+		})
+
+		it('a path in the root outside a checkout, or outside the top, is refused', () => {
+			for (const path of ['notes', '.repos/github.com/acme']) {
+				const res = r(path)
+				expect(res.status).toBe(1)
+				expect(res.stderr).toContain(
+					`${root}/${path} is in the ken root ${root} but in no checkout`
+				)
+			}
+			const out = r('../outside')
+			expect(out.status).toBe(1)
+			expect(out.stderr).toContain(`${dir}/outside is outside the top root ${root}`)
+		})
+
+		it('a worktree of a clone outside the root is refused, with the git worktree move', () => {
+			const res = r('.repos/github.com/acme/stray')
+			expect(res.status).toBe(1)
+			expect(res.stderr).toContain(
+				`\`git -C ${dir}/away worktree move ${root}/.repos/github.com/acme/stray ${dir}/stray\``
+			)
 		})
 	})
 
@@ -234,12 +365,14 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	describe('help', () => {
 		it('carries the same examples as <command> --help, and the external commands found', () => {
 			const all = ken(['help']).stdout
-			const page = ken(['path', '--help'])
-			expect(page.status).toBe(0)
-			expect(ken(['help', 'path']).stdout).toBe(page.stdout)
-			const examples = page.stdout.split('Examples:\n')[1]?.trim().split('\n') ?? []
-			expect(examples.length).toBeGreaterThan(2)
-			for (const example of examples) expect(all).toContain(example.trim())
+			for (const name of ['path', 'which']) {
+				const page = ken([name, '--help'])
+				expect(page.status).toBe(0)
+				expect(ken(['help', name]).stdout).toBe(page.stdout)
+				const examples = page.stdout.split('Examples:\n')[1]?.trim().split('\n') ?? []
+				expect(examples.length).toBeGreaterThan(2)
+				for (const example of examples) expect(all).toContain(example.trim())
+			}
 			expect(all).toContain(`  the scope, ${root}/.bin: both, hello\n`)
 			expect(all).toContain(`  layer atlas, ${atlas}/.bin: team\n`)
 			expect(all).toContain(`  PATH, ${pathBin}: far\n`)

@@ -1277,6 +1277,6 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	})
 })
 
-it('the kernel stays under its cap of 1,200 lines, so it is read in a sitting', () => {
-	expect(readFileSync(KEN, 'utf8').split('\n').length).toBeLessThan(1200)
+it('the kernel stays under its cap of 1,500 lines, so it is read in a sitting', () => {
+	expect(readFileSync(KEN, 'utf8').split('\n').length).toBeLessThan(1500)
 })

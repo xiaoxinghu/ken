@@ -703,6 +703,13 @@ cmd_get() {
 			"\`git --version\`, then run \`ken get $KEY\` again."
 	fi
 	find_root
+	filter=--filter=blob:none
+	case $(sed -n '/^clone\.blobless=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//;p;}' "$SCOPE/.ken" 2>/dev/null | tail -n 1) in
+	'' | true) ;;
+	false) filter= ;;
+	*) die "$SCOPE/.ken sets clone.blobless to neither true nor false, so ken cannot tell how to clone." \
+		"Fix that line to clone.blobless=false or true, then run \`ken get $KEY\` again." ;;
+	esac
 	clone=$TOP/.repos/$KEY parent=$TOP/.repos/${KEY%/*}
 	for at in "$TOP/.repos" "${parent%/*}" "$parent"; do
 		if [ -L "$at" ]; then
@@ -724,13 +731,6 @@ cmd_get() {
 	trap 'rmdir "$mark" 2>/dev/null || :' EXIT
 	if made=$(mkdir -- "$clone" 2>&1); then
 		trap 'rm -rf "$clone"; exit 1' INT TERM HUP
-		filter=--filter=blob:none
-		case $(sed -n '/^clone\.blobless=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//;p;}' "$SCOPE/.ken" 2>/dev/null | tail -n 1) in
-		'' | true) ;;
-		false) filter= ;;
-		*) die "$SCOPE/.ken sets clone.blobless to neither true nor false, so ken cannot tell how to clone." \
-			"Fix that line to clone.blobless=false or true, then run \`ken get $KEY\` again." ;;
-		esac
 		if ! err=$(git clone -q ${filter:+"$filter"} -- "$URL" "$clone" 2>&1); then
 			rm -rf "$clone"
 			hint=

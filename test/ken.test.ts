@@ -682,6 +682,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(config(cloneOf(at), 'remote.origin.partialclonefilter')).toBe('')
 		})
 
+		it('refuses a clone.blobless it cannot read before making anything, so the rerun clones', () => {
+			const at = fresh('clone.blobless=flase\n')
+			const r = ken(['get', KEY], { cwd: at })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`${at}/.ken sets clone.blobless to neither true nor false`)
+			expect(existsSync(join(at, '.repos'))).toBe(false)
+			write(join(at, '.ken'), 'clone.blobless=false\n')
+			expect(ken(['get', KEY], { cwd: at }).stdout).toBe(`${cloneOf(at)}\n`)
+		})
+
 		it('uses a repo made with git init where the clone belongs, as it is', () => {
 			const at = fresh()
 			repo(cloneOf(at))

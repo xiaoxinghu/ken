@@ -1252,10 +1252,147 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 	})
 
+	describe('repos', () => {
+		const at = () => join(dir, `repos-${shell}`)
+		const own = () => join(at(), '.repos/example.com/acme')
+		// A root listing app, lib with no desc, and its layer team; team, cloned, lists lib too
+		// (the root's entry wins), tool, and docs, its own layer, which lists manual with no desc;
+		// the layer gone has no clone. On disk: app on main with a worktree where its branch
+		// puts it, a detached one, and one moved off its folder; lib switched to side; loose, a
+		// clone no index lists. Clones of src-lib have origin/HEAD, the others none.
+		beforeAll(() => {
+			const o = own()
+			write(
+				join(at(), '.ken'),
+				'layer.team=example.com/acme/team\nlayer.gone=example.com/acme/gone\n'
+			)
+			write(
+				join(at(), '.repos/index'),
+				'repo: example.com/acme/app\ndesc: The app.\n\nrepo: example.com/acme/lib\n\nrepo: example.com/acme/team\ndesc: The team layer.\n'
+			)
+			repo(join(o, 'team'))
+			write(join(o, 'team/.ken'), 'layer.docs=example.com/acme/docs\n')
+			write(
+				join(o, 'team/.repos/index'),
+				'repo: example.com/acme/lib\ndesc: Lib, as the team says.\n\nrepo: example.com/acme/tool\ndesc: A tool.\n\nrepo: example.com/acme/docs\ndesc: The docs layer.\n'
+			)
+			repo(join(o, 'docs'))
+			write(join(o, 'docs/.ken'), '')
+			write(join(o, 'docs/.repos/index'), 'repo: example.com/acme/manual\n')
+			git(dir, 'clone', '-q', 'src-lib', join(o, 'app'))
+			git(dir, 'clone', '-q', 'src-lib', join(o, 'lib'))
+			git(join(o, 'lib'), 'switch', '-q', '-c', 'side')
+			repo(join(o, 'loose'))
+			const app = join(o, 'app')
+			git(app, 'worktree', 'add', '-q', '-b', 'feat/ok', '../app.feat-ok')
+			git(app, 'worktree', 'add', '-q', '--detach', '../app.pinned')
+			git(app, 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
+			git(app, 'worktree', 'move', '../app.feat-x', '../app.renamed')
+		})
+		const noDesc =
+			'stray: no desc, and a desc is what lets an agent choose a repo before cloning it. Run'
+		const offSide = () =>
+			`  stray: the clone has the branch side checked out, not its default branch main, which every \`ken get -b\` starts from. Run \`git -C ${own()}/lib switch main\`, then \`ken get example.com/acme/lib -b side\`.`
+		const manual = () =>
+			`  ${noDesc} \`cd ${own()}/docs && ken index set example.com/acme/manual desc="..."\`.`
+
+		it('merges the indexes over the disk, a row per key with its worktrees and strays', () => {
+			const o = own()
+			const r = ken(['repos'], { cwd: at() })
+			expect(r.status).toBe(0)
+			expect(r.stdout).toBe(
+				[
+					'example.com/acme/app  listed by root, cloned on main',
+					'  The app.',
+					`  worktree feat/ok  ${o}/app.feat-ok`,
+					`  worktree (detached)  ${o}/app.pinned`,
+					`  worktree feat/x  ${o}/app.renamed`,
+					`  stray: the worktree of feat/x is at ${o}/app.renamed, not ${o}/app.feat-x, where \`ken get -b\` and \`ken path code\` look for it. Run \`git -C ${o}/app worktree move ${o}/app.renamed ${o}/app.feat-x\`.`,
+					'example.com/acme/docs  listed by team, cloned on main',
+					'  The docs layer.',
+					'example.com/acme/lib  listed by root, cloned on side',
+					`  ${noDesc} \`ken index set example.com/acme/lib desc="..."\`.`,
+					offSide(),
+					'example.com/acme/loose  listed by no index, cloned on main',
+					'  stray: no index lists it, so nothing says what it is and only this disk knows it. Run `ken index set example.com/acme/loose desc="..."`.',
+					'example.com/acme/manual  listed by team/docs, not cloned',
+					manual(),
+					'example.com/acme/team  listed by root, cloned on main',
+					'  The team layer.',
+					'example.com/acme/tool  listed by team, not cloned',
+					'  A tool.',
+					''
+				].join('\n')
+			)
+			expect(r.stderr).toBe(
+				`ken: the layer gone, example.com/acme/gone, is offline: it has no clone at ${o}/gone, so its index and its layers' are left out. Run \`ken init ${at()}\` to clone it.\n`
+			)
+		})
+
+		it('--porcelain: a line per key, key, desc, listed by, cloned and branch split by tabs', () => {
+			const r = ken(['repos', '--porcelain'], { cwd: at() })
+			expect(r.status).toBe(0)
+			expect(
+				r.stdout
+					.replace(/\n$/, '')
+					.split('\n')
+					.map((line) => line.split('\t'))
+			).toEqual([
+				['example.com/acme/app', 'The app.', 'root', 'true', 'main'],
+				['example.com/acme/docs', 'The docs layer.', 'team', 'true', 'main'],
+				['example.com/acme/lib', '', 'root', 'true', 'side'],
+				['example.com/acme/loose', '', '', 'true', 'main'],
+				['example.com/acme/manual', '', 'team/docs', 'false', ''],
+				['example.com/acme/team', 'The team layer.', 'root', 'true', 'main'],
+				['example.com/acme/tool', 'A tool.', 'team', 'false', '']
+			])
+			expect(r.stderr).toMatch(/^ken: the layer gone, example\.com\/acme\/gone, is offline/)
+		})
+
+		it("inside a layer lists the layer's keys and its layers', with no clone of the disk", () => {
+			const r = ken(['repos'], { cwd: join(own(), 'team') })
+			expect(r).toEqual({
+				status: 0,
+				stdout: [
+					'example.com/acme/docs  listed by root, cloned on main',
+					'  The docs layer.',
+					'example.com/acme/lib  listed by root, cloned on side',
+					'  Lib, as the team says.',
+					offSide(),
+					'example.com/acme/manual  listed by docs, not cloned',
+					manual(),
+					'example.com/acme/tool  listed by root, not cloned',
+					'  A tool.',
+					''
+				].join('\n'),
+				stderr: ''
+			})
+		})
+
+		it('with no repo at all says so and what to run', () => {
+			const empty = join(dir, `repos-empty-${shell}`)
+			write(join(empty, '.ken'), '')
+			const r = ken(['repos'], { cwd: empty })
+			expect(r.status).toBe(0)
+			expect(r.stdout).toBe('')
+			expect(r.stderr).toBe(
+				`ken: no index of ${empty} or of its layers lists a repo, and ${empty}/.repos holds no clone, so there is nothing to list. Run \`ken get <key>\` to clone a repo and list it, or \`ken index set <key> desc="..."\` to list one uncloned.\n`
+			)
+		})
+
+		it('refuses an argument it does not take', () => {
+			const r = ken(['repos', '-v'], { cwd: at() })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toBe(
+				'ken: ken repos takes only --porcelain, not -v. Run `ken repos --help`.\n'
+			)
+		})
+	})
+
 	describe('help', () => {
 		it('carries the same examples as <command> --help, and the external commands found', () => {
 			const all = ken(['help']).stdout
-			for (const name of ['init', 'path', 'which', 'get', 'index']) {
+			for (const name of ['init', 'path', 'which', 'get', 'repos', 'index']) {
 				const page = ken([name, '--help'])
 				expect(page.status).toBe(0)
 				expect(ken(['help', name]).stdout).toBe(page.stdout)

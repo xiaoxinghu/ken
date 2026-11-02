@@ -18,7 +18,7 @@ unset CDPATH
 nl='
 '
 tab=$(printf '\t')
-BUILTINS='init path which get index help'
+BUILTINS='init path which get repos index help'
 
 # --- prelude
 
@@ -197,7 +197,8 @@ branch_folder() {
 # validates the whole file, failing at the first line it cannot read, and in I_MODE:
 #   stanza  prints the stanza of repo I_KEY, its comments left out (nothing when none)
 #   field   prints the value of field I_FIELD of repo I_KEY
-#   keys    prints every repo key
+#   list    prints "<key><tab>I_KEY<tab>I_FIELD<tab><desc>" for every repo, a tab in desc as a
+#           space: I_KEY and I_FIELD say which root listed it, for ken repos
 #   set     prints the file with I_LIST, <name>=<value> lines, set in I_KEY's stanza: a line
 #           replaced, or appended at the stanza's end, or a new stanza at the end of the file
 #   unset   prints the file without the fields of I_KEY named in I_LIST, space-separated
@@ -215,6 +216,7 @@ function fail(what) {
 	exit
 }
 function finish() {
+	if (mode == "list" && rk != "") print rk "\t" key "\t" ENVIRON["I_FIELD"] "\t" d
 	if (mode == "set" && here)
 		for (i = 1; i <= n; i++)
 			if (!(names[i] in done)) print names[i] ": " value[names[i]]
@@ -261,7 +263,9 @@ BEGIN {
 		if ((f, v) in first)
 			fail("repeats the key of the stanza at line " first[f, v] "; a key has one stanza per file, so merge the two")
 		first[f, v] = open = NR
-		here = f == "repo" && v == key
+		here = mode != "list" && f == "repo" && v == key
+		rk = f == "repo" ? v : ""
+		d = ""
 		found = found || here
 		split("", has)
 	} else if (f !~ /^[A-Za-z0-9_-]+$/)
@@ -271,7 +275,10 @@ BEGIN {
 	else if (f == "desc" && v == "")
 		fail("is an empty desc; a desc says what the repo is, so write one or delete the line")
 	has[f] = 1
-	if (mode == "keys" && open == NR && f == "repo") print v
+	if (mode == "list" && f == "desc") {
+		d = v
+		gsub(/\t/, " ", d)
+	}
 	if (!here) {
 		if (w) print
 	} else if (mode == "stanza") print
@@ -372,21 +379,30 @@ EOF
 	if [ -n "$found" ]; then printf '%s\n' "${found#"$nl"}"; fi
 }
 
-# Prints the key of each layer reachable from root $1 and cloned at the top, in walk order:
-# each layer, then its own (PRD decision 22), a cycle visited once; an offline layer is left
-# out with its layers. find_root has run. Call as x=$(reachable "$r") || exit 1.
+# Prints "<section><tab><key>" for each layer reachable from root $1 and cloned at the top, in
+# walk order: each layer, then its own (PRD decision 22), a cycle visited once; its section is
+# the path of its link from $1, as atlas/handbook. An offline layer is left out with its
+# layers, said on stderr when $2 is set. find_root has run. Call as x=$(reachable "$r") || exit 1.
 reachable() {
 	todo=$(layer_lines "$1") || exit 1
 	seen=' '
 	while [ -n "$todo" ]; do
 		line=${todo%%"$nl"*}
 		case $todo in *"$nl"*) todo=${todo#*"$nl"} ;; *) todo='' ;; esac
-		key=${line#*"$tab"}
+		section=${line%%"$tab"*} key=${line#*"$tab"}
 		case $seen in *" $key "*) continue ;; esac
 		seen="$seen$key "
-		if [ -z "$line" ] || [ ! -d "$TOP/.repos/$key" ]; then continue; fi
-		printf '%s\n' "$key"
+		if [ -z "$line" ]; then continue; fi
+		if [ ! -d "$TOP/.repos/$key" ]; then
+			if [ -n "${2-}" ]; then
+				printf 'ken: %s %s\n' "the layer $section, $key, is offline: it has no clone at $TOP/.repos/$key, so its" \
+					"index and its layers' are left out. Run \`ken init $(q "$1")\` to clone it." >&2
+			fi
+			continue
+		fi
+		printf '%s\n' "$line"
 		mine=$(layer_lines "$TOP/.repos/$key") || exit 1
+		if [ -n "$mine" ]; then mine=$(printf '%s\n' "$mine" | sed "s|^|$section/|"); fi
 		todo=$mine$nl$todo
 	done
 }
@@ -594,6 +610,21 @@ ken get git@github.com:acme/join-web.git
 cd "$(ken get github.com/acme/join-web)"
 cd "$(ken get github.com/acme/join-web -b feat/login)"   # .../join-web.feat-login
 ken get github.com/acme/join-web -b fix/pay --from v1.2.0'
+		;;
+	repos)
+		usage='repos [--porcelain]'
+		summary="Every repo the scope's index and its layers' list, against the checkouts on disk, offline."
+		details='One row per key, sorted: <key>  listed by <root|layer>, cloned on <branch>|not cloned; then
+its desc, its worktrees, and each stray with the command that fixes it: no desc; a clone
+not on its default branch, origin/HEAD; a worktree whose folder does not match its branch.
+At the top root, also each clone no index lists. A key in more than one index takes the
+whole entry of the first: the scope'"'"'s, then each layer'"'"'s in .ken order, each followed by
+its own layers'"'"'. A layer with no clone here is left out, said on stderr.
+  --porcelain   one line per key, tab-separated: key, desc, listed by, cloned (true or
+                false), branch; empty fields empty.'
+		examples='ken repos
+ken repos --porcelain | awk -F"\t" '"'"'$4 == "false" { print $1 }'"'"'   # listed, not cloned
+rg -lL github.com/acme/join-web "$(ken path root)"   # the pages that mention a repo'
 		;;
 	index)
 		usage='index set <key> <field>=<value>... | unset <key> [<field>...]'
@@ -1082,7 +1113,7 @@ cmd_get() {
 	listed=$(index_read stanza "$file" "$KEY") || exit 1
 	if [ -z "$listed" ]; then
 		layers=$(reachable "$SCOPE") || exit 1
-		for layer in $layers; do
+		for layer in $(printf '%s\n' "$layers" | cut -f 2); do
 			listed=$(index_read stanza "$TOP/.repos/$layer/.repos/index" "$KEY") || exit 1
 			if [ -n "$listed" ]; then break; fi
 		done
@@ -1097,6 +1128,106 @@ cmd_get() {
 		return
 	fi
 	get_worktree
+}
+
+cmd_repos() {
+	porcelain=
+	for arg; do
+		if [ "$arg" != --porcelain ]; then
+			die "ken repos takes only --porcelain, not $(q "$(redact "$arg")"). Run \`ken repos --help\`."
+		fi
+		porcelain=1
+	done
+	find_root
+	layers=$(reachable "$SCOPE" say) || exit 1
+	# the merged index, "<key><tab><listed by><tab><the root that lists it><tab><desc>", then at
+	# the top each clone, a folder whose .git is one, the first line of a key winning
+	all=$(index_read list "$SCOPE/.repos/index" root "$SCOPE") || exit 1
+	while IFS=$tab read -r section layer; do
+		if [ -z "$layer" ]; then continue; fi
+		mine=$(index_read list "$TOP/.repos/$layer/.repos/index" "$section" "$TOP/.repos/$layer") || exit 1
+		all=$all$nl$mine
+	done <<EOF
+$layers
+EOF
+	if [ "$SCOPE" = "$TOP" ]; then
+		for at in "$TOP"/.repos/*/*/*/.git "$TOP"/.repos/*/*/.[!.]*/.git; do
+			key=${at%/.git}
+			key=${key#"$TOP/.repos/"}
+			if [ -d "$at" ] && is_key "$key"; then all=$all$nl$key; fi
+		done
+	fi
+	all=$(printf '%s\n' "$all" | awk -F "$tab" 'NF && !seen[$1]++' | LC_ALL=C sort -t "$tab" -k 1,1)
+	if [ -z "$all" ]; then
+		disk=
+		if [ "$SCOPE" = "$TOP" ]; then disk=", and $TOP/.repos holds no clone"; fi
+		printf 'ken: %s %s\n' "no index of $SCOPE or of its layers lists a repo$disk, so there is nothing to list." \
+			"Run \`ken get <key>\` to clone a repo and list it, or \`ken index set <key> desc=\"...\"\` to list one uncloned." >&2
+		return
+	fi
+	# each key a row, of fields that only trail empty, since read joins tabs as it joins spaces
+	while IFS=$tab read -r key by from desc; do
+		clone=$TOP/.repos/$key cloned=false on='' trees='' strays=''
+		if [ -z "$by" ]; then
+			strays="$strays$nl  stray: no index lists it, so nothing says what it is and only this disk knows it."
+			strays="$strays Run \`ken index set $key desc=\"...\"\`."
+		elif [ -z "$desc" ]; then
+			cd=
+			if [ "$from" != "$SCOPE" ]; then cd="cd $(q "$from") && "; fi
+			strays="$strays$nl  stray: no desc, and a desc is what lets an agent choose a repo before cloning it."
+			strays="$strays Run \`${cd}ken index set $key desc=\"...\"\`."
+		fi
+		if [ -d "$clone/.git" ]; then
+			cloned=true
+			# one record per worktree, the clone first, a line per attribute; a newline in a path as ?
+			list=$(git -C "$clone" worktree list --porcelain -z | tr '\n\000' '?\n')
+			first=1 path='' branch='' gone=''
+			while IFS= read -r line; do
+				case $line in
+				'worktree '*) path=${line#worktree } ;;
+				'branch refs/heads/'*) branch=${line#branch refs/heads/} ;;
+				prunable*) gone=1 ;;
+				'')
+					if [ -n "$first" ]; then
+						first='' on=$branch
+					elif [ -n "$path" ] && [ -z "$gone" ]; then
+						trees="$trees$nl  worktree ${branch:-(detached)}  $path"
+						at=$(real "$path" 2>/dev/null) || at=$path
+						want=$clone.$(printf '%s\n' "$branch" | tr / -)
+						if [ -n "$branch" ] && [ "$at" != "$want" ]; then
+							strays="$strays$nl  stray: the worktree of $branch is at $at, not $want, where \`ken get -b\`"
+							strays="$strays and \`ken path code\` look for it. Run \`git -C $(q "$clone") worktree move $(q "$at") $(q "$want")\`."
+						fi
+					fi
+					path='' branch='' gone=''
+					;;
+				esac
+			done <<EOF
+$list
+
+EOF
+			def=$(git -C "$clone" symbolic-ref -q --short refs/remotes/origin/HEAD) || def=''
+			def=${def#origin/}
+			if [ -n "$def" ] && [ "$on" != "$def" ]; then
+				was='a detached HEAD' fix="git -C $(q "$clone") switch $(q "$def")"
+				if [ -n "$on" ]; then was="the branch $on" fix="$fix\`, then \`ken get $key -b $(q "$on")"; fi
+				strays="$strays$nl  stray: the clone has $was checked out, not its default branch $def, which"
+				strays="$strays every \`ken get -b\` starts from. Run \`$fix\`."
+			fi
+		fi
+		if [ -n "$porcelain" ]; then
+			printf '%s\t%s\t%s\t%s\t%s\n' "$key" "$desc" "$by" "$cloned" "$on"
+			continue
+		fi
+		state='not cloned'
+		if [ $cloned = true ]; then state="cloned on ${on:-a detached HEAD}"; fi
+		printf '%s  listed by %s, %s\n' "$key" "${by:-no index}" "$state"
+		if [ -n "$desc" ]; then printf '  %s\n' "$desc"; fi
+		trees=$trees$strays
+		if [ -n "$trees" ]; then printf '%s\n' "${trees#"$nl"}"; fi
+	done <<EOF
+$all
+EOF
 }
 
 cmd_index() {

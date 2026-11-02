@@ -460,6 +460,15 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(existsSync(r.index)).toBe(false)
 		})
 
+		it('an index path that is not a file is refused, nothing written into it', () => {
+			const r = fresh()
+			mkdirSync(r.index, { recursive: true })
+			const out = ken(['index', 'set', KEY, 'desc=Web.'], r)
+			expect(out.status).toBe(1)
+			expect(out.stderr).toContain(`${r.index} is not a file`)
+			expect(readdirSync(r.index)).toEqual([])
+		})
+
 		it('an index ken cannot read stops it, naming the file, the line and what it expected', () => {
 			for (const [body, line, what] of [
 				['# top\n\ndesc: no key\n', 3, 'opens a stanza'],

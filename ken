@@ -292,6 +292,10 @@ END {
 # $3, with the field or list $4. A file it cannot read stops it: call as x=$(index_read ...) || exit 1.
 index_read() {
 	src=$2
+	if [ -e "$src" ] && [ ! -f "$src" ]; then
+		die "$src is not a file, so ken cannot read or write the index there." \
+			"Move it aside, e.g. \`mv $(q "$src") $(q "$src.old")\`, then rerun."
+	fi
 	if [ ! -f "$src" ]; then src=/dev/null; fi
 	I_MODE=$1 I_FILE=$2 I_KEY=${3-} I_FIELD=${4-} I_LIST=${4-} awk "$INDEX_AWK" "$src"
 }

@@ -58,25 +58,28 @@ key=$(ken config --json | node -e '
 	const names = Object.keys(orgs)
 	const parts = repo.split("/")
 	const fail = (why) => { console.error(`ken new: ${why}`); process.exit(1) }
-	if (parts.length === 3) console.log(repo)
+	// a key is lowercase everywhere, as `ken` makes it
+	const out = (key) => console.log(key.toLowerCase())
+	if (parts.length === 3) out(repo)
 	else if (parts.length === 2) {
 		if (!orgs[parts[0]]) fail(`${parts[0]} is not an org in .ken.yaml (${names.join(", ") || "it lists none"}), so ${repo} names no repo. Use a key, <host>/<owner>/${parts[1]}.`)
-		console.log(`${orgs[parts[0]]}/${parts[1]}`)
+		out(`${orgs[parts[0]]}/${parts[1]}`)
 	} else if (parts.length === 1) {
 		const org = orgs.me ? "me" : names.length === 1 ? names[0] : undefined
 		if (!org) fail(names.length
 			? `${repo} has no owner: .ken.yaml lists the orgs ${names.join(", ")} and none is "me". Run \`ken new <org>/${repo}\`.`
 			: `${repo} has no owner: .ken.yaml lists no orgs. Pass a key, \`ken new <host>/<owner>/${repo}\`, or add yours to .ken.yaml: orgs:, then me: github.com/<you>.`)
-		console.log(`${orgs[org]}/${repo}`)
+		out(`${orgs[org]}/${repo}`)
 	} else fail(`${repo} is not a repo: give a name, <org>/<name> or <host>/<owner>/<name>.`)
 ' "$repo")
 dir=$(ken path code "$key")
 [ ! -e "$dir" ] && [ ! -L "$dir" ] ||
 	die "$dir is already there, so $key is not new. Use it as it is: \`ken get $key\`$([ -z "$layer" ] || echo ", then \`ken layer add $key\`")."
-# as `ken get` does, before the first write: a link on the way would put the repo outside the root
-link=$root
-for part in .repos "${key%%/*}" "$(echo "$key" | cut -d/ -f2)"; do
-	link=$link/$part
+# as `ken get` does, before the first write: a link on the way, the owner, host or .repos folder
+# above the path it will write, would put the repo outside the root
+link=$dir
+for _ in owner host repos; do
+	link=$(dirname "$link")
 	[ -L "$link" ] || continue
 	if target=$(cd "$link" 2>/dev/null && pwd -P); then fix="replace the link with the folder it points to, \`rm '$link' && mv '$target' '$link'\`"
 	else fix="the link points nowhere: remove it, \`rm '$link'\`"

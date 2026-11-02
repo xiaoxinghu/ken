@@ -86,6 +86,12 @@ describe('the agents template', { timeout: 30_000 }, () => {
 			writeFileSync(join(root, '.ken.yaml'), 'orgs:\n  me: example.com/me\n', { flag: 'a' })
 		})
 
+		it('takes a key in any case, as ken does: lowercase', () => {
+			const r = run('ken new EXAMPLE.COM/Me/Draft "A draft."')
+			expect(r.stdout).toBe(`${root}/.repos/example.com/me/draft\n`)
+			expect(r.stderr).toContain('Started example.com/me/draft at')
+		})
+
 		it('starts a repo of the org me, its desc as written, and prints only its path', () => {
 			const r = run('ken new draft "A [draft]: idea"')
 			expect(r.status).toBe(0)
@@ -114,7 +120,7 @@ describe('the agents template', { timeout: 30_000 }, () => {
 			mkdirSync(outside)
 			mkdirSync(join(root, '.repos/example.com'), { recursive: true })
 			symlinkSync(outside, join(root, '.repos/example.com/me'))
-			for (const args of ['draft', 'notes "My notes." --layer']) {
+			for (const args of ['draft', 'notes "My notes." --layer', 'EXAMPLE.COM/ME/draft']) {
 				const r = run(`ken new ${args}`)
 				expect(r.status).toBe(1)
 				expect(r.stderr).toContain(`${root}/.repos/example.com/me is a symlink`)

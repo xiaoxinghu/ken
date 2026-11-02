@@ -56,6 +56,28 @@ const repo = (path: string) => {
 	git(path, 'commit', '-q', '--allow-empty', '-m', 'init')
 }
 
+// A layer's remote, remotes/acme/<name>.git: a root whose .ken lists `layers`, each with its
+// tracked link <name> -> .repos/<key>, and holding `files`.
+const layerRemote = (
+	name: string,
+	layers: Record<string, string>,
+	files: Record<string, string>
+) => {
+	const src = join(dir, `src-${name}`)
+	repo(src)
+	write(
+		join(src, '.ken'),
+		Object.entries(layers)
+			.map(([n, k]) => `layer.${n}=${k}\n`)
+			.join('')
+	)
+	for (const [n, k] of Object.entries(layers)) symlinkSync(`.repos/${k}`, join(src, n))
+	for (const [file, body] of Object.entries(files)) write(join(src, file), body)
+	git(src, 'add', '-A')
+	git(src, 'commit', '-q', '-m', 'layer')
+	git(dir, 'clone', '-q', '--bare', `src-${name}`, `remotes/acme/${name}.git`)
+}
+
 // A root with one direct layer and its link, a clone with a worktree beside it and a detached
 // one elsewhere, a folder with no .git where a checkout belongs, a worktree of a clone outside
 // the root, a nested root that is not a layer, a folder on PATH, and a HOME with no ~/ken, so
@@ -88,6 +110,33 @@ beforeAll(() => {
 	git(join(dir, 'src-lib'), 'commit', '-q', '-m', 'readme')
 	git(dir, 'clone', '-q', '--bare', 'src-lib', 'remotes/acme/lib.git')
 	script(join(dir, 'old-git/git'), 'echo "git version 2.47.1"')
+	// three layers, A listing B, B listing C, and C listing A again
+	layerRemote(
+		'la',
+		{ B: 'example.com/acme/lb' },
+		{
+			'page.md': 'a\n',
+			'.repos/github.com/team-a/AGENTS.md': 'team a\n',
+			'.repos/github.com/shared/AGENTS.md': 'shared from a\n',
+			'.agents/skills/sa/SKILL.md': 'skill a\n'
+		}
+	)
+	layerRemote(
+		'lb',
+		{ C: 'example.com/acme/lc' },
+		{
+			'.repos/github.com/team-b/AGENTS.md': 'team b\n',
+			'.agents/skills/sb/SKILL.md': 'skill b\n'
+		}
+	)
+	layerRemote(
+		'lc',
+		{ A: 'example.com/acme/la' },
+		{ 'c.md': 'c\n', '.repos/github.com/team-c/AGENTS.md': 'team c\n' }
+	)
+	// an ssh and a wrapper that log their arguments and fail, as an unreachable host would
+	for (const name of ['ssh', 'wrap'])
+		script(join(dir, `ssh-bin/${name}`), 'echo "$*" >>"$LOG"; exit 255')
 	repo(atlas)
 	symlinkSync('.repos/github.com/acme/atlas', join(root, 'atlas'))
 	const app = join(root, '.repos/github.com/acme/app')
@@ -264,6 +313,88 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(hint).toContain(`\n  ln -s ${other}/.bin/ken ~/.local/bin/ken\n`)
 			expect(hint).toContain(`\n  export KEN_ROOT=${other}\n`)
 			expect(ken(['init'], { cwd: other, env }).stdout).not.toContain('KEN_ROOT=')
+		})
+	})
+
+	describe('reconcile, run by init', () => {
+		const outside = () => join(dir, 'outside')
+		const status = (repo: string) =>
+			spawnSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8', env: env() })
+				.stdout
+
+		it('clones layers and theirs at the top, links them, and undoes the links of a layer removed', () => {
+			const at = join(dir, `layered-${shell}`)
+			const clone = (name: string) => join(at, '.repos/example.com/acme', name)
+			const owner = (name: string) => join(at, '.repos/github.com', name, 'AGENTS.md')
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\nlayer.gone=example.com/acme/gone\n')
+			write(owner('shared'), 'mine\n')
+			symlinkSync('.repos/example.com/acme/la', join(at, 'A'))
+			const r = ken(['init', at], { cwd: outside() })
+			expect(r.status).toBe(0)
+			expect(r.stdout).toContain(`Layer A: cloned example.com/acme/la at ${clone('la')}.`)
+			expect(r.stdout).toContain('Layer A/B: cloned example.com/acme/lb')
+			expect(r.stdout).toContain('Layer A/B/C: cloned example.com/acme/lc')
+			expect(r.stderr).toContain(
+				'ken: layer gone, example.com/acme/gone, is offline on this machine'
+			)
+			expect(r.stderr).toContain('does not appear to be a git repository')
+			expect(r.stderr).toContain(`run \`ken init ${at}\` again`)
+			// the tracked links resolve through the hoisted clones, the cycle back to A included
+			expect(readFileSync(join(at, 'A/B/C/c.md'), 'utf8')).toBe('c\n')
+			expect(readFileSync(join(at, 'A/B/C/A/page.md'), 'utf8')).toBe('a\n')
+			for (const name of ['la', 'lb', 'lc']) expect(status(clone(name))).toBe('')
+			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
+			// owner context from every reachable layer where the root has none; skills from A only
+			for (const name of ['a', 'b', 'c']) {
+				expect(readFileSync(owner(`team-${name}`), 'utf8')).toBe(`team ${name}\n`)
+			}
+			expect(readFileSync(owner('shared'), 'utf8')).toBe('mine\n')
+			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
+			expect(existsSync(join(at, '.agents/skills/sb'))).toBe(false)
+			const again = ken(['init', at], { cwd: outside() })
+			expect(again.stdout).toContain('Layer A/B/C: example.com/acme/lc is cloned already')
+			expect(again.stdout).not.toContain('Linked')
+			// A no longer listed: its links and those of the layers it brought go, the clones stay
+			write(join(at, '.ken'), 'layer.gone=example.com/acme/gone\n')
+			const removed = ken(['init', at], { cwd: outside() })
+			expect(removed.status).toBe(0)
+			expect(removed.stdout).toContain(
+				`Removed ${owner('team-c')}, a link into example.com/acme/lc`
+			)
+			for (const name of ['a', 'b', 'c']) expect(existsSync(owner(`team-${name}`))).toBe(false)
+			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(false)
+			expect(readFileSync(owner('shared'), 'utf8')).toBe('mine\n')
+			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
+		}, 20_000)
+
+		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {
+			const at = join(dir, `ssh-${shell}`)
+			const log = join(dir, `ssh-${shell}.log`)
+			write(join(at, '.ken'), 'layer.s=ssh.test/acme/s\n')
+			const bin = join(dir, 'ssh-bin')
+			// each line the fake ssh logged, from an init whose layer reaches it
+			const ssh = (more: Record<string, string>, config: [string, string][] = []) => {
+				rmSync(log, { force: true })
+				config.push(['url.ssh://git@ssh.test/.insteadOf', 'https://ssh.test/'])
+				const via: Record<string, string> = { LOG: log, GIT_CONFIG_COUNT: `${config.length}` }
+				config.forEach(([k, v], i) => {
+					via[`GIT_CONFIG_KEY_${i}`] = k
+					via[`GIT_CONFIG_VALUE_${i}`] = v
+				})
+				const r = ken(['init', at], { cwd: outside(), env: { ...via, ...more } })
+				expect(r.status).toBe(0)
+				expect(r.stderr).toContain('ken: layer s, ssh.test/acme/s, is offline on this machine')
+				return readFileSync(log, 'utf8').trim().split('\n')
+			}
+			const opts =
+				'-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+			for (const line of ssh({ GIT_SSH_COMMAND: `env X=1 ${bin}/ssh -p 2222` })) {
+				expect(line.startsWith(`${opts} -p 2222 `)).toBe(true)
+			}
+			for (const line of ssh({}, [['core.sshCommand', `${bin}/wrap --via x`]])) {
+				expect(line.startsWith(`--via x ${opts}`)).toBe(true)
+			}
+			for (const line of ssh({ GIT_SSH: `${bin}/wrap` })) expect(line).not.toContain('BatchMode')
 		})
 	})
 

@@ -198,11 +198,14 @@ each missing one as `get` does, unattended: `GIT_TERMINAL_PROMPT=0`, no askpass,
 `BatchMode=yes` with a connect timeout and keepalive added after the ssh word of the user's
 own command, http low-speed limits. In each layer's clone, link `.repos/<key>` of each of
 its layers to the hoisted clone and list the link in that clone's `.git/info/exclude`. At
-the scope, link each reachable layer's `.repos/<host>/<owner>/AGENTS.md` and each direct
-layer's `.agents/skills/<name>` where the scope has none, and remove such links into clones
-no longer reachable. A clone already there is left alone, no fetch. A layer that cannot be
-cloned is offline on this machine: said on stderr with git's reason and the `ken init` to
-rerun, exit 0.
+the scope, link each reachable layer's `.repos/<host>/<owner>/AGENTS.md`, in walk order, and
+each direct layer's `.agents/skills/<name>` where the scope has none, and remove such links
+into clones no longer reachable, or for a skill no longer direct; a host or owner folder
+that is a link is left alone, which it says. Every link is relative. A clone already there
+is left alone, no fetch. A layer that cannot be cloned is offline on this machine: said on
+stderr with git's reason and the `ken init` to rerun, its own layers unknown, exit 0. It
+says each layer cloned or already there, each link made or removed, and the `git add` of
+the links at the scope.
 
 **Everything else is git**, run against the path `ken path` prints: `git worktree list`,
 `git worktree remove` and `git branch -d` to finish a branch; `rm -rf "$(ken path code

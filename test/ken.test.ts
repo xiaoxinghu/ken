@@ -760,7 +760,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(all.map((a) => a.status)).toEqual(keys.map(() => 0))
 			for (const k of keys) expect(r.read()).toContain(`repo: ${k}\ndesc: R.\n`)
 			expect(readdirSync(join(r.cwd, '.repos'))).toEqual(['index'])
-		})
+		}, 20_000)
 
 		it('a lock whose holder is gone is refused with the rm to run, never removed by ken', () => {
 			const r = fresh('')

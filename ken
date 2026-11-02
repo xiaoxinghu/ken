@@ -442,17 +442,25 @@ ken which "$(ken path code github.com/acme/join-web feat/login)"   # github.com/
 ken which "$(ken path code github.com/acme/api)/src/x.ts"   # not cloned yet: github.com/acme/api clone'
 		;;
 	get)
-		usage='get <url|key>'
-		summary='Make a repo ready at the top and print its clone, <top>/.repos/<key>, the only thing on stdout.'
-		details='  <url|key>   <host>/<owner>/<repo>, cloned from https://<key>.git, or a git URL.
+		usage='get <url|key> [-b <branch> [--from <ref>]]'
+		summary='Make a repo ready at the top and print its clone, or with -b a worktree, the only thing on stdout.'
+		details='  <url|key>        <host>/<owner>/<repo>, cloned from https://<key>.git, or a git URL.
+  -b <branch>      the worktree of <branch> beside the clone, <top>/.repos/<key>.<branch>
+                   with / as -: a new branch from the default branch (what the clone has
+                   checked out) as it stands; an existing one checked out there, or where it
+                   already is. The default branch prints the clone. Nothing is copied or run.
+  --from <ref>     start a new branch from <ref>, a tag, commit or branch, instead.
 Missing, the repo is cloned there: blobless, unless the scope'"'"'s .ken says
 clone.blobless=false; a failed clone leaves no folder. A clone already there is used as
-it is, no fetch; anything else there is refused untouched. Every time: the clone gets
-worktree.useRelativePaths and `git worktree repair`, and when no index of the scope or of
-its layers lists the key, an entry in the scope'"'"'s .repos/index. Needs git 2.48 or newer.'
+it is, no fetch; anything else there, or at the worktree'"'"'s folder (in any case), is
+refused untouched. Every time: the clone gets worktree.useRelativePaths and `git worktree
+repair`, and when no index of the scope or of its layers lists the key, an entry in the
+scope'"'"'s .repos/index. Needs git 2.48 or newer.'
 		examples='ken get github.com/acme/join-web
 ken get git@github.com:acme/join-web.git
-cd "$(ken get github.com/acme/join-web)"'
+cd "$(ken get github.com/acme/join-web)"
+cd "$(ken get github.com/acme/join-web -b feat/login)"   # .../join-web.feat-login
+ken get github.com/acme/join-web -b fix/pay --from v1.2.0'
 		;;
 	index)
 		usage='index set <key> <field>=<value>... | unset <key> [<field>...]'
@@ -717,21 +725,131 @@ relative_paths() {
 		git -C "$1" config worktree.useRelativePaths true
 }
 
-cmd_get() {
-	if [ $# -ne 1 ] || [ "${1#-}" != "$1" ]; then
-		die "ken get takes one repo key or git URL, got $(q "$(redact "$*")")." \
-			'Run e.g. `ken get github.com/acme/join-web`, or `ken get --help`.'
+# The -b half of get: prints the worktree of $branch beside $clone, $clone$folder, made when
+# missing (PRD decision 2), or the clone for the default branch. cmd_get has run up to it.
+get_worktree() {
+	if ! def=$(git -C "$clone" symbolic-ref -q --short HEAD); then
+		name=$(git -C "$clone" symbolic-ref -q --short refs/remotes/origin/HEAD) || name=origin/main
+		die "$clone has a detached HEAD, so it names no default branch, and the clone holds the default" \
+			"branch for every worktree to start from. Run \`git -C $(q "$clone") switch ${name#origin/}\`" \
+			"(or the default branch's name), then \`$again\` again."
 	fi
-	parse_key "$1"
+	exists=
+	if [ "$branch" = "$def" ] || git -C "$clone" show-ref -q --verify "refs/heads/$branch"; then exists=1; fi
+	case $exists$opts in 1*' --from '*)
+		die "$branch exists in $clone already, so it is not made again from --from $(q "$from_ref")." \
+			"Run \`ken get $KEY -b $(q "$branch")\` for its worktree, or pick a new branch name."
+		;;
+	esac
+	if [ "$branch" = "$def" ]; then
+		printf '%s\n' "$clone"
+		return
+	fi
+	# "<path><tab><branch>" of each worktree of the clone on a branch
+	trees=$(git -C "$clone" worktree list --porcelain -z | tr '\0' '\n' |
+		awk '/^worktree /{p = substr($0, 10)} /^branch refs\/heads\//{print p "\t" substr($0, 19)}')
+	held=$(printf '%s\n' "$trees" | W=$branch awk -F "$tab" '$2 == ENVIRON["W"] {print $1}')
+	if [ -n "$held" ] && [ -d "$held" ]; then
+		printf '%s\n' "$held"
+		return
+	elif [ -n "$held" ]; then
+		die "$branch is checked out in the worktree $held, whose folder is gone, and git checks a branch" \
+			"out in one worktree at a time. Run \`git -C $(q "$clone") worktree prune\`, then \`$again\` again."
+	fi
+	wt=$clone$folder
+	hit=$(for at in "${clone%/*}"/* "${clone%/*}"/.*; do printf '%s\n' "${at##*/}"; done |
+		grep -ixF -e "${wt##*/}" | head -n 1)
+	if [ -n "$hit" ]; then
+		hit=${clone%/*}/$hit
+		its=$(printf '%s\n' "$trees" | W=$hit awk -F "$tab" '$1 == ENVIRON["W"] {print $2}')
+		what="$hit is in the way"
+		if [ "$hit" != "$wt" ]; then what="$hit differs only by case from it, one folder on a case-insensitive disk"; fi
+		if [ -n "$its" ]; then what="$what, a worktree of $clone holding the branch $its"; fi
+		die "the worktree of $branch belongs at $wt, but $what, so ken makes nothing. Pick another" \
+			"branch name, or move it aside, e.g. \`mv $(q "$hit") ~/${hit##*/}.aside\`, then \`$again\` again."
+	fi
+	made_branch=
+	if [ -z "$exists" ]; then
+		start=HEAD
+		case $opts in *' --from '*) start=$from_ref ;; esac
+		if ! base=$(git -C "$clone" rev-parse -q --verify --end-of-options "$start^{commit}"); then
+			if [ "$start" != HEAD ]; then
+				die "$(q "$from_ref") is no commit in $clone, so $branch cannot start from it. Run" \
+					"\`git -C $(q "$clone") fetch --tags\` if it is on the remote, then \`$again\` again."
+			fi
+			die "the default branch $def of $clone has no commit yet, so there is nothing to start $branch" \
+				"from. Commit to $def there first, or run \`ken get $KEY -b $(q "$branch") --from <ref>\`."
+		fi
+		# the lock: of two gets of one new branch, one makes it
+		if ! err=$(git -C "$clone" branch "$branch" "$base" 2>&1); then
+			if git -C "$clone" show-ref -q --verify "refs/heads/$branch"; then
+				die "$branch was made in $clone just now, by another \`ken get\`, so this one made nothing." \
+					"Run \`ken get $KEY -b $(q "$branch")\`, without --from, for its worktree."
+			fi
+			die "could not make the branch $branch in $clone. git said: $err${nl}Fix that, then run \`$again\` again."
+		fi
+		made_branch=1
+	fi
+	made_dir=
+	if err=$(mkdir -- "$wt" 2>&1); then made_dir=1; fi
+	if [ -z "$made_dir" ] || ! err=$(git -C "$clone" worktree add -q -- "$wt" "$branch" 2>&1); then
+		undone=
+		if [ -n "$made_dir" ]; then rmdir -- "$wt" 2>/dev/null || :; fi
+		if [ -n "$made_dir" ] && absent "$wt"; then undone=" Removed the folder $wt again."; fi
+		if [ -n "$made_dir" ] && ! absent "$wt"; then undone=" Left $wt, which is not empty: look inside."; fi
+		if [ -n "$made_branch" ] && git -C "$clone" branch -q -D "$branch" 2>/dev/null; then
+			undone="$undone Deleted the branch $branch again."
+		elif [ -n "$made_branch" ]; then
+			undone="$undone Left the branch $branch, which a worktree holds: \`git -C $(q "$clone") worktree list\`."
+		fi
+		die "could not make the worktree of $branch at $wt: $err${nl}So $branch has no worktree.$undone" \
+			"Fix that, then run \`$again\` again."
+	fi
+	if [ -f "$wt/.ken" ]; then
+		: # a worktree of a root is a root: reconcile it here (PRD, "Reconcile") once ken has it
+	fi
+	printf '%s\n' "$wt"
+}
+
+cmd_get() {
+	asked='' branch='' from_ref='' opts=''
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-b | --from)
+			if [ $# -lt 2 ]; then die "ken get $1 needs a value. Run e.g. \`ken get <key> -b feat/login\`."; fi
+			if [ "$1" = -b ]; then branch=$2; else from_ref=$2; fi
+			opts="$opts $1 $(q "$(redact "$2")")"
+			shift 2
+			;;
+		*)
+			if [ -n "$asked" ] || [ "${1#-}" != "$1" ]; then
+				die "ken get takes one repo key or git URL, then -b <branch> [--from <ref>], not" \
+					"$(q "$(redact "$1")") as well. Run e.g. \`ken get github.com/acme/join-web -b feat/login\`."
+			fi
+			asked=$1
+			shift
+			;;
+		esac
+	done
+	case $opts in
+	'' | *' -b '*) ;;
+	*) die "ken get --from names what a new branch starts from, so it needs -b <branch>. Run e.g. \`ken get <key> -b fix/x --from v1.2\`." ;;
+	esac
+	if [ -z "$asked" ]; then die 'ken get needs a repo key or git URL. Run e.g. `ken get github.com/acme/join-web`.'; fi
+	parse_key "$asked"
+	# a bad branch name is refused before anything is touched
+	folder=
+	case $opts in *' -b '*) folder=.$(branch_folder "$branch") || exit 1 ;; esac
+	again="ken get $KEY$opts"
 	version=$(git --version 2>/dev/null) ||
 		die "git is not on PATH, and ken get clones with it. Install git 2.48 or newer" \
-			"(e.g. \`brew install git\`), then run \`ken get $KEY\` again."
+			"(e.g. \`brew install git\`), then run \`$again\` again."
 	major=${version#git version } minor=${version#git version *.}
 	major=${major%%[!0-9]*} minor=${minor%%[!0-9]*}
 	if [ "${major:-0}" -lt 2 ] || { [ "$major" -eq 2 ] && [ "${minor:-0}" -lt 48 ]; }; then
 		die "$version is too old: ken needs git 2.48 or newer, for worktree.useRelativePaths, which" \
 			"lets a whole <owner>/ folder move. Install it (e.g. \`brew install git\`), check" \
-			"\`git --version\`, then run \`ken get $KEY\` again."
+			"\`git --version\`, then run \`$again\` again."
 	fi
 	find_root
 	filter=--filter=blob:none
@@ -739,7 +857,7 @@ cmd_get() {
 	'' | true) ;;
 	false) filter= ;;
 	*) die "$SCOPE/.ken sets clone.blobless to neither true nor false, so ken cannot tell how to clone." \
-		"Fix that line to clone.blobless=false or true, then run \`ken get $KEY\` again." ;;
+		"Fix that line to clone.blobless=false or true, then run \`$again\` again." ;;
 	esac
 	clone=$TOP/.repos/$KEY parent=$TOP/.repos/${KEY%/*}
 	for at in "$TOP/.repos" "${parent%/*}" "$parent"; do
@@ -749,7 +867,7 @@ cmd_get() {
 			die "$at is a symlink to $to, so a clone under it would be outside the top root $TOP," \
 				"whose .repos/ holds every checkout so that context cascades along its real path." \
 				"Put the folder in its place, \`rm $(q "$at") && mv $(q "$to") $(q "$at")\`, or start an" \
-				"empty one, \`rm $(q "$at")\`; then run \`ken get $KEY\` again."
+				"empty one, \`rm $(q "$at")\`; then run \`$again\` again."
 		fi
 	done
 	# every get marks itself before the claim, so one that loses the mkdir waits while the
@@ -757,7 +875,7 @@ cmd_get() {
 	mark=$parent/.${KEY##*/}.ken-get.$$
 	if ! mkdir -p -- "$mark"; then
 		die "could not make $parent (the reason is above), so $KEY has no folder to be cloned into." \
-			"Fix that, then run \`ken get $KEY\` again."
+			"Fix that, then run \`$again\` again."
 	fi
 	trap 'rmdir "$mark" 2>/dev/null || :' EXIT
 	if made=$(mkdir -- "$clone" 2>&1); then
@@ -765,19 +883,19 @@ cmd_get() {
 		if ! err=$(git clone -q ${filter:+"$filter"} -- "$URL" "$clone" 2>&1); then
 			rm -rf "$clone"
 			hint=
-			case $1 in *:*) ;; *)
+			case $asked in *:*) ;; *)
 				hint="A key alone clones https://$KEY.git; for another remote pass its URL, e.g."
 				hint="$hint \`ken get git@${KEY%%/*}:${KEY#*/}.git\`. "
 				;;
 			esac
 			die "could not clone $(redact "$URL") into $clone, so it was removed again. git said:" \
-				"$(redact "$err")$nl${hint}Fix the cause, then run \`ken get $(q "$(redact "$1")")\` again."
+				"$(redact "$err")$nl${hint}Fix the cause, then run \`ken get $(q "$(redact "$asked")")$opts\` again."
 		fi
 		trap - INT TERM HUP
 	else
 		rmdir "$mark"
 		if absent "$clone"; then
-			die "could not make $clone: $made. Fix that, then run \`ken get $KEY\` again."
+			die "could not make $clone: $made. Fix that, then run \`$again\` again."
 		fi
 		busy=1
 		while [ -n "$busy" ]; do
@@ -795,7 +913,7 @@ cmd_get() {
 		what="a symlink to $(readlink "$clone")"
 	elif absent "$clone"; then
 		die "$clone is gone: another \`ken get $KEY\` was cloning into it and failed, saying why in" \
-			"its own output. Run \`ken get $KEY\` again to clone it here."
+			"its own output. Run \`$again\` again to clone it here."
 	elif [ ! -d "$clone" ]; then
 		what='a file'
 	elif absent "$clone/.git"; then
@@ -808,17 +926,17 @@ cmd_get() {
 	if [ -n "$what" ]; then
 		init=
 		if [ "$what" = 'a folder with no .git' ]; then
-			init=" To make this folder the repo instead, run \`git init $(q "$clone")\` then \`ken get $KEY\`."
+			init=" To make this folder the repo instead, run \`git init $(q "$clone")\` then \`$again\`."
 		fi
 		die "$clone is where the clone of $KEY belongs, but it is $what, so ken neither uses nor" \
 			"replaces it. Move it aside, e.g. \`mv $(q "$clone") ~/${KEY##*/}.aside\`, then run" \
-			"\`ken get $KEY\` again.$init"
+			"\`$again\` again.$init"
 	fi
 	# another get of an existing repo may hold git's config lock, setting the same: wait, recheck
 	if ! relative_paths "$clone" 2>/dev/null && ! { sleep 1 && relative_paths "$clone"; }; then
 		die "could not set worktree.useRelativePaths in $clone (the reason is above), which lets" \
 			"its <owner>/ folder move. Run \`git -C $(q "$clone") config worktree.useRelativePaths true\`," \
-			"then \`ken get $KEY\` again."
+			"then \`$again\` again."
 	fi
 	git -C "$clone" worktree repair >&2
 	file=$SCOPE/.repos/index
@@ -835,7 +953,11 @@ cmd_get() {
 		printf 'ken: %s %s\n' "registered $KEY in $file with no desc, and a desc is what lets an agent" \
 			"choose a repo before cloning it. Run \`ken index set $KEY desc=\"...\"\` with what it is, in a line." >&2
 	fi
-	printf '%s\n' "$clone"
+	if [ -z "$folder" ]; then
+		printf '%s\n' "$clone"
+		return
+	fi
+	get_worktree
 }
 
 cmd_index() {

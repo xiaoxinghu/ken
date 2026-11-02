@@ -436,7 +436,8 @@ reconcile() (
 		case $seen in *" $key "*) continue ;; esac
 		seen="$seen$key "
 		clone=$TOP/.repos/$key
-		if [ -d "$clone" ]; then
+		# only a real clone counts as there; anything else is get's to refuse, naming the mv aside
+		if [ "$(real "$clone" 2>/dev/null)" = "$clone" ] && [ -d "$clone/.git" ] && [ ! -L "$clone/.git" ]; then
 			printf 'Layer %s: %s is cloned already, at %s; left as it is, no fetch.\n' "$name" "$key" "$clone"
 		elif err=$( (KEN_ROOT=$SCOPE && cmd_get "$key") 2>&1 >/dev/null); then
 			printf 'Layer %s: cloned %s at %s.\n' "$name" "$key" "$clone"
@@ -462,7 +463,9 @@ reconcile() (
 		for key in $(layer_lines "$root" | cut -f2); do
 			link_in "$root/.repos/$key" "$up/.repos/$key" || :
 			if [ -n "$exclude" ] && ! grep -qxF "/.repos/$key" "$exclude" 2>/dev/null; then
-				mkdir -p "${exclude%/*}" && printf '/.repos/%s\n' "$key" >>"$exclude"
+				mkdir -p "${exclude%/*}"
+				if [ -s "$exclude" ] && [ -n "$(tail -c 1 "$exclude")" ]; then printf '\n' >>"$exclude"; fi
+				printf '/.repos/%s\n' "$key" >>"$exclude"
 			fi
 		done
 	done

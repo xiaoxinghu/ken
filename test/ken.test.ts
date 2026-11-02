@@ -367,6 +367,26 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
 		}, 20_000)
 
+		it('takes only a real clone as a layer that is there, and adds an exclude rule as its own line', () => {
+			const at = join(dir, `there-${shell}`)
+			const la = join(at, '.repos/example.com/acme/la')
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\nlayer.P=example.com/acme/plain\n')
+			write(join(at, '.repos/example.com/acme/plain/.ken'), 'layer.X=example.com/acme/lc\n')
+			git(dir, 'clone', '-q', join(dir, 'remotes/acme/la.git'), la)
+			write(join(la, '.git/info/exclude'), 'mine')
+			const r = ken(['init', at], { cwd: outside() })
+			expect(r.status).toBe(0)
+			expect(r.stderr).toContain('ken: layer P, example.com/acme/plain, is offline')
+			expect(r.stderr).toContain('but it is a folder with no .git')
+			expect(r.stdout).toContain('Layer A: example.com/acme/la is cloned already')
+			expect(r.stdout).not.toContain('Layer P')
+			expect(existsSync(join(at, '.repos/example.com/acme/plain/.repos'))).toBe(false)
+			expect(readFileSync(join(la, '.git/info/exclude'), 'utf8')).toBe(
+				'mine\n/.repos/example.com/acme/lb\n'
+			)
+			expect(status(la)).toBe('')
+		}, 20_000)
+
 		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {
 			const at = join(dir, `ssh-${shell}`)
 			const log = join(dir, `ssh-${shell}.log`)

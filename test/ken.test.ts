@@ -899,6 +899,15 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(ken(['get', KEY, '-b', 'feat/x'], { cwd: at })).toEqual(r)
 		})
 
+		it('a root whose path holds a tab and a newline: again prints the same worktree', () => {
+			const at = join(dir, `get-b-${shell}-odd\t\nroot`)
+			write(join(at, '.ken'), '')
+			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
+			const first = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			expect(first.stdout).toBe(`${join(at, '.repos', KEY)}.feat\n`)
+			expect(ken(['get', KEY, '-b', 'feat'], { cwd: at })).toEqual(first)
+		})
+
 		it('the default branch prints the clone; an existing branch gets its worktree', () => {
 			const { at, clone, wt } = cloned()
 			expect(ken(['get', KEY, '-b', 'main'], { cwd: at }).stdout).toBe(`${clone}\n`)

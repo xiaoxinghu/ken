@@ -745,10 +745,8 @@ get_worktree() {
 		printf '%s\n' "$clone"
 		return
 	fi
-	# "<path><tab><branch>" of each worktree of the clone on a branch
-	trees=$(git -C "$clone" worktree list --porcelain -z | tr '\0' '\n' |
-		awk '/^worktree /{p = substr($0, 10)} /^branch refs\/heads\//{print p "\t" substr($0, 19)}')
-	held=$(printf '%s\n' "$trees" | W=$branch awk -F "$tab" '$2 == ENVIRON["W"] {print $1}')
+	# the worktree holding a branch, asked of git one ref at a time, so a path is never split
+	held=$(git -C "$clone" for-each-ref --format='%(worktreepath)' "refs/heads/$branch")
 	if [ -n "$held" ] && [ -d "$held" ]; then
 		printf '%s\n' "$held"
 		return
@@ -761,7 +759,8 @@ get_worktree() {
 		grep -ixF -e "${wt##*/}" | head -n 1)
 	if [ -n "$hit" ]; then
 		hit=${clone%/*}/$hit
-		its=$(printf '%s\n' "$trees" | W=$hit awk -F "$tab" '$1 == ENVIRON["W"] {print $2}')
+		its=$(git -C "$hit" branch --show-current 2>/dev/null) || its=
+		if [ -n "$its" ] && [ "$(git -C "$clone" for-each-ref --format='%(worktreepath)' "refs/heads/$its")" != "$hit" ]; then its=; fi
 		what="$hit is in the way"
 		if [ "$hit" != "$wt" ]; then what="$hit differs only by case from it, one folder on a case-insensitive disk"; fi
 		if [ -n "$its" ]; then what="$what, a worktree of $clone holding the branch $its"; fi

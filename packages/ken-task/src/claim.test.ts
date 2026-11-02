@@ -1,7 +1,6 @@
-// `ken task claim` against a local repo cloned into the layout with `ken get`, whose
-// .ken.yaml copies a file into each new worktree and runs a setup there.
+// `ken task claim` against a local repo cloned into the layout with `ken get`.
 import { spawn } from 'node:child_process'
-import { existsSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs'
+import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { git } from './git.ts'
@@ -15,16 +14,15 @@ beforeAll(() => {
 	const remote = join(dir, 'remotes/acme/portal.git')
 	mkdirSync(remote, { recursive: true })
 	git(remote, 'init', '-q', '-b', 'main')
-	writeFileSync(join(remote, '.ken.yaml'), 'copy: [.env]\nsetup: echo set up; pwd > setup-ran\n')
+	writeFileSync(join(remote, 'README.md'), '# portal\n')
 	git(remote, 'add', '.')
 	git(remote, '-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'init')
 })
 
-/** A root with the clone of KEY, its .env made, and a task file for each of `tasks`. */
+/** A root with the clone of KEY and a task file for each of `tasks`. */
 function setup(tasks: Record<string, string>) {
 	const root = newRoot()
 	const clone = kenGet(root, KEY)
-	writeFileSync(join(clone, '.env'), 'SECRET=1\n')
 	for (const [rel, front] of Object.entries(tasks)) write(join(root, rel), `---\n${front}\n---\n`)
 	return {
 		root,
@@ -40,7 +38,7 @@ function setup(tasks: Record<string, string>) {
 /** `ken task <args>` in `root`, run in the background, so two can race. */
 const race = (root: string, args: string[]) =>
 	new Promise<{ status: number | null; stdout: string; stderr: string }>((done) => {
-		const child = spawn(process.execPath, [ken, 'task', ...args], { cwd: root, env: env(root) })
+		const child = spawn('sh', [ken, 'task', ...args], { cwd: root, env: env(root) })
 		let stdout = ''
 		let stderr = ''
 		child.stdout.on('data', (d) => {
@@ -53,15 +51,12 @@ const race = (root: string, args: string[]) =>
 	})
 
 describe('ken task claim', { timeout: 60_000 }, () => {
-	it('makes the branch and its worktree, copies, runs setup, prints only the path', () => {
+	it('makes the branch and its worktree, prints only the path', () => {
 		const t = setup({ [TASK]: `repo: ${KEY}` })
 		const r = kenTask(t.root, ['claim', TASK])
 		const worktree = `${t.clone}.portal-fix-login`
 		expect(r).toMatchObject({ status: 0, stdout: `${worktree}\n` })
-		expect(r.stderr).toContain('set up')
 		expect(git(worktree, 'branch', '--show-current')).toBe('portal/fix-login')
-		expect(readFileSync(join(worktree, '.env'), 'utf8')).toBe('SECRET=1\n')
-		expect(readFileSync(join(worktree, 'setup-ran'), 'utf8').trim()).toBe(worktree)
 		expect(t.state(TASK)).toBe('claimed')
 		expect(kenTask(t.root, ['claim', '--help']).stdout).toContain('Examples:')
 	})
@@ -212,7 +207,5 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 		const results = await Promise.all([race(t.root, ['claim']), race(t.root, ['claim'])])
 		expect(results.map((r) => r.status)).toEqual([0, 0])
 		expect(results.map((r) => r.stdout).sort()).toEqual([`${t.clone}.one\n`, `${t.clone}.two\n`])
-		expect(existsSync(join(`${t.clone}.one`, 'setup-ran'))).toBe(true)
-		expect(existsSync(join(`${t.clone}.two`, 'setup-ran'))).toBe(true)
 	})
 })

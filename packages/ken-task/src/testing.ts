@@ -10,11 +10,11 @@ export const dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-task-')))
 // `ken` and `ken-task` on PATH as a user installs them, so `ken task` goes through dispatch
 const bin = join(dir, 'bin')
 mkdirSync(bin)
-symlinkSync(join(import.meta.dirname, '../../ken/src/cli.ts'), join(bin, 'ken'))
+symlinkSync(join(import.meta.dirname, '../../../ken'), join(bin, 'ken'))
 symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-task'))
 
-/** How the tests run `ken`: its CLI under node, and the environment for the root `root`. */
-export const ken = join(import.meta.dirname, '../../ken/src/cli.ts')
+/** How the tests run `ken`: the script at the repo root under sh, and the environment for the root `root`. */
+export const ken = join(import.meta.dirname, '../../../ken')
 export const env = (root: string) => ({
 	...process.env,
 	KEN_ROOT: root,
@@ -23,7 +23,7 @@ export const env = (root: string) => ({
 
 /** `ken get <key> <args>` in the root `root`; https://example.com/ clones from `dir/remotes/`. */
 export const kenGet = (root: string, key: string, ...args: string[]): string => {
-	const r = spawnSync(process.execPath, [ken, 'get', key, ...args], {
+	const r = spawnSync('sh', [ken, 'get', key, ...args], {
 		encoding: 'utf8',
 		env: {
 			...env(root),
@@ -38,7 +38,7 @@ export const kenGet = (root: string, key: string, ...args: string[]): string => 
 
 /** `ken task <args>` in the root `root`, run from `cwd`. */
 export const kenTask = (root: string, args: string[], cwd = root) => {
-	const r = spawnSync(process.execPath, [ken, 'task', ...args], {
+	const r = spawnSync('sh', [ken, 'task', ...args], {
 		cwd,
 		encoding: 'utf8',
 		env: env(root)
@@ -51,9 +51,10 @@ export const write = (file: string, text: string | Buffer) => {
 	writeFileSync(file, text)
 }
 
-export const newRoot = (kenYaml = '') => {
+/** A root holding `.ken`, its settings `settings`, as `key=value` lines. */
+export const newRoot = (settings = '') => {
 	const root = mkdtempSync(join(dir, 'root-'))
-	writeFileSync(join(root, '.ken.yaml'), kenYaml)
+	writeFileSync(join(root, '.ken'), settings)
 	return root
 }
 

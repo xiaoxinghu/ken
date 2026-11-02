@@ -27,7 +27,7 @@ describe('ken task list', () => {
 	const front = (text: string) => `---\n${text}\n---\n`
 
 	beforeAll(() => {
-		root = newRoot('task:\n  folder: work\n')
+		root = newRoot('task.folder=work\n')
 		folder = join(root, 'work')
 		const task = (rel: string, text: string) => write(join(folder, rel), text)
 		task('remember-the-milk.md', 'Before Friday.\n')
@@ -328,7 +328,7 @@ describe('ken task list: no tasks', () => {
 	})
 
 	it('lists a task folder it cannot look at as a problem row, and exits 0', () => {
-		const root = newRoot('task:\n  folder: loop\n')
+		const root = newRoot('task.folder=loop\n')
 		symlinkSync('loop', join(root, 'loop'))
 		const r = kenTask(root, ['list', '--json'])
 		expect(r).toMatchObject({ status: 0, stderr: '' })
@@ -338,8 +338,33 @@ describe('ken task list: no tasks', () => {
 	it('reads an absolute task.folder', () => {
 		const tasks = mkdtempSync(join(dir, 'elsewhere-'))
 		write(join(tasks, 'far.md'), '# Far\n')
-		const r = kenTask(newRoot(`task:\n  folder: ${tasks}\n`), ['list'])
+		const r = kenTask(newRoot(`task.folder=${tasks}\n`), ['list'])
 		expect(r).toMatchObject({ status: 0, stdout: `ready  ${join(tasks, 'far.md')}\n` })
+	})
+
+	it("reads task.folder as .ken's grammar has it: its last line, trimmed, past comments and other keys", () => {
+		const root = newRoot(
+			'# settings\n#task.folder=commented\nlayer.handbook=github.com/acme/handbook\ntask.folder=old\ntask.folder= work \n'
+		)
+		write(join(root, 'work/a.md'), '# A\n')
+		const r = kenTask(root, ['list'])
+		expect(r).toMatchObject({ status: 0, stdout: `ready  ${join(root, 'work/a.md')}\n` })
+	})
+
+	it('refuses an empty task.folder, naming the line to fix', () => {
+		const r = kenTask(newRoot('task.folder=\n'), ['list'])
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('task.folder=tasks')
+	})
+
+	it('without KEN_ROOT, says to run it through ken', () => {
+		const { KEN_ROOT: _, ...rest } = process.env
+		const r = spawnSync(process.execPath, [join(import.meta.dirname, 'cli.ts'), 'list'], {
+			encoding: 'utf8',
+			env: rest
+		})
+		expect(r).toMatchObject({ status: 1, stdout: '' })
+		expect(r.stderr).toContain('Run it as `ken task <command>`')
 	})
 })
 

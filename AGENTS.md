@@ -24,8 +24,8 @@ run.
 ## The extensions: `packages/ken-task`, `packages/ken-lint`
 
 - pnpm for packages; node runs TypeScript directly (type stripping). No build step. Tabs.
-- Their tests still assume the retired TypeScript kernel and are excluded in
-  `vitest.config.ts` until they are ported to `.ken` and the script.
+- They read the root from `KEN_ROOT`, which `ken` dispatch sets, and their settings from
+  its `.ken`. Their tests put the root `ken` script on `PATH` and run it under `sh`.
 
 ## Checks
 

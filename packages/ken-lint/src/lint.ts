@@ -20,22 +20,52 @@ const RESERVED = new Set(['README.md', 'AGENTS.md', 'CLAUDE.md', 'log.md'])
 const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s'"<>#,;*]+)/gi
 const IS_REFERENCE = /^[\w-][\w.-]*\/[\w.-]+\/[\w.-]+:/
 
-type Config = {
-	task?: { folder?: string }
-	layers: { name: string; cloned: boolean; linked: boolean }[]
-}
 type Page = { path: string; listedBy: string[] }
 
-const ken = (args: string[], env = process.env) => spawnSync('ken', args, { encoding: 'utf8', env })
+const ken = (args: string[]) => spawnSync('ken', args, { encoding: 'utf8' })
 
 /** A word for sh, whatever it holds. */
 const quote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
 
-/** `ken config --json` at `top`; a failure stops the lint, saying what is unknown. */
-function readConfig(top: string, unknown: string): Config {
-	const r = ken(['config', '--json'], { ...process.env, KEN_ROOT: top })
-	if (r.status !== 0) throw new Error(`\`ken config --json\` failed ${unknown}:\n${r.stderr}`)
-	return JSON.parse(r.stdout) as Config
+/**
+ * The task folder, absolute, and the layer names of the root or layer `top`, from its `.ken` as
+ * docs/files.md reads it: a repeated key is its last line, a value is trimmed. The layer's key is
+ * the kernel's business. One it cannot read stops the lint, saying what is unknown.
+ */
+function readKen(top: string, unknown: string): { folder: string; layers: Set<string> } {
+	const file = join(top, '.ken')
+	let text: string
+	try {
+		text = readFileSync(file, 'utf8')
+	} catch (e) {
+		throw new Error(
+			`${file} could not be read (${(e as Error).message}), ${unknown}. Every root holds a .ken, a layer's clone too: make it with \`ken init ${quote(top)}\`, then run \`ken lint\` again.`
+		)
+	}
+	let folder = 'tasks'
+	const layers = new Set<string>()
+	for (const [i, line] of text.split('\n').entries()) {
+		const at = `${file} line ${i + 1}, ${JSON.stringify(line)},`
+		if (line.startsWith('task.folder=')) {
+			folder = line.slice('task.folder='.length).trim()
+			if (!folder) {
+				throw new Error(
+					`${at} sets task.folder to nothing, ${unknown}. It is a folder, relative to the root or absolute, like task.folder=tasks: fix the line, or delete it for the default, tasks.`
+				)
+			}
+		} else if (line.startsWith('layer.')) {
+			const eq = line.indexOf('=')
+			const name = line.slice('layer.'.length, eq)
+			// the name is a folder at the top, so one that climbs out of it is refused
+			if (eq < 0 || !/^[A-Za-z0-9_.-]+$/.test(name) || /^\.\.?$/.test(name)) {
+				throw new Error(
+					`${at} is not a layer line, ${unknown}. It expects layer.<name>=<host>/<owner>/<repo>, lowercase, the name a folder at ${top}, such as layer.sales-atlas=github.com/acme/sales-atlas: fix or delete that line, then run \`ken lint\` again.`
+				)
+			}
+			layers.add(name)
+		}
+	}
+	return { folder: resolve(top, folder), layers }
 }
 
 /** A path keeps its brackets, `src/app/[id]/page.ts`, not the prose's punctuation after it. */
@@ -62,24 +92,29 @@ function visit(node: Nodes, fn: (node: Nodes) => void): void {
 
 /** Lint the root at `root`: one line per problem, then the summary; `errors` decides the exit. */
 export function lint(root: string): { lines: string[]; errors: number } {
-	const config = readConfig(root, 'so the layers are unknown')
-	// an offline layer has nothing to read
-	const tops = [
-		root,
-		...config.layers.filter((l) => l.cloned && l.linked).map((l) => join(root, l.name))
-	]
-	// a task folder holds tasks, not pages: the root's, and each layer's from its own .ken.yaml;
-	// compared by real path, so a link to a folder above it does not reach it either
-	const taskFolders = new Set(
-		tops.map((top) => {
-			const own =
-				top === root
-					? config
-					: readConfig(top, `at the layer ${basename(top)}, so its task folder is unknown`)
-			const folder = resolve(top, own.task?.folder ?? 'tasks')
-			return existsSync(folder) ? realpathSync(folder) : folder
-		})
-	)
+	// The root and every layer reachable from it, each layer at its link, `<top>/<name>`, and the
+	// task folders, which hold tasks, not pages: each one's from its own .ken, compared by real
+	// path, so a link to a folder above one does not reach it either. An offline layer, its link
+	// dangling, has nothing to read; a layer reached twice is read once.
+	const tops = [root]
+	const taskFolders = new Set<string>()
+	const seen = new Set([realpathSync(root)]) // folders walked, or to be walked as a top
+	for (const top of tops) {
+		const own = readKen(
+			top,
+			top === root
+				? 'so the task folder and the layers are unknown'
+				: `at the layer ${relative(root, top)}, so its task folder and its layers are unknown`
+		)
+		taskFolders.add(existsSync(own.folder) ? realpathSync(own.folder) : own.folder)
+		for (const name of own.layers) {
+			const layer = join(top, name)
+			if (!statSync(layer, { throwIfNoEntry: false })?.isDirectory()) continue
+			if (seen.has(realpathSync(layer))) continue
+			seen.add(realpathSync(layer))
+			tops.push(layer)
+		}
+	}
 
 	const problems: string[] = []
 	const report = (kind: 'error' | 'note', file: string, text: string, line?: number) =>
@@ -94,12 +129,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		}
 	}
 
-	// The walk, as `find -L`: links followed, each folder read once. A page is keyed by its real
-	// path, so a link that reaches it by another path still finds it.
+	// The walk, as `find -L`: links followed, each folder read once, a layer as a top only. A page
+	// is keyed by its real path, so a link that reaches it by another path still finds it.
 	const pages = new Map<string, Page>()
 	const readmes: string[] = []
 	const topOf = new Map<string, string>() // file -> the root or layer it is in
-	const seen = new Set<string>()
 	const walk = (dir: string, top: string) => {
 		if (taskFolders.has(realpathSync(dir)) || seen.has(realpathSync(dir))) return
 		seen.add(realpathSync(dir))
@@ -114,10 +148,9 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		}
 	}
 	for (const top of tops) {
-		seen.add(realpathSync(top))
 		for (const name of readdirSync(top).sort()) {
 			const path = join(top, name)
-			if (name.startsWith('.') || tops.includes(path)) continue
+			if (name.startsWith('.')) continue
 			const stat = statSync(path, { throwIfNoEntry: false })
 			if (stat?.isDirectory()) walk(path, top)
 			// a page at the top is in no section: reported below
@@ -261,12 +294,12 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		})
 		const changed = Number(log.stdout.trim()) * 1000
 		if (!changed || Date.now() - changed < STALE_DAYS * 86_400_000) continue
-		const cd = top === root ? 'ken path root' : `ken path layer ${basename(top)}`
+		const cd = `"$(ken path root)"${top === root ? '' : `/${quote(relative(root, top))}`}`
 		const rel = relative(top, page)
 		report(
 			'note',
 			page,
-			`nobody links to it and nobody has changed it since ${new Date(changed).toISOString().slice(0, 10)}. If it is settled, propose archiving it: \`cd "$(${cd})" && mkdir -p -- ${quote(join('.archive', dirname(rel)))} && git mv -- ${quote(rel)} ${quote(join('.archive', rel))}\`, then drop its line from its README.md.`
+			`nobody links to it and nobody has changed it since ${new Date(changed).toISOString().slice(0, 10)}. If it is settled, propose archiving it: \`cd ${cd} && mkdir -p -- ${quote(join('.archive', dirname(rel)))} && git mv -- ${quote(rel)} ${quote(join('.archive', rel))}\`, then drop its line from its README.md.`
 		)
 	}
 

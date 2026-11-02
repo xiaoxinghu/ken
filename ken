@@ -92,11 +92,13 @@ find_root() {
 	fi
 	SCOPE=$(real "$dir")
 	TOP=$SCOPE
+	# a root reached through .repos/ is a checkout there: <up>/.repos/<host>/<owner>/<folder>
 	while :; do
 		case $TOP in
-		*/.repos/*) up=${TOP%/.repos/*} ;;
+		*/.repos/*/*/*) up=${TOP%/.repos/*/*/*} ;;
 		*) break ;;
 		esac
+		case ${TOP#"$up/.repos/"} in */*/*/*) break ;; esac
 		if [ ! -f "$up/.ken" ]; then break; fi
 		TOP=$up
 	done
@@ -305,6 +307,7 @@ EOF
 # the scope's .bin/, each direct layer's in .ken order, then PATH. find_root has run.
 places() {
 	PLACES="$SCOPE/.bin${tab}the scope"
+	layers=''
 	if [ -f "$SCOPE/.ken" ]; then
 		lines=$(sed -n '/^layer\./{=;p;}' "$SCOPE/.ken")
 		while read -r n && read -r line; do
@@ -318,11 +321,19 @@ places() {
 					"layer.<name>=<host>/<owner>/<repo>, lowercase, such as" \
 					"layer.sales-atlas=github.com/acme/sales-atlas. Fix or delete that line."
 			fi
-			PLACES=$PLACES$nl$TOP/.repos/$key/.bin${tab}layer\ $layer
+			# a repeated key reads as its last line (docs/files.md): drop the earlier one
+			kept=''
+			while IFS=$tab read -r dir from; do
+				if [ -n "$dir" ] && [ "$from" != "layer $layer" ]; then kept=$kept$nl$dir$tab$from; fi
+			done <<EOF
+$layers
+EOF
+			layers=$kept$nl$TOP/.repos/$key/.bin${tab}layer\ $layer
 		done <<EOF
 $lines
 EOF
 	fi
+	PLACES=$PLACES$layers
 	set -f
 	IFS=:
 	# an empty PATH entry is the current folder, as in any shell; the : added keeps a last one

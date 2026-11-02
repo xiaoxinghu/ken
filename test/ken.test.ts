@@ -130,11 +130,13 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 		})
 
-		it('a .ken reached not through .repos/ is its own top', () => {
-			const inner = join(root, 'notes/inner')
-			expect(ken(['path', 'code', 'github.com/acme/x'], { cwd: inner }).stdout).toBe(
-				`${inner}/.repos/github.com/acme/x\n`
-			)
+		it('a .ken reached not through .repos/ is its own top, inside a layer too', () => {
+			for (const inner of [join(root, 'notes/inner'), join(atlas, 'notes/inner')]) {
+				write(join(inner, '.ken'), '')
+				expect(ken(['path', 'code', 'github.com/acme/x'], { cwd: inner }).stdout).toBe(
+					`${inner}/.repos/github.com/acme/x\n`
+				)
+			}
 		})
 
 		it('KEN_ROOT wins over the cwd, resolved to its real path', () => {
@@ -199,6 +201,15 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			const r = ken(['plain'])
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain(`Run \`chmod +x ${root}/.bin/ken-plain\``)
+		})
+
+		it('a layer named twice in .ken is the last line, and only that layer is searched', () => {
+			const twice = join(dir, `twice-${shell}`)
+			write(join(twice, '.ken'), 'layer.t=github.com/acme/old\nlayer.t=github.com/acme/new\n')
+			script(join(twice, '.repos/github.com/acme/old/.bin/ken-which-layer'), 'echo old')
+			script(join(twice, '.repos/github.com/acme/new/.bin/ken-which-layer'), 'echo new')
+			expect(ken(['which-layer'], { cwd: twice }).stdout).toBe('new\n')
+			expect(ken(['nope'], { cwd: twice }).stderr).not.toContain('acme/old')
 		})
 
 		it('a layer line in .ken that ken cannot read stops it, naming the file and line', () => {

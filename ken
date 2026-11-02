@@ -446,6 +446,10 @@ cmd_init() {
 			"share a root into $up with \`ken layer add <key>\` run there; or make a root outside $up," \
 			'e.g. `ken init ~/other`.'
 	done
+	if ! absent "$dir/.ken" && [ ! -f "$dir/.ken" ]; then
+		die "$dir/.ken is there but is not a file, and only a .ken file makes a folder a root, so" \
+			"ken would never find $dir as one. Move it aside, then run \`ken init $(q "$dir")\` again."
+	fi
 	if ! mkdir -p -- "$dir/.repos" "$dir/.bin"; then
 		die "could not make $dir/.repos and $dir/.bin (the reason is above), so $dir cannot be a root." \
 			"Fix that or pick another folder, then run \`ken init $(q "$dir")\` again."

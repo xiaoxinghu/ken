@@ -195,6 +195,19 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(existsSync(join(root, `.repos/dot-${shell}`))).toBe(false)
 		})
 
+		it('refuses a .ken that is a folder or a dangling link, which marks no root', () => {
+			const odd = join(dir, `odd-${shell}`)
+			mkdirSync(join(odd, 'folder/.ken'), { recursive: true })
+			mkdirSync(join(odd, 'dangling'))
+			symlinkSync('nowhere', join(odd, 'dangling/.ken'))
+			for (const at of ['folder', 'dangling']) {
+				const r = ken(['init', join(odd, at)], { cwd: outside() })
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`${join(odd, at)}/.ken is there but is not a file`)
+				expect(existsSync(join(odd, at, '.bin'))).toBe(false)
+			}
+		})
+
 		it('accepts a checkout at <root>/.repos/<host>/<owner>/<repo>, through every root above', () => {
 			for (const checkout of [
 				join(root, `.repos/github.com/acme/new-${shell}`),

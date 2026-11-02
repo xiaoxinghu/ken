@@ -164,9 +164,17 @@ describe.each(SHELLS)('a layer is a workspace, under %s', (shell) => {
 		expect(run(wt, 'git', 'status', '--porcelain').stdout).toBe('')
 	}, 20_000)
 
+	// rg -L's search, in POSIX: follow links, skip hidden folders, list files holding the words
+	const search = () =>
+		run(
+			top,
+			'sh',
+			'-c',
+			"find -L . -name '.?*' -prune -o -type f -exec grep -l 'the nested page' {} +"
+		).stdout
+
 	it('search from the top finds a page of the nested layer through two links', () => {
-		const found = run(top, 'rg', '-L', '-l', 'the nested page', '.')
-		expect(found.stdout).toBe('./atlas/handbook/guide/x.md\n')
+		expect(search()).toBe('./atlas/handbook/guide/x.md\n')
 	})
 
 	it('a key added by both the top and a layer is one clone with two links', () => {
@@ -179,7 +187,7 @@ describe.each(SHELLS)('a layer is a workspace, under %s', (shell) => {
 			'hb',
 			'lib'
 		])
-		const found = run(top, 'rg', '-L', '-l', 'the nested page', '.').stdout.split('\n').sort()
+		const found = search().split('\n').sort()
 		expect(found).toEqual(['', './atlas/handbook/guide/x.md', './handbook/guide/x.md'])
 		// now a direct layer of the top, the handbook's commands run there
 		expect(ok(top, 'hb')).toBe('hb\n')

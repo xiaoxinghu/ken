@@ -9,6 +9,7 @@ import {
 	readFileSync,
 	readlinkSync,
 	realpathSync,
+	renameSync,
 	rmSync,
 	statSync,
 	symlinkSync,
@@ -403,6 +404,15 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(readdirSync(away)).toEqual([])
 			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(true)
 			// the clone replaced by a plain folder: A is offline, and its skills go with it
+			// .repos itself a link in another layer's clone: left alone too
+			const lb = join(at, '.repos/example.com/acme/lb')
+			rmSync(join(lb, '.repos/example.com/acme/lc'))
+			renameSync(join(lb, '.repos'), join(lb, 'moved'))
+			symlinkSync('moved', join(lb, '.repos'))
+			expect(ken(['init', at], { cwd: outside() }).stdout).toContain(
+				`Left ${lb}/.repos/example.com/acme/lc alone: ${lb}/.repos is a link`
+			)
+			expect(existsSync(join(lb, 'moved/example.com/acme/lc'))).toBe(false)
 			rmSync(la, { recursive: true })
 			mkdirSync(la)
 			const offline = ken(['init', at], { cwd: outside() })

@@ -400,10 +400,11 @@ up_to_top() {
 	printf '%s\n' "$up"
 }
 
-# Links $1 to $2, relative, when nothing is at $1, and says so. Either folder above $1 being a
-# link is left alone, said too: a link made in it would land elsewhere, with a wrong target.
+# Links $1 to $2, relative, when nothing is at $1, and says so. A folder of the three above $1
+# (up to .repos or .agents) that is a link is left alone, said too: a link made in it would land
+# elsewhere, with a wrong target.
 link_in() {
-	for above in "${1%/*}" "${1%/*/*}"; do
+	for above in "${1%/*}" "${1%/*/*}" "${1%/*/*/*}"; do
 		if [ -L "$above" ]; then
 			printf 'Left %s alone: %s is a link, so ken makes no link inside it.\n' "$1" "$above"
 			return 1

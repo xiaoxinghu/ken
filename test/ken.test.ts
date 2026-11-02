@@ -388,6 +388,31 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(status(la)).toBe('')
 		}, 20_000)
 
+		it('leaves a folder that is a link alone, and drops the skills of a direct layer gone offline', () => {
+			const at = join(dir, `linked-${shell}`)
+			const la = join(at, '.repos/example.com/acme/la')
+			const away = join(dir, `linked-away-${shell}`)
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
+			git(dir, 'clone', '-q', join(dir, 'remotes/acme/la.git'), la)
+			mkdirSync(away)
+			symlinkSync(away, join(la, '.repos/example.com'))
+			const r = ken(['init', at], { cwd: outside() })
+			expect(r.stdout).toContain(
+				`Left ${la}/.repos/example.com/acme/lb alone: ${la}/.repos/example.com is a link`
+			)
+			expect(readdirSync(away)).toEqual([])
+			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(true)
+			// the clone replaced by a plain folder: A is offline, and its skills go with it
+			rmSync(la, { recursive: true })
+			mkdirSync(la)
+			const offline = ken(['init', at], { cwd: outside() })
+			expect(offline.stderr).toContain('ken: layer A, example.com/acme/la, is offline')
+			expect(offline.stdout).toContain(
+				`Removed ${at}/.agents/skills/sa, a link into example.com/acme/la`
+			)
+			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(false)
+		}, 20_000)
+
 		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {
 			const at = join(dir, `ssh-${shell}`)
 			const log = join(dir, `ssh-${shell}.log`)

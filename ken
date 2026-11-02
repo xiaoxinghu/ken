@@ -400,8 +400,15 @@ up_to_top() {
 	printf '%s\n' "$up"
 }
 
-# Links $1 to $2, relative, when nothing is at $1, and says so.
+# Links $1 to $2, relative, when nothing is at $1, and says so. Either folder above $1 being a
+# link is left alone, said too: a link made in it would land elsewhere, with a wrong target.
 link_in() {
+	for above in "${1%/*}" "${1%/*/*}"; do
+		if [ -L "$above" ]; then
+			printf 'Left %s alone: %s is a link, so ken makes no link inside it.\n' "$1" "$above"
+			return 1
+		fi
+	done
 	if ! absent "$1" || ! mkdir -p "${1%/*}" || ! ln -s "$2" "$1"; then return 1; fi
 	printf 'Linked %s -> %s\n' "$1" "$2"
 }
@@ -472,12 +479,15 @@ reconcile() (
 		done
 	done
 	# at the scope: links into what is no longer reachable go first, so a new layer can take their place
-	up3=$(up_to_top 3 "$SCOPE") up2=$(up_to_top 2 "$SCOPE") track=''
+	up3=$(up_to_top 3 "$SCOPE") up2=$(up_to_top 2 "$SCOPE") track='' skilled=' '
+	for key in $walked; do
+		case $direct in *" $key "*) skilled="$skilled$key " ;; esac
+	done
 	for at in "$SCOPE"/.repos/*/*/AGENTS.md "$SCOPE"/.agents/skills/*; do
 		if [ ! -L "$at" ] || [ -L "${at%/*}" ] || [ -L "${at%/*/*}" ]; then continue; fi
 		to=$(readlink "$at")
 		case $at in
-		*/.agents/skills/*) up=$up2 keep=$direct why='a direct layer, whose skills alone are linked' ;;
+		*/.agents/skills/*) up=$up2 keep=$skilled why='a direct layer cloned here, whose skills alone are linked' ;;
 		*) up=$up3 keep=$walked why='reachable from here' ;;
 		esac
 		case $to in "$up/.repos/"*) ;; *) continue ;; esac
@@ -490,15 +500,11 @@ reconcile() (
 	for key in $walked; do
 		for at in "$TOP/.repos/$key"/.repos/*/*/AGENTS.md; do
 			owner=${at#"$TOP/.repos/$key/.repos/"} && owner=${owner%/AGENTS.md}
-			if [ ! -f "$at" ]; then continue; fi
-			if [ -L "$SCOPE/.repos/${owner%/*}" ] || [ -L "$SCOPE/.repos/$owner" ]; then
-				printf 'Left %s alone: a host or owner folder there is a link, so its AGENTS.md is not ours.\n' \
-					"$SCOPE/.repos/$owner"
-			elif link_in "$SCOPE/.repos/$owner/AGENTS.md" "$up3/.repos/$key/.repos/$owner/AGENTS.md"; then
+			if [ -f "$at" ] && link_in "$SCOPE/.repos/$owner/AGENTS.md" "$up3/.repos/$key/.repos/$owner/AGENTS.md"; then
 				track="$track .repos/$owner/AGENTS.md"
 			fi
 		done
-		case $direct in *" $key "*) ;; *) continue ;; esac
+		case $skilled in *" $key "*) ;; *) continue ;; esac
 		for at in "$TOP/.repos/$key"/.agents/skills/*; do
 			if [ ! -e "$at" ]; then continue; fi
 			if link_in "$SCOPE/.agents/skills/${at##*/}" "$up2/.repos/$key/.agents/skills/${at##*/}"; then

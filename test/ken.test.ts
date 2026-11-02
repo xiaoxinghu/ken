@@ -977,6 +977,25 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(out(clone, 'branch', '--list', 'feat')).toBe('')
 		})
 
+		it('a folder made by another get after the branch is left to it, the branch kept', () => {
+			const { at, clone, wt } = cloned()
+			// another get saw the branch, made the folder and is about to add its worktree
+			const real = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim()
+			const bin = join(dir, `slow-git-${shell}`)
+			script(
+				join(bin, 'git'),
+				`${real} "$@" || exit\nif [ "$3 $#" = "branch 5" ]; then mkdir "${wt('feat')}"; fi`
+			)
+			const r = ken(['get', KEY, '-b', 'feat'], {
+				cwd: at,
+				env: { PATH: `${bin}:${process.env.PATH}` }
+			})
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`${wt('feat')} was made just now, by another \`ken get\``)
+			git(clone, 'worktree', 'add', '-q', wt('feat'), 'feat')
+			expect(head(wt('feat'))).toBe('feat')
+		})
+
 		it('two gets of one new branch at once: one branch, one worktree, one path', async () => {
 			const { at, clone, wt } = cloned()
 			const both = await Promise.all([

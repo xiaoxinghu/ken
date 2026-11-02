@@ -797,7 +797,11 @@ get_worktree() {
 		if [ -n "$made_dir" ]; then rmdir -- "$wt" 2>/dev/null || :; fi
 		if [ -n "$made_dir" ] && absent "$wt"; then undone=" Removed the folder $wt again."; fi
 		if [ -n "$made_dir" ] && ! absent "$wt"; then undone=" Left $wt, which is not empty: look inside."; fi
-		if [ -n "$made_branch" ] && git -C "$clone" branch -q -D "$branch" 2>/dev/null; then
+		# a folder made there since the checks is another get's claim, about to check $branch out
+		if [ -z "$made_dir" ] && [ -d "$wt" ] && [ ! -L "$wt" ]; then
+			die "$wt was made just now, by another \`ken get\` adding the worktree of $branch, so this" \
+				"one stops and leaves $branch to it. Run \`ken get $KEY -b $(q "$branch")\` for its worktree."
+		elif [ -n "$made_branch" ] && git -C "$clone" branch -q -D "$branch" 2>/dev/null; then
 			undone="$undone Deleted the branch $branch again."
 		elif [ -n "$made_branch" ]; then
 			undone="$undone Left the branch $branch, which a worktree holds: \`git -C $(q "$clone") worktree list\`."

@@ -10,10 +10,11 @@ its source.
 
 ## What it checks
 
-It walks the root's sections and each layer's, through the layer links as `find -L` does,
-each folder once, skipping hidden entries and the task folders: the root's, and each
-layer's from its own `.ken`, compared by real path; a `.ken` it cannot read stops it. Each
-problem names its file, its line when it has one, and what to do.
+It walks the root's sections and each layer's, a layer's own layers too, through the layer
+links as `find -L` does, each folder once, skipping hidden entries and the task folders: the
+root's, and each layer's from its own `.ken`, compared by real path; an offline layer has
+nothing to walk, and a `.ken` it cannot read stops it. Each problem names its file, its line
+when it has one, and what to do.
 
 **Errors, exit 1:**
 

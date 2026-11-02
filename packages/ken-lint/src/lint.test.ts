@@ -45,7 +45,7 @@ beforeEach(() => {
 	root = join(dir, 'my ken')
 	const bin = join(dir, 'bin')
 	mkdirSync(bin)
-	symlinkSync(join(import.meta.dirname, '../../ken/src/cli.ts'), join(bin, 'ken'))
+	symlinkSync(join(import.meta.dirname, '../../../ken'), join(bin, 'ken'))
 	symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-lint'))
 	const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 	env = {
@@ -57,6 +57,8 @@ beforeEach(() => {
 	mkdirSync(root)
 	expect(run('git init -q && ken init').status).toBe(0)
 	write({
+		'README.md': '# My ken\n',
+		'AGENTS.md': '# Agents\n',
 		// reference-style, a footnote that is no link, and parentheses in a destination
 		'systems/README.md':
 			'# Systems\n\n- [join][j]: the join flow.[^1]\n- [design](design(v2).md): v2.\n- [intro](pages/intro.md): read first.\n\n[j]: join.md\n[^1]: Since 2025.\n',
@@ -81,7 +83,8 @@ beforeEach(() => {
 		[`${LAYER}/README.md`]: '# Atlas\n\n- [teams](teams/README.md)\n',
 		[`${LAYER}/teams/README.md`]: '# Teams\n\n- [sales](sales.md): who sells.\n',
 		[`${LAYER}/teams/sales.md`]: '# Sales\n',
-		// the layer's own tasks, in its default task folder
+		// a root itself, with its own tasks in its default task folder
+		[`${LAYER}/.ken`]: "# the layer's settings\n",
 		[`${LAYER}/tasks/hire.md`]: 'Hire a seller.\n'
 	})
 	// a link back into a section walks nothing twice
@@ -92,10 +95,7 @@ beforeEach(() => {
 	run(`git init -q ${LAYER}`)
 	commit(join(root, LAYER))
 	symlinkSync(LAYER, join(root, 'atlas'))
-	appendFileSync(
-		join(root, '.ken.yaml'),
-		'task:\n  folder: work/tasks\nlayers:\n  - name: atlas\n    key: example.com/acme/atlas\n'
-	)
+	appendFileSync(join(root, '.ken'), 'task.folder=work/tasks\nlayer.atlas=example.com/acme/atlas\n')
 }, 30_000)
 
 describe('ken lint', { timeout: 30_000 }, () => {
@@ -118,6 +118,9 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		})
 		appendFileSync(join(root, 'systems/README.md'), '- [old](old%20notes.md): settled long ago.\n')
 		commit(root, "'systems/old notes.md'", '2020-01-01T00:00:00')
+		write({ [`${LAYER}/teams/old.md`]: '# Old team\n' })
+		appendFileSync(join(root, LAYER, 'teams/README.md'), '- [old](old.md): disbanded.\n')
+		commit(join(root, LAYER), 'teams/old.md', '2020-01-01T00:00:00')
 		appendFileSync(join(root, 'README.md'), pad(60))
 		appendFileSync(join(root, 'AGENTS.md'), pad(40))
 		appendFileSync(join(root, 'systems/join.md'), 'example.com/acme/web:src/app/(auth)/gone.ts\n')
@@ -145,20 +148,52 @@ describe('ken lint', { timeout: 30_000 }, () => {
 				'error systems/join.md', // listed in two section READMEs
 				'error systems/join.md:2', // a reference to a missing file under (auth)/, on its line
 				'error systems/lost.md', // listed in none: a definition no link uses renders nothing
-				'note systems/old notes.md' // nobody links to it, untouched since 2020
+				'note systems/old notes.md', // nobody links to it, untouched since 2020
+				'note atlas/teams/old.md' // and in the layer
 			].sort()
 		)
 		// the archive command keeps a name with a space one word
 		expect(r.stdout).toContain("git mv -- 'systems/old notes.md' '.archive/systems/old notes.md'")
+		// a layer's page moves in the layer's clone, reached through its link
+		expect(r.stdout).toContain(
+			`cd "$(ken path root)"/'atlas' && mkdir -p -- '.archive/teams' && git mv -- 'teams/old.md' '.archive/teams/old.md'`
+		)
 		// the uncloned repo is counted, not an error
 		expect(r.stdout).toMatch(/^note: .*1 code reference.*example\.com\/acme\/api/m)
 	})
 
-	it("stops when a layer's config cannot be read, rather than guess its task folder", () => {
-		writeFileSync(join(root, LAYER, '.ken.yaml'), 'task: [\n')
+	it("walks a layer's own layer as a layer, and skips an offline one", () => {
+		const HANDBOOK = '.repos/example.com/acme/handbook'
+		write({
+			[`${HANDBOOK}/.ken`]: 'task.folder=todo\n',
+			[`${HANDBOOK}/README.md`]: '# Handbook\n',
+			[`${HANDBOOK}/guide/README.md`]: '# Guide\n\n- [start](start.md): day one.\n',
+			[`${HANDBOOK}/guide/start.md`]: '# Start\n',
+			// its tasks, in the folder its own .ken names, are not pages
+			[`${HANDBOOK}/todo/write.md`]: 'Write the guide.\n'
+		})
+		run(`git init -q ${HANDBOOK}`)
+		appendFileSync(join(root, LAYER, '.ken'), 'layer.handbook=example.com/acme/handbook\n')
+		symlinkSync('.repos/example.com/acme/handbook', join(root, LAYER, 'handbook'))
+		// links atlas/.repos/<handbook> to the hoisted clone, as installing a layer does
+		expect(run('ken init').status).toBe(0)
+		// offline: listed, its link dangling, no clone here; after init, which would try to clone it
+		appendFileSync(join(root, '.ken'), 'layer.gone=example.com/acme/gone\n')
+		symlinkSync('.repos/example.com/acme/gone', join(root, 'gone'))
+		const r = run('ken lint')
+		expect(r.stderr).toBe('')
+		expect(r.stdout).toBe('ken lint: no errors in 5 pages.\n')
+		expect(r.status).toBe(0)
+	})
+
+	it("stops when a layer's .ken cannot be read, rather than guess its task folder", () => {
+		// a layer named . would be the layer itself, walked again as its own layer
+		writeFileSync(join(root, LAYER, '.ken'), 'layer..=example.com/acme/up\n')
 		const r = run('ken lint')
 		expect(r.status).toBe(1)
 		expect(r.stdout).toBe('')
-		expect(r.stderr).toMatch(/failed at the layer atlas, so its task folder is unknown/)
+		expect(r.stderr).toMatch(
+			/\.ken line 1, "layer\.\.=example\.com\/acme\/up", is not a layer line, at the layer atlas, so its task folder and its layers are unknown/
+		)
 	})
 })

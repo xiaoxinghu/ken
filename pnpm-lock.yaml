@@ -21,23 +21,8 @@ importers:
         specifier: ^4.0.18
         version: 4.1.12(@types/node@25.9.9)(vite@8.3.5(@types/node@25.9.9)(yaml@2.9.1))
 
-  packages/create-ken:
-    dependencies:
-      '@unclex/ken':
-        specifier: workspace:*
-        version: link:../ken
-
-  packages/ken:
-    dependencies:
-      yaml:
-        specifier: ^2.9.1
-        version: 2.9.1
-
   packages/ken-lint:
     dependencies:
-      '@unclex/ken':
-        specifier: workspace:*
-        version: link:../ken
       mdast-util-from-markdown:
         specifier: ^2.1.0
         version: 2.1.0
@@ -48,9 +33,6 @@ importers:
 
   packages/ken-task:
     dependencies:
-      '@unclex/ken':
-        specifier: workspace:*
-        version: link:../ken
       yaml:
         specifier: ^2.9.1
         version: 2.9.1

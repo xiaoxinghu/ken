@@ -2,10 +2,12 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import {
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	readlinkSync,
 	realpathSync,
 	statSync,
+	symlinkSync,
 	writeFileSync
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -105,6 +107,20 @@ describe('the agents template', { timeout: 30_000 }, () => {
 			)
 			const row = JSON.parse(run('ken repos example.com/me/notes --json').stdout)
 			expect(row).toMatchObject({ desc: 'My notes.', strays: [] })
+		})
+
+		it('refuses an owner folder that links out of the root, before writing anywhere', () => {
+			const outside = join(dir, 'elsewhere')
+			mkdirSync(outside)
+			mkdirSync(join(root, '.repos/example.com'), { recursive: true })
+			symlinkSync(outside, join(root, '.repos/example.com/me'))
+			for (const args of ['draft', 'notes "My notes." --layer']) {
+				const r = run(`ken new ${args}`)
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`${root}/.repos/example.com/me is a symlink`)
+				expect(r.stderr).toContain(`mv '${outside}' '${root}/.repos/example.com/me'`)
+			}
+			expect(readdirSync(outside)).toEqual([])
 		})
 
 		it('refuses what it cannot make, before making anything', () => {

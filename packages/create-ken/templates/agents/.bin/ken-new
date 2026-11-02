@@ -73,6 +73,16 @@ key=$(ken config --json | node -e '
 dir=$(ken path code "$key")
 [ ! -e "$dir" ] && [ ! -L "$dir" ] ||
 	die "$dir is already there, so $key is not new. Use it as it is: \`ken get $key\`$([ -z "$layer" ] || echo ", then \`ken layer add $key\`")."
+# as `ken get` does, before the first write: a link on the way would put the repo outside the root
+link=$root
+for part in .repos "${key%%/*}" "$(echo "$key" | cut -d/ -f2)"; do
+	link=$link/$part
+	[ -L "$link" ] || continue
+	if target=$(cd "$link" 2>/dev/null && pwd -P); then fix="replace the link with the folder it points to, \`rm '$link' && mv '$target' '$link'\`"
+	else fix="the link points nowhere: remove it, \`rm '$link'\`"
+	fi
+	die "$link is a symlink, so $key would be made outside the root $root, where no session in it loads the root's context: $fix, then run ken new again."
+done
 
 trap 'echo "ken new: stopped before the end. What is done stays: $dir. Finish by hand, or remove it with \`rm -rf '"'"'$dir'"'"'\` and run ken new again." >&2' EXIT
 git init -q "$dir"

@@ -39,32 +39,35 @@ q() {
 # case as stored, so roots compare as real paths (PRD decision 15).
 real() { (cd -P -- "$1" && pwd -P); }
 
-# The real path of $1, which need not exist: its longest existing folder as a real path, a
-# symlink to a file or to nothing followed (40 at most, so a cycle ends), then the rest as
-# written, . and .. taken. Call as p=$(real_path "$1") || exit 1.
+# The real path of $1, which need not exist: walked a part at a time, each symlink followed
+# where it is met, to a file or to nothing too (40 at most, so a cycle ends), so a .. always
+# climbs a real folder; then the longest existing folder is made real, for the case stored on
+# a case-insensitive disk. Call as p=$(real_path "$1") || exit 1.
 real_path() {
-	case $1 in /*) head=$1 ;; *) head=$(pwd -P)/$1 ;; esac
-	rest='' hops=0
-	while [ -n "$head" ] && [ ! -d "$head" ]; do
-		if [ -L "$head" ] && [ $hops -lt 40 ]; then
-			hops=$((hops + 1))
-			link=$(readlink "$head")
-			case $link in /*) head=$link ;; *) head=${head%/*}/$link ;; esac
-		else
-			rest=${head##*/}/$rest head=${head%/*}
-		fi
-	done
-	head=$(real "${head:-/}") || return 1
-	head=${head%/}
-	set -f
-	IFS=/
-	for part in $rest; do
+	case $1 in /*) todo=$1 ;; *) todo=$(pwd -P)/$1 ;; esac
+	head='' hops=0
+	while [ -n "$todo" ]; do
+		part=${todo%%/*}
+		case $todo in */*) todo=${todo#*/} ;; *) todo='' ;; esac
 		case $part in
 		'' | .) ;;
 		..) head=${head%/*} ;;
-		*) head=$head/$part ;;
+		*)
+			if [ -L "$head/$part" ] && [ $hops -lt 40 ]; then
+				hops=$((hops + 1))
+				link=$(readlink "$head/$part")
+				case $link in /*) head='' ;; esac
+				todo=$link/$todo
+			else
+				head=$head/$part
+			fi
+			;;
 		esac
 	done
+	rest=''
+	while [ -n "$head" ] && [ ! -d "$head" ]; do rest=/${head##*/}$rest head=${head%/*}; done
+	head=$(real "${head:-/}") || return 1
+	head=${head%/}$rest
 	printf '%s\n' "${head:-/}"
 }
 

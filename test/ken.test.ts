@@ -219,6 +219,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('a layer is a checkout of the root above it, through its link and from inside it', () => {
 			expect(r('atlas/sub')).toEqual(ok('github.com/acme/atlas clone main'))
+			expect(r('missing/../atlas/sub')).toEqual(ok('github.com/acme/atlas clone main'))
 			expect(ken(['which'], { cwd: join(root, 'atlas/sub') })).toEqual(
 				ok('github.com/acme/atlas clone main')
 			)

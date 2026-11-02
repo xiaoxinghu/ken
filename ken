@@ -500,20 +500,20 @@ reconcile() (
 		case $keep in *" $key "*) continue ;; esac
 		rm -f "$at"
 		printf 'Removed %s, a link into %s, which is no longer %s.\n' "$at" "$key" "$why"
-		track="$track ${at#"$SCOPE/"}"
+		track="$track $(q "${at#"$SCOPE/"}")"
 	done
 	for key in $walked; do
 		for at in "$TOP/.repos/$key"/.repos/*/*/AGENTS.md; do
 			owner=${at#"$TOP/.repos/$key/.repos/"} && owner=${owner%/AGENTS.md}
 			if [ -f "$at" ] && link_in "$SCOPE/.repos/$owner/AGENTS.md" "$up3/.repos/$key/.repos/$owner/AGENTS.md"; then
-				track="$track .repos/$owner/AGENTS.md"
+				track="$track $(q ".repos/$owner/AGENTS.md")"
 			fi
 		done
 		case $skilled in *" $key "*) ;; *) continue ;; esac
 		for at in "$TOP/.repos/$key"/.agents/skills/*; do
 			if [ ! -e "$at" ]; then continue; fi
 			if link_in "$SCOPE/.agents/skills/${at##*/}" "$up2/.repos/$key/.agents/skills/${at##*/}"; then
-				track="$track .agents/skills/${at##*/}"
+				track="$track $(q ".agents/skills/${at##*/}")"
 			fi
 		done
 	done

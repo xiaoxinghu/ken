@@ -119,7 +119,8 @@ beforeAll(() => {
 			'page.md': 'a\n',
 			'.repos/github.com/team-a/AGENTS.md': 'team a\n',
 			'.repos/github.com/shared/AGENTS.md': 'shared from a\n',
-			'.agents/skills/sa/SKILL.md': 'skill a\n'
+			'.agents/skills/sa/SKILL.md': 'skill a\n',
+			'.agents/skills/review notes/SKILL.md': 'notes\n'
 		}
 	)
 	layerRemote(
@@ -352,6 +353,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(readFileSync(owner('shared'), 'utf8')).toBe('mine\n')
 			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
 			expect(existsSync(join(at, '.agents/skills/sb'))).toBe(false)
+			expect(r.stdout).toContain(` '.agents/skills/review notes' .agents/skills/sa `)
 			const again = ken(['init', at], { cwd: outside() })
 			expect(again.stdout).toContain('Layer A/B/C: example.com/acme/lc is cloned already')
 			expect(again.stdout).not.toContain('Linked')

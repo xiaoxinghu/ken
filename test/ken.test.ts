@@ -372,12 +372,13 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			const la = join(at, '.repos/example.com/acme/la')
 			write(join(at, '.ken'), 'layer.A=example.com/acme/la\nlayer.P=example.com/acme/plain\n')
 			write(join(at, '.repos/example.com/acme/plain/.ken'), 'layer.X=example.com/acme/lc\n')
+			mkdirSync(join(at, '.repos/example.com/acme/plain/.git'))
 			git(dir, 'clone', '-q', join(dir, 'remotes/acme/la.git'), la)
 			write(join(la, '.git/info/exclude'), 'mine')
 			const r = ken(['init', at], { cwd: outside() })
 			expect(r.status).toBe(0)
 			expect(r.stderr).toContain('ken: layer P, example.com/acme/plain, is offline')
-			expect(r.stderr).toContain('but it is a folder with no .git')
+			expect(r.stderr).toContain('but it is a folder whose .git git does not take as its repo')
 			expect(r.stdout).toContain('Layer A: example.com/acme/la is cloned already')
 			expect(r.stdout).not.toContain('Layer P')
 			expect(existsSync(join(at, '.repos/example.com/acme/plain/.repos'))).toBe(false)
@@ -408,8 +409,10 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			}
 			const opts =
 				'-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
-			for (const line of ssh({ GIT_SSH_COMMAND: `env X=1 ${bin}/ssh -p 2222` })) {
-				expect(line.startsWith(`${opts} -p 2222 `)).toBe(true)
+			for (const command of [`env X=1 ${bin}/ssh -p 2222`, `"${bin}/ssh" -p 2222`]) {
+				for (const line of ssh({ GIT_SSH_COMMAND: command })) {
+					expect(line.startsWith(`${opts} -p 2222 `)).toBe(true)
+				}
 			}
 			for (const line of ssh({}, [['core.sshCommand', `${bin}/wrap --via x`]])) {
 				expect(line.startsWith(`--via x ${opts}`)).toBe(true)

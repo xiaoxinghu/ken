@@ -422,7 +422,8 @@ reconcile() (
 	if [ -n "$ssh" ] || [ -z "${GIT_SSH-}" ]; then
 		opts='-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
 		ssh=${ssh:-ssh}
-		GIT_SSH_COMMAND=$(printf '%s\n' "$ssh" | sed -E "s#(^|[[:space:]])([^[:space:]]*/)?ssh([[:space:]]|\$)#\\1\\2ssh $opts\\3#")
+		GIT_SSH_COMMAND=$(printf '%s\n' "$ssh" |
+			sed -E "s#(^|[[:space:]])([\"']?([^[:space:]\"']*/)?ssh[\"']?)([[:space:]]|\$)#\\1\\2 $opts\\4#")
 		if [ "$GIT_SSH_COMMAND" = "$ssh" ]; then GIT_SSH_COMMAND="$ssh $opts"; fi
 		export GIT_SSH_COMMAND
 	fi
@@ -437,7 +438,8 @@ reconcile() (
 		seen="$seen$key "
 		clone=$TOP/.repos/$key
 		# only a real clone counts as there; anything else is get's to refuse, naming the mv aside
-		if [ "$(real "$clone" 2>/dev/null)" = "$clone" ] && [ -d "$clone/.git" ] && [ ! -L "$clone/.git" ]; then
+		if [ "$(real "$clone" 2>/dev/null)" = "$clone" ] &&
+			[ "$(git -C "$clone" rev-parse --absolute-git-dir 2>/dev/null)" = "$clone/.git" ]; then
 			printf 'Layer %s: %s is cloned already, at %s; left as it is, no fetch.\n' "$name" "$key" "$clone"
 		elif err=$( (KEN_ROOT=$SCOPE && cmd_get "$key") 2>&1 >/dev/null); then
 			printf 'Layer %s: cloned %s at %s.\n' "$name" "$key" "$clone"

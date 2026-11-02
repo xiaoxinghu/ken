@@ -403,7 +403,6 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 			expect(readdirSync(away)).toEqual([])
 			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(true)
-			// the clone replaced by a plain folder: A is offline, and its skills go with it
 			// .repos itself a link in another layer's clone: left alone too
 			const lb = join(at, '.repos/example.com/acme/lb')
 			rmSync(join(lb, '.repos/example.com/acme/lc'))
@@ -413,14 +412,21 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				`Left ${lb}/.repos/example.com/acme/lc alone: ${lb}/.repos is a link`
 			)
 			expect(existsSync(join(lb, 'moved/example.com/acme/lc'))).toBe(false)
-			rmSync(la, { recursive: true })
-			mkdirSync(la)
+			// the scope's .repos a link: A is offline, its skills go, and nothing under the link is touched
+			const repos = join(dir, `linked-repos-${shell}`)
+			const teamA = join(repos, 'github.com/team-a/AGENTS.md')
+			renameSync(join(at, '.repos'), repos)
+			symlinkSync(repos, join(at, '.repos'))
 			const offline = ken(['init', at], { cwd: outside() })
 			expect(offline.stderr).toContain('ken: layer A, example.com/acme/la, is offline')
 			expect(offline.stdout).toContain(
 				`Removed ${at}/.agents/skills/sa, a link into example.com/acme/la`
 			)
 			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(false)
+			expect(offline.stdout).toContain(
+				`Left ${at}/.repos/github.com/team-a/AGENTS.md alone: ${at}/.repos is a link`
+			)
+			expect(lstatSync(teamA).isSymbolicLink()).toBe(true)
 		}, 20_000)
 
 		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {

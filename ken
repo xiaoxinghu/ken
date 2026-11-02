@@ -400,17 +400,21 @@ up_to_top() {
 	printf '%s\n' "$up"
 }
 
-# Links $1 to $2, relative, when nothing is at $1, and says so. A folder of the three above $1
-# (up to .repos or .agents) that is a link is left alone, said too: a link made in it would land
-# elsewhere, with a wrong target.
-link_in() {
+# Whether a folder of the three above $1, up to .repos or .agents, is a link, said on stdout:
+# reconcile neither makes nor removes anything under one, which would act elsewhere.
+linked_above() {
 	for above in "${1%/*}" "${1%/*/*}" "${1%/*/*/*}"; do
 		if [ -L "$above" ]; then
-			printf 'Left %s alone: %s is a link, so ken makes no link inside it.\n' "$1" "$above"
-			return 1
+			printf 'Left %s alone: %s is a link, so ken makes or removes nothing inside it.\n' "$1" "$above"
+			return 0
 		fi
 	done
-	if ! absent "$1" || ! mkdir -p "${1%/*}" || ! ln -s "$2" "$1"; then return 1; fi
+	return 1
+}
+
+# Links $1 to $2, relative, when nothing is at $1 and no folder above it is a link, and says so.
+link_in() {
+	if linked_above "$1" || ! absent "$1" || ! mkdir -p "${1%/*}" || ! ln -s "$2" "$1"; then return 1; fi
 	printf 'Linked %s -> %s\n' "$1" "$2"
 }
 
@@ -485,7 +489,7 @@ reconcile() (
 		case $direct in *" $key "*) skilled="$skilled$key " ;; esac
 	done
 	for at in "$SCOPE"/.repos/*/*/AGENTS.md "$SCOPE"/.agents/skills/*; do
-		if [ ! -L "$at" ] || [ -L "${at%/*}" ] || [ -L "${at%/*/*}" ]; then continue; fi
+		if [ ! -L "$at" ] || linked_above "$at"; then continue; fi
 		to=$(readlink "$at")
 		case $at in
 		*/.agents/skills/*) up=$up2 keep=$skilled why='a direct layer cloned here, whose skills alone are linked' ;;

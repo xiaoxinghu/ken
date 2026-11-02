@@ -1,8 +1,10 @@
 import { spawnSync } from 'node:child_process'
 import {
 	copyFileSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	realpathSync,
 	symlinkSync,
@@ -362,10 +364,136 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 	})
 
+	describe('index', () => {
+		const KEY = 'github.com/acme/web'
+		let n = 0
+		// A fresh root whose .repos/index holds `body`, or none when undefined.
+		const fresh = (body?: string) => {
+			const at = join(dir, `index-${shell}-${n++}`)
+			write(join(at, '.ken'), '')
+			if (body !== undefined) write(join(at, '.repos/index'), body)
+			const index = join(at, '.repos/index')
+			return { cwd: at, index, read: () => readFileSync(index, 'utf8') }
+		}
+		const OTHERS = '# The index.\n\nowner: github.com/acme\ndesc: Acme.\n\n'
+
+		it('set creates the file and the entry and nothing else, saying what and where', () => {
+			const r = fresh()
+			expect(ken(['index', 'set', KEY, 'desc=Web.', 'kind=fe'], r)).toEqual({
+				status: 0,
+				stdout: `Set desc, kind in a new entry for ${KEY}, in ${r.index}.\n`,
+				stderr: ''
+			})
+			expect(r.read()).toBe(`repo: ${KEY}\ndesc: Web.\nkind: fe\n`)
+			const empty = fresh('')
+			ken(['index', 'set', KEY, 'desc=Web.'], empty)
+			expect(empty.read()).toBe(`repo: ${KEY}\ndesc: Web.\n`)
+		})
+
+		it('set of a second repo appends its stanza, keeping the first and the comment on top', () => {
+			const r = fresh(`${OTHERS}repo: github.com/acme/api\ndesc: API.`)
+			ken(['index', 'set', KEY, 'desc=Web.'], r)
+			expect(r.read()).toBe(
+				`${OTHERS}repo: github.com/acme/api\ndesc: API.\n\nrepo: ${KEY}\ndesc: Web.\n`
+			)
+		})
+
+		it('set replaces a field in place and appends a new one, other lines kept as they are', () => {
+			const tail = '\n\n\n# about api\nrepo: github.com/acme/api\ndesc: API.\n'
+			const r = fresh(`${OTHERS}repo: ${KEY}\ndesc: Web.\n# who: sales\nkind: fe\n${tail}`)
+			ken(['index', 'set', KEY, 'kind=be', 'tags=sales join', 'owner=team-x'], r)
+			expect(r.read()).toBe(
+				`${OTHERS}repo: ${KEY}\ndesc: Web.\n# who: sales\nkind: be\ntags: sales join\nowner: team-x\n${tail}`
+			)
+		})
+
+		it('a value with # and = in it, and a backslash, reads back as written', () => {
+			const r = fresh()
+			const value = 'see #12, a=b \\t c'
+			ken(['index', 'set', KEY, `desc=${value}`, 'doc=#top'], r)
+			ken(['index', 'set', KEY, 'kind=fe'], r)
+			expect(r.read()).toBe(`repo: ${KEY}\ndesc: ${value}\ndoc: #top\nkind: fe\n`)
+		})
+
+		it('an entry of only its repo line has no fields, and gains them on set', () => {
+			const r = fresh(`repo: ${KEY}\n`)
+			expect(ken(['index', 'unset', KEY, 'kind'], r).stderr).toContain('its fields are none')
+			ken(['index', 'set', KEY, 'kind=fe'], r)
+			expect(r.read()).toBe(`repo: ${KEY}\nkind: fe\n`)
+		})
+
+		it('unset removes the fields, or the whole entry and the blank line after it', () => {
+			const r = fresh(`${OTHERS}repo: ${KEY}\ndesc: Web.\nkind: fe\ntags: a\n\nrepo: x.io/a/b\n`)
+			expect(ken(['index', 'unset', KEY, 'kind', 'tags'], r).stdout).toBe(
+				`Removed kind, tags from the entry for ${KEY}, in ${r.index}.\n`
+			)
+			expect(r.read()).toBe(`${OTHERS}repo: ${KEY}\ndesc: Web.\n\nrepo: x.io/a/b\n`)
+			ken(['index', 'unset', KEY], r)
+			expect(r.read()).toBe(`${OTHERS}repo: x.io/a/b\n`)
+		})
+
+		it('unset refuses desc alone, a field the entry lacks, and a key with no entry', () => {
+			const body = `repo: ${KEY}\ndesc: Web.\nkind: fe\n`
+			const r = fresh(body)
+			const refused = (args: string[]) => {
+				const out = ken(['index', 'unset', ...args], r)
+				expect(out.status).toBe(1)
+				return out.stderr
+			}
+			expect(refused([KEY, 'kind', 'desc'])).toContain(
+				`ken index unset ${KEY}\` to remove the whole`
+			)
+			expect(refused([KEY, 'tags'])).toContain('its fields are desc, kind.')
+			expect(refused(['github.com/acme/api'])).toContain(
+				`github.com/acme/api has no entry in ${r.index}`
+			)
+			expect(r.read()).toBe(body)
+		})
+
+		it('set refuses an empty value, a newline, a bad field name and the repo line', () => {
+			const r = fresh()
+			for (const arg of ['desc=', 'desc= ', 'doc=a\nb', 'a.b=c', 'kind', 'repo=x.io/a/b']) {
+				const out = ken(['index', 'set', KEY, arg], r)
+				expect(out.status).toBe(1)
+				expect(out.stderr).toMatch(/^ken: .*run (e\.g\. )?`ken index (un)?set /i)
+			}
+			expect(existsSync(r.index)).toBe(false)
+		})
+
+		it('an index path that is not a file is refused, nothing written into it', () => {
+			const r = fresh()
+			mkdirSync(r.index, { recursive: true })
+			const out = ken(['index', 'set', KEY, 'desc=Web.'], r)
+			expect(out.status).toBe(1)
+			expect(out.stderr).toContain(`${r.index} is not a file`)
+			expect(readdirSync(r.index)).toEqual([])
+		})
+
+		it('an index ken cannot read stops it, naming the file, the line and what it expected', () => {
+			for (const [body, line, what] of [
+				['# top\n\ndesc: no key\n', 3, 'opens a stanza'],
+				['repo: github.com/Acme/web\n', 1, 'opens a stanza'],
+				['owner: github.com/acme/web\n', 1, 'opens a stanza'],
+				[`repo: ${KEY}\n\nrepo: ${KEY}\n`, 3, 'repeats the key of the stanza at line 1'],
+				[`repo: ${KEY}\nkind fe\n`, 2, 'is not a field line'],
+				[`repo: ${KEY}\nkind: a\n# c\nkind: b\n`, 4, 'names kind a second time'],
+				[`repo: ${KEY}\ndesc:  \n`, 2, 'is an empty desc']
+			] as const) {
+				const r = fresh(body)
+				const out = ken(['index', 'set', 'github.com/acme/api', 'desc=API.'], r)
+				expect(out.status).toBe(1)
+				expect(out.stderr).toContain(`ken: ${r.index} line ${line}, `)
+				expect(out.stderr).toContain(what)
+				expect(r.read()).toBe(body)
+				expect(readdirSync(join(r.cwd, '.repos'))).toEqual(['index'])
+			}
+		})
+	})
+
 	describe('help', () => {
 		it('carries the same examples as <command> --help, and the external commands found', () => {
 			const all = ken(['help']).stdout
-			for (const name of ['path', 'which']) {
+			for (const name of ['path', 'which', 'index']) {
 				const page = ken([name, '--help'])
 				expect(page.status).toBe(0)
 				expect(ken(['help', name]).stdout).toBe(page.stdout)

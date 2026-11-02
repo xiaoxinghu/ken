@@ -18,7 +18,7 @@ unset CDPATH
 nl='
 '
 tab=$(printf '\t')
-BUILTINS='path which help'
+BUILTINS='path which index help'
 
 # --- prelude
 
@@ -187,6 +187,131 @@ branch_folder() {
 	printf '%s\n' "$1" | tr / -
 }
 
+# --- the index: .repos/index, stanzas (docs/files.md, "Stanzas" and "Rules for both")
+
+# One pass over an index, line by line so every other line is kept byte for byte and an error
+# names its line; a stanza is a run of lines up to a blank one, comments inside it kept. It
+# validates the whole file, failing at the first line it cannot read, and in I_MODE:
+#   stanza  prints the stanza of repo I_KEY, its comments left out (nothing when none)
+#   field   prints the value of field I_FIELD of repo I_KEY
+#   keys    prints every repo key
+#   set     prints the file with I_LIST, <name>=<value> lines, set in I_KEY's stanza: a line
+#           replaced, or appended at the stanza's end, or a new stanza at the end of the file
+#   unset   prints the file without the fields of I_KEY named in I_LIST, space-separated
+#   drop    prints the file without I_KEY's stanza and the blank line after it
+# Its input is passed through ENVIRON, as awk -v would expand the backslashes in a value.
+INDEX_AWK='
+function trim(s) {
+	sub(/^[ \t]+/, "", s)
+	sub(/[ \t]+$/, "", s)
+	return s
+}
+function fail(what) {
+	printf "ken: %s line %d, `%s`, %s, so ken cannot read the index. Fix that line, then rerun.\n", ENVIRON["I_FILE"], NR, $0, what | "cat 1>&2"
+	bad = 1
+	exit
+}
+function finish() {
+	if (mode == "set" && here)
+		for (i = 1; i <= n; i++)
+			if (!(names[i] in done)) print names[i] ": " value[names[i]]
+	open = here = 0
+}
+BEGIN {
+	mode = ENVIRON["I_MODE"]
+	key = ENVIRON["I_KEY"]
+	w = mode == "set" || mode == "unset" || mode == "drop"
+	k = split(ENVIRON["I_LIST"], list, mode == "set" ? "\n" : " ")
+	for (i = 1; i <= k; i++) {
+		if (list[i] == "") continue
+		if (mode == "unset") {
+			gone[list[i]] = 1
+			continue
+		}
+		eq = index(list[i], "=")
+		f = substr(list[i], 1, eq - 1)
+		if (!(f in value)) names[++n] = f
+		value[f] = substr(list[i], eq + 1)
+	}
+}
+/^[ \t]*$/ {
+	dropped = here && mode == "drop"
+	if (open) finish()
+	blank = 1
+	if (w && !dropped) print
+	next
+}
+{ blank = 0 }
+/^#/ {
+	if (w && !(here && mode == "drop")) print
+	next
+}
+{
+	c = index($0, ": ")
+	f = c ? substr($0, 1, c - 1) : ""
+	v = trim(substr($0, c + 2))
+	if (!open) {
+		ok = f == "repo" && v ~ /^[a-z0-9._-]+\/[a-z0-9._-]+\/[a-z0-9._-]+$/
+		ok = ok || f == "owner" && v ~ /^[a-z0-9._-]+\/[a-z0-9._-]+$/
+		if (!ok || ("/" v "/") ~ /\/\.\.?\//)
+			fail("opens a stanza, which takes `repo: <host>/<owner>/<repo>` or `owner: <host>/<owner>`, lowercase, as its first line")
+		if ((f, v) in first)
+			fail("repeats the key of the stanza at line " first[f, v] "; a key has one stanza per file, so merge the two")
+		first[f, v] = open = NR
+		here = f == "repo" && v == key
+		found = found || here
+		split("", has)
+	} else if (f !~ /^[A-Za-z0-9_-]+$/)
+		fail("is not a field line `<name>: <value>`, a name of letters, digits, _ and -, a colon and a space, or the stanza lacks the blank line that ends it")
+	else if (f in has)
+		fail("names " f " a second time in the stanza at line " open "; a field appears once per stanza, so delete one")
+	else if (f == "desc" && v == "")
+		fail("is an empty desc; a desc says what the repo is, so write one or delete the line")
+	has[f] = 1
+	if (mode == "keys" && open == NR && f == "repo") print v
+	if (!here) {
+		if (w) print
+	} else if (mode == "stanza") print
+	else if (mode == "field" && f == ENVIRON["I_FIELD"]) print v
+	else if (mode == "set" && (f in value)) {
+		print f ": " value[f]
+		done[f] = 1
+	} else if (w && mode != "drop" && !(f in gone)) print
+}
+END {
+	if (bad) exit 1
+	if (open) finish()
+	if (mode == "set" && !found) {
+		if (NR && !blank) print ""
+		print "repo: " key
+		for (i = 1; i <= n; i++) print names[i] ": " value[names[i]]
+	}
+}'
+
+# Runs the index pass in mode $1 over the index file $2 (missing reads as empty), for repo key
+# $3, with the field or list $4. A file it cannot read stops it: call as x=$(index_read ...) || exit 1.
+index_read() {
+	src=$2
+	if [ -e "$src" ] && [ ! -f "$src" ]; then
+		die "$src is not a file, so ken cannot read or write the index there." \
+			"Move it aside, e.g. \`mv $(q "$src") $(q "$src.old")\`, then rerun."
+	fi
+	if [ ! -f "$src" ]; then src=/dev/null; fi
+	I_MODE=$1 I_FILE=$2 I_KEY=${3-} I_FIELD=${4-} I_LIST=${4-} awk "$INDEX_AWK" "$src"
+}
+
+# Rewrites the index file $2 by the pass in mode $1 (set, unset or drop): written beside it and
+# renamed over, so a reader never sees half of it, and nothing written when it cannot be read.
+index_write() {
+	mkdir -p "$(dir_of "$2")"
+	tmp=$2.tmp.$$
+	if ! index_read "$@" >"$tmp"; then
+		rm -f "$tmp"
+		exit 1
+	fi
+	mv -f "$tmp" "$2"
+}
+
 # --- builtins: each one's help, then what it runs
 
 # Sets usage, summary, details and examples for the builtin $1; fails for any other name.
@@ -223,6 +348,23 @@ ken path github.com/acme/join-web:src/join.ts#submit'
 		examples='ken which
 ken which "$(ken path code github.com/acme/join-web feat/login)"   # github.com/acme/join-web worktree feat/login
 ken which "$(ken path code github.com/acme/api)/src/x.ts"   # not cloned yet: github.com/acme/api clone'
+		;;
+	index)
+		usage='index set <key> <field>=<value>... | unset <key> [<field>...]'
+		summary="Write fields into the scope's index, .repos/index, or remove them or the entry."
+		details='  set <key> <field>=<value>...  set each field of the entry, creating the file and the
+                                entry when missing. A field name is letters, digits, _ and -;
+                                a value is the rest of the argument as written, not empty, a
+                                list its items separated by spaces: tags="sales join".
+  unset <key> [<field>...]      remove the fields, or with none the whole entry. desc alone is
+                                not removed: set it, or unset the entry.
+
+Only that one stanza changes: every other line, comment and order is kept, and the file is
+written beside and renamed over. For a layer'"'"'s index, cd into the layer first.'
+		examples='ken index set github.com/acme/join-web desc="Front end for the join funnel." kind=frontend
+ken index set github.com/acme/join-web tags="sales join" depends_on=join-api
+ken index unset github.com/acme/join-web tags depends_on
+ken index unset github.com/acme/join-web'
 		;;
 	help)
 		usage='help [<command>]'
@@ -367,6 +509,86 @@ cmd_which() {
 	die "$dir is a worktree of $clone, a clone outside $TOP/.repos/<host>/<owner>/<repo>, so it" \
 		"has no key, and a worktree in .repos/ must belong to a clone there. Move it beside its clone:" \
 		"\`git -C $(q "$clone") worktree move $(q "$dir") $(q "${clone%/*}/$folder")\`."
+}
+
+cmd_index() {
+	sub=${1-}
+	case $sub in set | unset) ;; *)
+		die "ken index takes set or unset, then a repo key, got $(q "$(redact "$sub")")." \
+			'Run e.g. `ken index set github.com/acme/join-web desc="Front end for the join funnel."`,' \
+			'or `ken index --help` for the forms.'
+		;;
+	esac
+	if [ $# -lt 2 ]; then die "ken index $sub needs a repo key. Run \`ken index --help\` for the forms."; fi
+	parse_key "$2"
+	shift 2
+	find_root
+	file=$SCOPE/.repos/index
+	if [ "$sub" = set ]; then
+		if [ $# -eq 0 ]; then
+			die "ken index set $KEY needs at least one <field>=<value> to write." \
+				"Run e.g. \`ken index set $KEY desc=\"What it is, in a line.\"\`."
+		fi
+		list='' set=''
+		for arg; do
+			field=${arg%%=*} value=${arg#*=}
+			case $arg in *=*) ;; *) field='' ;; esac
+			case $field in '' | *[!A-Za-z0-9_-]* | repo)
+				die "$(q "$(redact "$arg")") is not a <field>=<value> ken index set can write: a field" \
+					"name is letters, digits, _ and -, and repo is the entry's key line, not a field." \
+					"Run e.g. \`ken index set $KEY kind=frontend\`."
+				;;
+			esac
+			case $value in *"$nl"*)
+				die "the value of $field has a newline, and an index value is one line." \
+					"Write longer text in a page, then run \`ken index set $KEY doc=<path>\`."
+				;;
+			esac
+			case $value in *[![:space:]]*) ;; *)
+				unset_it=", or \`ken index unset $KEY $field\` to remove it"
+				if [ "$field" = desc ]; then unset_it=''; fi
+				die "the value of $field is empty, and an empty field says nothing." \
+					"Run \`ken index set $KEY $field=<value>\` with a value$unset_it."
+				;;
+			esac
+			list=$list$field=$value$nl
+			case ", $set, " in *", $field, "*) ;; *) set="${set:+$set, }$field" ;; esac
+		done
+		entry=$(index_read stanza "$file" "$KEY") || exit 1
+		index_write set "$file" "$KEY" "$list"
+		if [ -n "$entry" ]; then entry='the entry'; else entry='a new entry'; fi
+		printf 'Set %s in %s for %s, in %s.\n' "$set" "$entry" "$KEY" "$file"
+		return
+	fi
+	entry=$(index_read stanza "$file" "$KEY") || exit 1
+	if [ -z "$entry" ]; then
+		die "$KEY has no entry in $file, so there is nothing to unset. Run" \
+			"\`grep '^repo: ' $(q "$file")\` for the repos it lists; for a layer's entry, cd into the layer."
+	fi
+	has=$(printf '%s\n' "$entry" | sed -n '2,$s/: .*//p' | tr '\n' ' ')
+	for field; do
+		if [ "$field" = desc ]; then
+			die "ken index unset does not remove desc alone: it says what $KEY is, before anyone" \
+				"clones it. Run \`ken index set $KEY desc=\"...\"\` to change it, or" \
+				"\`ken index unset $KEY\` to remove the whole entry."
+		fi
+		known=''
+		case " $has" in *" $field "*) known=1 ;; esac
+		case $field in *[!A-Za-z0-9_-]*) known='' ;; esac
+		if [ -z "$known" ]; then
+			fields=$(printf '%s' "$has" | sed 's/ $//; s/ /, /g')
+			die "the entry for $KEY in $file has no $(q "$(redact "$field")"), so ken cannot remove it;" \
+				"its fields are ${fields:-none}. Run \`ken index unset $KEY <field>...\` with those," \
+				"or \`ken index unset $KEY\` to remove the whole entry."
+		fi
+	done
+	if [ $# -eq 0 ]; then
+		index_write drop "$file" "$KEY"
+		printf 'Removed the entry for %s from %s.\n' "$KEY" "$file"
+	else
+		index_write unset "$file" "$KEY" "$*"
+		printf 'Removed %s from the entry for %s, in %s.\n' "$(printf '%s' "$*" | sed 's/ /, /g')" "$KEY" "$file"
+	fi
 }
 
 cmd_help() {

@@ -175,11 +175,11 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		run(`git init -q ${HANDBOOK}`)
 		appendFileSync(join(root, LAYER, '.ken'), 'layer.handbook=example.com/acme/handbook\n')
 		symlinkSync('.repos/example.com/acme/handbook', join(root, LAYER, 'handbook'))
-		// offline: listed, its link dangling, no clone here
-		appendFileSync(join(root, '.ken'), 'layer.gone=example.com/acme/gone\n')
-		symlinkSync('.repos/example.com/acme/gone', join(root, 'gone'))
 		// links atlas/.repos/<handbook> to the hoisted clone, as installing a layer does
 		expect(run('ken init').status).toBe(0)
+		// offline: listed, its link dangling, no clone here; after init, which would try to clone it
+		appendFileSync(join(root, '.ken'), 'layer.gone=example.com/acme/gone\n')
+		symlinkSync('.repos/example.com/acme/gone', join(root, 'gone'))
 		const r = run('ken lint')
 		expect(r.stderr).toBe('')
 		expect(r.stdout).toBe('ken lint: no errors in 5 pages.\n')

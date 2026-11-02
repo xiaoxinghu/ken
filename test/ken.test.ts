@@ -135,8 +135,8 @@ beforeAll(() => {
 		{ 'c.md': 'c\n', '.repos/github.com/team-c/AGENTS.md': 'team c\n' }
 	)
 	// an ssh and a wrapper that log their arguments and fail, as an unreachable host would
-	for (const name of ['ssh', 'wrap'])
-		script(join(dir, `ssh-bin/${name}`), 'echo "$*" >>"$LOG"; exit 255')
+	for (const name of ['ssh-bin/ssh', 'ssh-bin/wrap', 'ssh bin/ssh'])
+		script(join(dir, name), 'echo "$*" >>"$LOG"; exit 255')
 	repo(atlas)
 	symlinkSync('.repos/github.com/acme/atlas', join(root, 'atlas'))
 	const app = join(root, '.repos/github.com/acme/app')
@@ -409,7 +409,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			}
 			const opts =
 				'-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
-			for (const command of [`env X=1 ${bin}/ssh -p 2222`, `"${bin}/ssh" -p 2222`]) {
+			for (const command of [`env X=1 ${bin}/ssh -p 2222`, `"${dir}/ssh bin/ssh" -p 2222`]) {
 				for (const line of ssh({ GIT_SSH_COMMAND: command })) {
 					expect(line.startsWith(`${opts} -p 2222 `)).toBe(true)
 				}

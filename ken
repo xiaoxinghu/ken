@@ -423,7 +423,7 @@ reconcile() (
 		opts='-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
 		ssh=${ssh:-ssh}
 		GIT_SSH_COMMAND=$(printf '%s\n' "$ssh" |
-			sed -E "s#(^|[[:space:]])([\"']?([^[:space:]\"']*/)?ssh[\"']?)([[:space:]]|\$)#\\1\\2 $opts\\4#")
+			sed -E "s#(^|[[:space:]])(\"([^\"]*/)?ssh\"|'([^']*/)?ssh'|([^[:space:]\"']*/)?ssh)([[:space:]]|\$)#\\1\\2 $opts\\6#")
 		if [ "$GIT_SSH_COMMAND" = "$ssh" ]; then GIT_SSH_COMMAND="$ssh $opts"; fi
 		export GIT_SSH_COMMAND
 	fi

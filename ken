@@ -432,11 +432,11 @@ reconcile() (
 	# ssh takes an option's first value, so ours go right after the ssh word of the user's command
 	ssh=${GIT_SSH_COMMAND:-$(git config --get core.sshCommand 2>/dev/null || :)}
 	if [ -n "$ssh" ] || [ -z "${GIT_SSH-}" ]; then
-		opts='-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+		ssh_opts='-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
 		ssh=${ssh:-ssh}
 		GIT_SSH_COMMAND=$(printf '%s\n' "$ssh" |
-			sed -E "s#(^|[[:space:]])(\"([^\"]*/)?ssh\"|'([^']*/)?ssh'|([^[:space:]\"']*/)?ssh)([[:space:]]|\$)#\\1\\2 $opts\\6#")
-		if [ "$GIT_SSH_COMMAND" = "$ssh" ]; then GIT_SSH_COMMAND="$ssh $opts"; fi
+			sed -E "s#(^|[[:space:]])(\"([^\"]*/)?ssh\"|'([^']*/)?ssh'|([^[:space:]\"']*/)?ssh)([[:space:]]|\$)#\\1\\2 $ssh_opts\\6#")
+		if [ "$GIT_SSH_COMMAND" = "$ssh" ]; then GIT_SSH_COMMAND="$ssh $ssh_opts"; fi
 		export GIT_SSH_COMMAND
 	fi
 	todo=$(layer_lines "$SCOPE") || exit 1
@@ -945,9 +945,8 @@ get_worktree() {
 		die "could not make the worktree of $branch at $wt: $err${nl}So $branch has no worktree.$undone" \
 			"Fix that, then run \`$again\` again."
 	fi
-	if [ -f "$wt/.ken" ]; then
-		: # a worktree of a root is a root: reconcile it here (PRD, "Reconcile") once ken has it
-	fi
+	# a worktree of a root is a root: reconciled, saying so on stderr, as stdout is the path alone
+	if [ -f "$wt/.ken" ]; then (KEN_ROOT=$wt && find_root && reconcile) >&2 || exit 1; fi
 	printf '%s\n' "$wt"
 }
 

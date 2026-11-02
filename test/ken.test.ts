@@ -431,6 +431,22 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(lstatSync(teamA).isSymbolicLink()).toBe(true)
 		}, 20_000)
 
+		it('get -b of a layer reconciles its worktree, saying so on stderr, stdout the path alone', () => {
+			const at = join(dir, `branched-${shell}`)
+			const la = join(at, '.repos/example.com/acme/la')
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
+			expect(ken(['init', at], { cwd: outside() }).status).toBe(0)
+			const r = ken(['get', 'example.com/acme/la', '-b', 'feat'], { cwd: at })
+			expect(r.status).toBe(0)
+			expect(r.stdout).toBe(`${la}.feat\n`)
+			expect(r.stderr).toContain('Layer B/C: example.com/acme/lc is cloned already')
+			expect(r.stderr).toContain(`Linked ${la}.feat/.repos/example.com/acme/lb -> `)
+			expect(readFileSync(join(`${la}.feat`, 'B/C/c.md'), 'utf8')).toBe('c\n')
+			// the link to the hoisted clone is excluded; the owner and skill links are the worktree's to track
+			expect(status(`${la}.feat`)).not.toContain('example.com')
+			expect(r.stderr).toContain(`Track the links at ${la}.feat with`)
+		}, 20_000)
+
 		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {
 			const at = join(dir, `ssh-${shell}`)
 			const log = join(dir, `ssh-${shell}.log`)

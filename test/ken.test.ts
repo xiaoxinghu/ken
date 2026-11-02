@@ -77,6 +77,9 @@ beforeAll(() => {
 	git(app, 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
 	mkdirSync(join(app, '../app.feat-x/src/deep'), { recursive: true })
 	git(app, 'worktree', 'add', '-q', '--detach', '../../other/elsewhere')
+	git(app, 'worktree', 'add', '-q', '-b', 'feat+fix', '../app.feat+fix')
+	write(join(app, 'src/a.ts'), '')
+	symlinkSync('.repos/github.com/acme/app/src/a.ts', join(root, 'a.ts'))
 	repo(join(dir, 'away'))
 	git(
 		join(dir, 'away'),
@@ -190,6 +193,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('a worktree is keyed by its clone wherever its folder is, detached with no branch', () => {
 			expect(r('.repos/github.com/other/elsewhere')).toEqual(ok('github.com/acme/app worktree'))
+		})
+
+		it('a worktree whose branch has a character no key may hold is keyed by its clone', () => {
+			expect(r('.repos/github.com/acme/app.feat+fix')).toEqual(
+				ok('github.com/acme/app worktree feat+fix')
+			)
+		})
+
+		it('a symlink to a file is followed to the checkout the file is in', () => {
+			expect(r('a.ts')).toEqual(ok('github.com/acme/app clone main'))
 		})
 
 		it('a layer is a checkout of the root above it, through its link and from inside it', () => {

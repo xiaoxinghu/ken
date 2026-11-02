@@ -39,13 +39,19 @@ q() {
 # case as stored, so roots compare as real paths (PRD decision 15).
 real() { (cd -P -- "$1" && pwd -P); }
 
-# The real path of $1, which need not exist: its longest existing folder as a real path, then
-# the rest as written, . and .. taken. Call as p=$(real_path "$1") || exit 1.
+# The real path of $1, which need not exist: its longest existing folder as a real path, a
+# symlink to a file followed, then the rest as written, . and .. taken.
+# Call as p=$(real_path "$1") || exit 1.
 real_path() {
 	case $1 in /*) head=$1 ;; *) head=$(pwd -P)/$1 ;; esac
 	rest=
 	while [ -n "$head" ] && [ ! -d "$head" ]; do
-		rest=${head##*/}/$rest head=${head%/*}
+		if [ -L "$head" ] && [ -e "$head" ]; then
+			link=$(readlink "$head")
+			case $link in /*) head=$link ;; *) head=${head%/*}/$link ;; esac
+		else
+			rest=${head##*/}/$rest head=${head%/*}
+		fi
 	done
 	head=$(real "${head:-/}") || return 1
 	head=${head%/}
@@ -314,31 +320,35 @@ cmd_which() {
 	owner=${rest%%/*} rest=${rest#*/}
 	folder=${rest%%/*}
 	dir=$TOP/.repos/$host/$owner/$folder
+	if [ -e "$dir" ] && [ ! -d "$dir" ]; then die "$nowhere"; fi
+	# its shape: <repo>.<x> beside a clone <repo>, a .git folder, is its worktree; the folder
+	# name of a worktree holds a branch, so only the clone's name is a key
+	repo=$folder kind=clone try=$folder
+	while [ "${try%.*}" != "$try" ]; do
+		try=${try%.*}
+		if [ -n "$try" ] && [ -d "${dir%/*}/$try/.git" ]; then
+			repo=$try kind=worktree
+			break
+		fi
+	done
 	if [ ! -e "$dir" ]; then
-		# not checked out yet: <repo>.<x> beside a clone <repo>, a .git folder, is its worktree
-		repo=$folder kind=clone try=$folder
-		while [ "${try%.*}" != "$try" ]; do
-			try=${try%.*}
-			if [ -n "$try" ] && [ -d "${dir%/*}/$try/.git" ]; then
-				repo=$try kind=worktree
-				break
-			fi
-		done
 		parse_key "$host/$owner/$repo"
 		printf '%s %s\n' "$KEY" "$kind"
 		return
 	fi
-	if [ ! -d "$dir" ]; then die "$nowhere"; fi
-	parse_key "$host/$owner/$folder"
 	if [ ! -e "$dir/.git" ]; then
+		parse_key "$host/$owner/$repo"
+		get="ken get $KEY"
+		if [ $kind = worktree ]; then get="$get -b <branch>"; fi
 		die "$dir is where a checkout belongs, but it has no .git, so it is no checkout and has no" \
-			"branch. Look inside; if nothing there is needed, remove it and run \`ken get $KEY\`."
+			"branch. Look inside; if nothing there is needed, remove it and run \`$get\`."
 	fi
 	dirs=$(git -C "$dir" rev-parse --path-format=absolute --git-dir --git-common-dir) ||
 		die "git cannot read the checkout $dir (above), so ken cannot tell its key or branch." \
 			"Run \`git -C $(q "$dir") status\` to see what is wrong."
 	branch=$(git -C "$dir" branch --show-current) || exit 1
 	if [ "${dirs%%"$nl"*}" = "${dirs#*"$nl"}" ]; then
+		parse_key "$host/$owner/$folder"
 		printf '%s clone%s\n' "$KEY" "${branch:+ $branch}"
 		return
 	fi

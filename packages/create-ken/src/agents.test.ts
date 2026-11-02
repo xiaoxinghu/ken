@@ -2,10 +2,12 @@ import { execFileSync, spawnSync } from 'node:child_process'
 import {
 	mkdirSync,
 	mkdtempSync,
+	readdirSync,
 	readFileSync,
 	readlinkSync,
 	realpathSync,
 	statSync,
+	symlinkSync,
 	writeFileSync
 } from 'node:fs'
 import { createRequire } from 'node:module'
@@ -74,6 +76,67 @@ describe('the agents template', { timeout: 30_000 }, () => {
 		expect(r.status).toBe(0)
 		expect(r.stdout).toContain('example.com/acme/web')
 		expect(r.stdout).toContain('layers:')
+	})
+
+	describe('ken new', () => {
+		const git = (args: string) => run(`git -C .repos/example.com/me/${args}`).stdout.trim()
+		beforeEach(() => {
+			Object.assign(env, { GIT_AUTHOR_NAME: 't', GIT_AUTHOR_EMAIL: 't@t' })
+			Object.assign(env, { GIT_COMMITTER_NAME: 't', GIT_COMMITTER_EMAIL: 't@t' })
+			writeFileSync(join(root, '.ken.yaml'), 'orgs:\n  me: example.com/me\n', { flag: 'a' })
+		})
+
+		it('takes a key in any case, as ken does: lowercase', () => {
+			const r = run('ken new EXAMPLE.COM/Me/Draft "A draft."')
+			expect(r.stdout).toBe(`${root}/.repos/example.com/me/draft\n`)
+			expect(r.stderr).toContain('Started example.com/me/draft at')
+		})
+
+		it('starts a repo of the org me, its desc as written, and prints only its path', () => {
+			const r = run('ken new draft "A [draft]: idea"')
+			expect(r.status).toBe(0)
+			expect(r.stdout).toBe(`${root}/.repos/example.com/me/draft\n`)
+			expect(r.stderr).toContain('push -u origin HEAD')
+			const row = JSON.parse(run('ken repos example.com/me/draft --json').stdout)
+			expect(row).toMatchObject({ desc: 'A [draft]: idea', localOnly: true, strays: [] })
+		})
+
+		it('starts a layer: a root with its desc on the front page, committed, linked and listed', () => {
+			const r = run('ken new notes "My notes." --layer --as mine')
+			expect(r.status).toBe(0)
+			expect(r.stdout).toBe(`${root}/.repos/example.com/me/notes\n`)
+			expect(git('notes log --format=%s')).toBe('Start the layer: My notes.')
+			expect(git('notes status --porcelain')).toBe('')
+			expect(readFileSync(join(root, 'mine/README.md'), 'utf8')).toMatch(/^# notes\n\nMy notes\.\n/)
+			expect(readFileSync(join(root, 'README.md'), 'utf8')).toContain(
+				'- [mine](mine/README.md): My notes.\n'
+			)
+			const row = JSON.parse(run('ken repos example.com/me/notes --json').stdout)
+			expect(row).toMatchObject({ desc: 'My notes.', strays: [] })
+		})
+
+		it('refuses an owner folder that links out of the root, before writing anywhere', () => {
+			const outside = join(dir, 'elsewhere')
+			mkdirSync(outside)
+			mkdirSync(join(root, '.repos/example.com'), { recursive: true })
+			symlinkSync(outside, join(root, '.repos/example.com/me'))
+			for (const args of ['draft', 'notes "My notes." --layer', 'EXAMPLE.COM/ME/draft']) {
+				const r = run(`ken new ${args}`)
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`${root}/.repos/example.com/me is a symlink`)
+				expect(r.stderr).toContain(`mv '${outside}' '${root}/.repos/example.com/me'`)
+			}
+			expect(readdirSync(outside)).toEqual([])
+		})
+
+		it('refuses what it cannot make, before making anything', () => {
+			expect(run('ken new notes --layer').stderr).toContain('a layer needs a <desc>')
+			expect(run('ken new nope/notes').stderr).toContain('nope is not an org in .ken.yaml (me)')
+			expect(run('ken new notes').status).toBe(0)
+			const again = run('ken new notes')
+			expect(again.status).toBe(1)
+			expect(again.stderr).toContain('is already there, so example.com/me/notes is not new')
+		})
 	})
 
 	it('the pi shim sends the session-start hook output with the first prompt only', async () => {

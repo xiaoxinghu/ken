@@ -92,7 +92,7 @@ describe('ken init', () => {
 
 	it.each([
 		['a section', 'systems'],
-		['a clone', '.repos/github.com/a/b'],
+		['a folder in a clone', '.repos/github.com/a/b/docs'],
 		['a section reached through a link', 'link']
 	])('refuses a folder inside a root, in %s, naming the root', (_, inside) => {
 		init(root, env)
@@ -101,6 +101,36 @@ describe('ken init', () => {
 		const target = inside === 'link' ? join(dir, 'link') : join(root, inside)
 		expect(() => init(target, env)).toThrow(`is inside the ken root ${root}`)
 		expect(existsSync(join(target, '.ken.yaml'))).toBe(false)
+	})
+
+	it("makes a root at a repo's place in a root's layout, a layer, and says how to add it", () => {
+		init(root, env)
+		const layer = join(root, '.repos/github.com/a/notes')
+		const out = init(layer, env)
+		for (const file of SKELETON) expect(existsSync(join(layer, file))).toBe(true)
+		expect(out).toContain(
+			`${layer} is github.com/a/notes in the layout of the root ${root}, where a layer lives.`
+		)
+		expect(out).toContain(`\`KEN_ROOT=${root} ken layer add github.com/a/notes\``)
+		expect(out).not.toContain('export KEN_ROOT')
+		// no git init in between: a second run finds the folder it made, plain, and adds nothing
+		expect(init(layer, env)).toContain(`Nothing to create: ${layer}`)
+	})
+
+	it("refuses a worktree, made or yet to be, at a clone's side: a branch, not a place for a root", () => {
+		init(root, env)
+		const clone = join(root, '.repos/github.com/a/b')
+		mkdirSync(clone, { recursive: true })
+		const git = (...args: string[]) =>
+			spawnSync('git', ['-C', clone, ...args], { encoding: 'utf8' })
+		git('init', '-q', '-b', 'main')
+		git('-c', 'user.name=t', '-c', 'user.email=t@t', 'commit', '-q', '--allow-empty', '-m', 'x')
+		expect(git('worktree', 'add', '-q', '-b', 'feat', `${clone}.feat`).status).toBe(0)
+		mkdirSync(`${clone}.plain`)
+		for (const target of [`${clone}.feat`, `${clone}.next`, `${clone}.plain`]) {
+			expect(() => init(target, env)).toThrow(`is inside the ken root ${root}`)
+			expect(existsSync(join(target, '.ken.yaml'))).toBe(false)
+		}
 	})
 
 	it('gives the line that points ken at a root that is not the configured one', () => {

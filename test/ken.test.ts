@@ -60,7 +60,8 @@ const repo = (path: string) => {
 // one elsewhere, a folder with no .git where a checkout belongs, a worktree of a clone outside
 // the root, a nested root that is not a layer, a folder on PATH, and a HOME with no ~/ken, so
 // nothing outside the temp folder is ever found. HOME's git config sends https://example.com/
-// to bare repos under remotes/, which serve blobless clones, and old-git/ holds a git 2.47.
+// to bare repos under remotes/, which serve blobless clones (acme/lib: v1, an empty commit, then
+// a README), and old-git/ holds a git 2.47.
 beforeAll(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-')))
 	root = join(dir, 'root')
@@ -81,6 +82,7 @@ beforeAll(() => {
 		`[url "file://${dir}/remotes/"]\n\tinsteadOf = https://example.com/\n[uploadpack]\n\tallowFilter = true\n`
 	)
 	repo(join(dir, 'src-lib'))
+	git(join(dir, 'src-lib'), 'tag', 'v1')
 	write(join(dir, 'src-lib/README.md'), 'lib\n')
 	git(join(dir, 'src-lib'), 'add', 'README.md')
 	git(join(dir, 'src-lib'), 'commit', '-q', '-m', 'readme')
@@ -867,6 +869,173 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain('git version 2.47.1 is too old: ken needs git 2.48 or newer')
 			expect(existsSync(join(at, '.repos'))).toBe(false)
+		})
+	})
+
+	describe('get -b', () => {
+		const KEY = 'example.com/acme/lib'
+		let n = 0
+		// A fresh root with lib cloned into it.
+		const cloned = () => {
+			const at = join(dir, `get-b-${shell}-${n++}`)
+			write(join(at, '.ken'), '')
+			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
+			const clone = join(at, '.repos', KEY)
+			return { at, clone, wt: (folder: string) => `${clone}.${folder}` }
+		}
+		const out = (cwd: string, ...args: string[]) =>
+			spawnSync('git', ['-C', cwd, ...args], { encoding: 'utf8', env: env() }).stdout
+		const head = (cwd: string) => out(cwd, 'rev-parse', '--abbrev-ref', 'HEAD').trim()
+
+		it('a new branch gets its worktree beside the clone, linked relatively; again prints it', () => {
+			const { at, clone, wt } = cloned()
+			const r = ken(['get', KEY, '-b', 'feat/x'], { cwd: at })
+			expect(r).toEqual({ status: 0, stdout: `${wt('feat-x')}\n`, stderr: '' })
+			expect(readFileSync(join(wt('feat-x'), '.git'), 'utf8')).toMatch(
+				/^gitdir: \.\.\/lib\/\.git\/worktrees\/[^/]+\n$/
+			)
+			expect(head(wt('feat-x'))).toBe('feat/x')
+			expect(out(wt('feat-x'), 'rev-parse', 'HEAD')).toBe(out(clone, 'rev-parse', 'HEAD'))
+			expect(ken(['get', KEY, '-b', 'feat/x'], { cwd: at })).toEqual(r)
+		})
+
+		it('a root whose path holds a tab and a newline: again prints the same worktree', () => {
+			const at = join(dir, `get-b-${shell}-odd\t\nroot`)
+			write(join(at, '.ken'), '')
+			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
+			const first = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			expect(first.stdout).toBe(`${join(at, '.repos', KEY)}.feat\n`)
+			expect(ken(['get', KEY, '-b', 'feat'], { cwd: at })).toEqual(first)
+		})
+
+		it('the default branch prints the clone; an existing branch gets its worktree', () => {
+			const { at, clone, wt } = cloned()
+			expect(ken(['get', KEY, '-b', 'main'], { cwd: at }).stdout).toBe(`${clone}\n`)
+			git(clone, 'branch', 'old', 'v1')
+			expect(ken(['get', KEY, '-b', 'old'], { cwd: at }).stdout).toBe(`${wt('old')}\n`)
+			expect(head(wt('old'))).toBe('old')
+			// a tag named main makes git shorten the default branch to heads/main, a branch of its own
+			git(clone, 'tag', 'main')
+			expect(ken(['get', KEY, '-b', 'heads/main'], { cwd: at }).stdout).toBe(
+				`${wt('heads-main')}\n`
+			)
+			expect(ken(['get', KEY, '-b', 'main'], { cwd: at }).stdout).toBe(`${clone}\n`)
+		})
+
+		it('--from starts a new branch there, and is refused for one that exists', () => {
+			const { at, wt } = cloned()
+			expect(ken(['get', KEY, '-b', 'fix', '--from', 'v1'], { cwd: at }).stdout).toBe(
+				`${wt('fix')}\n`
+			)
+			expect(existsSync(join(wt('fix'), 'README.md'))).toBe(false)
+			for (const branch of ['fix', 'main']) {
+				const r = ken(['get', KEY, '-b', branch, '--from', 'v1'], { cwd: at })
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`Run \`ken get ${KEY} -b ${branch}\` for its worktree`)
+			}
+		})
+
+		it("a branch named for a folder of another's is refused, never given that one's worktree", () => {
+			const { at, clone, wt } = cloned()
+			ken(['get', KEY, '-b', 'feat/x'], { cwd: at })
+			const r = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			expect([r.status, r.stdout]).toEqual([1, ''])
+			expect(r.stderr).toContain('could not make the branch feat')
+			expect(readdirSync(join(clone, '..'))).toEqual(['lib', 'lib.feat-x'])
+			expect(head(wt('feat-x'))).toBe('feat/x')
+		})
+
+		it('a bad branch name is refused before the clone is touched', () => {
+			const at = join(dir, `get-b-${shell}-${n++}`)
+			write(join(at, '.ken'), '')
+			const r = ken(['get', KEY, '-b', 'a..b'], { cwd: at })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain('is not a branch name git accepts')
+			expect(existsSync(join(at, '.repos'))).toBe(false)
+		})
+
+		it('a folder differing only by case is refused, naming the branch its worktree holds', () => {
+			const { at, clone, wt } = cloned()
+			ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			const r = ken(['get', KEY, '-b', 'Feat'], { cwd: at })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`but ${wt('feat')} differs only by case from it`)
+			expect(r.stderr).toContain(`a worktree of ${clone} holding the branch feat`)
+			expect(out(clone, 'branch', '--list', 'Feat')).toBe('')
+			expect(readdirSync(join(clone, '..'))).toEqual(['lib', 'lib.feat'])
+		})
+
+		it('an unborn default branch without --from, or a detached clone, is refused', () => {
+			const at = join(dir, `get-b-${shell}-${n++}`)
+			write(join(at, '.ken'), '')
+			const clone = join(at, '.repos', KEY)
+			mkdirSync(clone, { recursive: true })
+			git(clone, 'init', '-q', '-b', 'main')
+			const r = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain('has no commit yet, so there is nothing to start feat from')
+			expect(r.stderr).toContain(`\`ken get ${KEY} -b feat --from <ref>\``)
+			git(clone, 'commit', '-q', '--allow-empty', '-m', 'one')
+			git(clone, 'switch', '-q', '--detach')
+			const detached = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			expect(detached.stderr).toContain(`Run \`git -C ${clone} switch main\``)
+			expect(readdirSync(join(clone, '..'))).toEqual(['lib'])
+		})
+
+		it('a failed git worktree add leaves no branch behind, and says what is left', () => {
+			const { at, clone, wt } = cloned()
+			// a git that puts a file into the folder ken made, between its checks and the add
+			const real = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim()
+			const bin = join(dir, `racy-git-${shell}`)
+			script(
+				join(bin, 'git'),
+				`case " $* " in *" worktree add "*) : >"${wt('feat')}/mine" ;; esac\nexec ${real} "$@"`
+			)
+			const r = ken(['get', KEY, '-b', 'feat'], {
+				cwd: at,
+				env: { PATH: `${bin}:${process.env.PATH}` }
+			})
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`could not make the worktree of feat at ${wt('feat')}`)
+			expect(r.stderr).toContain('Deleted the branch feat again.')
+			expect(r.stderr).toContain(`Left ${wt('feat')}, which is not empty`)
+			expect(out(clone, 'branch', '--list', 'feat')).toBe('')
+		})
+
+		it('a folder made by another get after the branch is left to it, the branch kept', () => {
+			const { at, clone, wt } = cloned()
+			// another get saw the branch, made the folder and is about to add its worktree
+			const real = spawnSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).stdout.trim()
+			const bin = join(dir, `slow-git-${shell}`)
+			script(
+				join(bin, 'git'),
+				`${real} "$@" || exit\nif [ "$3 $#" = "branch 5" ]; then mkdir "${wt('feat')}"; fi`
+			)
+			const r = ken(['get', KEY, '-b', 'feat'], {
+				cwd: at,
+				env: { PATH: `${bin}:${process.env.PATH}` }
+			})
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`${wt('feat')} was made just now, by another \`ken get\``)
+			git(clone, 'worktree', 'add', '-q', wt('feat'), 'feat')
+			expect(head(wt('feat'))).toBe('feat')
+		})
+
+		it('two gets of one new branch at once: one branch, one worktree, one path', async () => {
+			const { at, clone, wt } = cloned()
+			const both = await Promise.all([
+				kenAsync(['get', KEY, '-b', 'feat'], at),
+				kenAsync(['get', KEY, '-b', 'feat'], at)
+			])
+			const won = both.filter((r) => r.status === 0)
+			expect(won.length).toBeGreaterThan(0)
+			for (const r of won) expect(r.stdout).toBe(`${wt('feat')}\n`)
+			for (const r of both.filter((r) => r.status !== 0)) {
+				expect(r.stderr).toMatch(/ken get example\.com\/acme\/lib -b feat/)
+			}
+			expect(out(clone, 'branch', '--list', 'feat')).toBe('+ feat\n')
+			expect(out(clone, 'worktree', 'list').trim().split('\n').length).toBe(2)
+			expect(readdirSync(join(clone, '..'))).toEqual(['lib', 'lib.feat'])
 		})
 	})
 

@@ -929,6 +929,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			}
 		})
 
+		it("a branch named for a folder of another's is refused, never given that one's worktree", () => {
+			const { at, clone, wt } = cloned()
+			ken(['get', KEY, '-b', 'feat/x'], { cwd: at })
+			const r = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			expect([r.status, r.stdout]).toEqual([1, ''])
+			expect(r.stderr).toContain('could not make the branch feat')
+			expect(readdirSync(join(clone, '..'))).toEqual(['lib', 'lib.feat-x'])
+			expect(head(wt('feat-x'))).toBe('feat/x')
+		})
+
 		it('a bad branch name is refused before the clone is touched', () => {
 			const at = join(dir, `get-b-${shell}-${n++}`)
 			write(join(at, '.ken'), '')

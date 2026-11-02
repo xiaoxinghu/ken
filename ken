@@ -746,7 +746,9 @@ get_worktree() {
 		return
 	fi
 	# the worktree holding a branch, asked of git one ref at a time, so a path is never split
-	held=$(git -C "$clone" for-each-ref --format='%(worktreepath)' "refs/heads/$branch")
+	# and only for a branch that exists: refs/heads/feat would match refs/heads/feat/x too
+	held=''
+	if [ -n "$exists" ]; then held=$(git -C "$clone" for-each-ref --format='%(worktreepath)' "refs/heads/$branch"); fi
 	if [ -n "$held" ] && [ -d "$held" ]; then
 		printf '%s\n' "$held"
 		return

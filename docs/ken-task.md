@@ -3,9 +3,10 @@
 Plain-text tasks in one folder of a ken root, tied to code by repo key and branch name.
 Published as `@unclex/ken-task`, installed by the user beside `ken`; its binary `ken-task`
 is found on `PATH` by `ken` dispatch, so it reads as `ken task <command>`. A root or layer
-that relies on it says so in its `AGENTS.md`. It depends on `ken` for `config`, `which`,
-`path code` and `get -b`, runs git itself for the rest. `ken` never depends on it. This
-document says what is true; git is its history.
+that relies on it says so in its `AGENTS.md`. It depends on `ken` for `which`, `path code`
+and `get -b`, reads `task.folder` from `.ken`, and runs git itself for the rest. `ken` never
+depends on it ([PRD](prd.md), decision 12). This document says what is true; git is its
+history.
 
 ## Problem
 
@@ -24,7 +25,7 @@ never depends on the task system.
 
 ## Decisions
 
-1. **One folder.** `task.folder` in `.ken.yaml`, relative to the root or absolute, default
+1. **One folder.** `task.folder` in `.ken`, relative to the root or absolute, default
    `tasks`. Every file in it, at any depth, is a task, except `README.md` and dot
    entries. Nothing outside it is ever a task; nothing in it is read by `ken`. A listing
    opens every file in the folder (about 20 µs each), so the folder, not the knowledge
@@ -221,13 +222,15 @@ archived and the page is what lasts. `set status done` prints that reminder.
 
 ## Configuration
 
-```yaml
-task:
-  folder: tasks # default; relative to the root, or absolute
+```
+task.folder=tasks
 ```
 
-Read through `ken config --json`. Nothing else. Per-repo files to copy and the setup
-command for a new worktree are `ken`'s, in the repo's `.ken.yaml`, applied by `get -b`.
+One key in the root's `.ken` ([files.md](files.md)), default `tasks`, relative to the root or
+absolute, read with `sed`. Nothing else. What a new worktree needs beyond git, files copied
+from the clone and a setup command, is `ken-task`'s to do after `get -b` returns, not the
+kernel's (PRD decision 12); how it is told what to copy and run is this document's to decide
+when it is built.
 
 ## Out of scope for now
 

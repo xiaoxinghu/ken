@@ -311,14 +311,16 @@ index_read() {
 index_write() {
 	mkdir -p "$(dir_of "$2")"
 	lock=$2.lock
-	while ! ln -s "$$" "$lock" 2>/dev/null; do
-		if absent "$lock"; then
-			if made=$(ln -s "$$" "$lock" 2>&1); then break; fi
-			if absent "$lock"; then die "could not take the lock $lock: $made. Fix that, then rerun."; fi
-		fi
+	# checked before each ln -s, which would make its link inside a folder in the way
+	while :; do
 		if [ ! -L "$lock" ] && ! absent "$lock"; then
 			die "$lock is in the way of the lock on $2, a symlink to its writer's PID, so no write" \
 				"could take turns there. Move it aside, e.g. \`mv $(q "$lock") $(q "$lock.old")\`, then rerun."
+		fi
+		if ln -s "$$" "$lock" 2>/dev/null; then break; fi
+		if absent "$lock"; then
+			if made=$(ln -s "$$" "$lock" 2>&1); then break; fi
+			if absent "$lock"; then die "could not take the lock $lock: $made. Fix that, then rerun."; fi
 		fi
 		holder=$(readlink "$lock" 2>/dev/null) || continue
 		if kill -0 "$holder" 2>/dev/null; then

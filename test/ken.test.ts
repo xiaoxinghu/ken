@@ -567,6 +567,11 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(out.status).toBe(1)
 			expect(out.stderr).toContain(`Move it aside, e.g. \`mv ${lock} ${lock}.old\``)
 			expect([r.read(), readFileSync(lock, 'utf8')]).toEqual(['', 'mine'])
+			// ln -s would make its link inside a folder and write with no lock held
+			rmSync(lock)
+			mkdirSync(lock)
+			expect(ken(['index', 'set', KEY, 'desc=Web.'], r).status).toBe(1)
+			expect([r.read(), readdirSync(lock)]).toEqual(['', []])
 		})
 
 		it('set of a second repo appends its stanza, keeping the first and the comment on top', () => {

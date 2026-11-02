@@ -11,10 +11,10 @@ diffing against the template's clone, the agent being the merge tool. Starting f
 is `ken init ~/ken`: `.ken`, an empty index and a `.bin/`, which is all a layer needs to be
 one; `init` writes no page. A template's `.ken` carries `template.name`, a key `ken` keeps.
 
-| Template  | Holds                                                                                                          |
-| --------- | -------------------------------------------------------------------------------------------------------------- |
+| Template  | Holds                                                                                                        |
+| --------- | ------------------------------------------------------------------------------------------------------------ |
 | `minimal` | `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`: no sections, no `log.md`, no `.envrc` |
-| `agents`  | `minimal` plus `.envrc`, the harness files below, hooks, deny rules, skills, and the `.bin/` scripts          |
+| `agents`  | `minimal` plus `.envrc`, the harness files below, hooks, deny rules, skills, and the `.bin/` scripts         |
 
 `minimal` is the hello world: it assumes nothing about what the root is for, not even
 software. Its `AGENTS.md` says how to make a section and a page; an agent grows the root

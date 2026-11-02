@@ -1,14 +1,13 @@
 # ken — file formats
 
-The files `ken` reads and writes, and their grammar. Two formats, both one line per fact,
-chosen so a shell script reads and edits them with `awk` and `sed` and nothing else. This
-document is the spec; `docs/prd.md` says what the files mean.
+The files `ken` reads and writes, and their grammar. Two files, two formats, both one line
+per fact, chosen so a shell script reads and edits them with `awk` and `sed` and nothing
+else. This document is the spec; `docs/prd.md` says what the files mean.
 
-| File                  | Format     | Holds                                        |
-| --------------------- | ---------- | -------------------------------------------- |
-| `<root>/.ken`         | key=value  | the root's settings, and other tools' keys   |
-| `<root>/.repos/index` | stanzas    | one record per repo, cloned or not           |
-| `<repo>/.ken`         | key=value  | what a new worktree of that repo needs       |
+| File                  | Format    | Holds                                                 |
+| --------------------- | --------- | ----------------------------------------------------- |
+| `<root>/.ken`         | key=value | the root's settings, and other tools' keys; its presence makes the folder a root |
+| `<root>/.repos/index` | stanzas   | one record per repo, cloned or not                    |
 
 ## Rules for both
 
@@ -40,18 +39,15 @@ task.folder=tasks
 - A name that would be a list element goes into the key, not into the value:
   `layer.<name>=<repo key>`, `org.<name>=<host>/<owner>`. Order in the file is the order
   that matters, so layers are in file order.
-- A key may repeat only where the spec says it is a list (`copy` below). A repeated scalar
-  key reads as its last line.
+- A key is a scalar. A repeated key reads as its last line.
 - Read: `sed -n 's/^task\.folder=//p' .ken`. Set: replace the line, or append it when
   missing. Unset: delete the line.
 
-Keys in `<root>/.ken`: `clone.blobless` (`true` or `false`, default `true`); `org.<name>`,
-a lowercase `<host>/<owner>`; `layer.<name>`, a lowercase `<host>/<owner>/<repo>`, `<name>`
-a folder name at the root. `root` is refused: the root is per machine.
-
-Keys in `<repo>/.ken`, read from the new worktree: `copy`, a path relative to the repo root
-that cannot climb out of it, repeated once per file to copy from the clone; `setup`, a
-command run there with `sh -c`.
+Keys `ken` owns: `clone.blobless` (`true` or `false`, default `true`); `org.<name>`, a
+lowercase `<host>/<owner>`; `layer.<name>`, a lowercase `<host>/<owner>/<repo>`, `<name>` a
+folder name at the root. `root` is refused: the root is per machine. No other file is
+configuration: a `.ken` is only ever at the top of a root, so finding one while walking up
+from a folder finds the root.
 
 ## Stanzas
 

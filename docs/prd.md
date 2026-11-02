@@ -40,6 +40,7 @@ hidden name.
   log.md                           append-only, one dated line per change
   systems/  flows/  playbooks/  decisions/     sections, made as needed, each with a README.md
   sales-atlas -> .repos/github.com/acme/sales-atlas    a layer: its clone, as a section
+  sales-atlas/handbook             a layer's own layer: nested in it, never at the root
   tasks/                           ken-task's folder, when installed; one file per task
   .ken                             settings: layers, orgs, clone, a key prefix per tool
   .gitignore                       .repos/*/*/*/   .env
@@ -47,14 +48,15 @@ hidden name.
   .bin/                            ken, the kernel itself, and ken-* scripts built on it
   .agents/                         skills and hooks.json, the files every harness shares; not ken's business
   .claude/  .codex/  .pi/          one thin adapter per harness, pointing into .agents/; not ken's business
-  .repos/                          every checkout
+  .repos/                          every checkout, the root's and every layer's: hoisted here
     index                          one stanza per repo, cloned or not
     github.com/acme/AGENTS.md              owner-level context: tracked, on the cascade path
     github.com/acme/.envrc                 owner-level env: source_up_if_exists; dotenv_if_exists
     github.com/acme/.env                   secrets: ignored
     github.com/acme/join-web/              the clone, on its default branch
     github.com/acme/join-web.PROJ-123/     a worktree, named for repo and branch
-    github.com/acme/sales-atlas/           the layer's clone, with the same shape inside
+    github.com/acme/sales-atlas/           the layer's clone, a root itself; in its .repos/ only
+                                           the index, owner files, and links to hoisted clones
 ```
 
 **Reserved names** at the root: `.repos`, `.bin`, `.ken`, `.agents`, `.claude`, `.codex`, `.pi`, `.envrc`,
@@ -78,7 +80,7 @@ an existing section. Everything else at the root is a section of the knowledge b
    branches that map to one folder, or a repo actually named `<repo>.<branch>`, collide:
    the second is refused, naming what is in the way. A worktree holds the branch it was
    made for and the clone holds the default branch: never switch branches inside either.
-3. **Checkouts are physically inside the root, and hidden.** Context cascades only along
+3. **Checkouts are physically inside the top root, and hidden.** Context cascades only along
    a real path: Claude Code walks every ancestor of the physical working directory to `/`,
    and through a symlink only the target's ancestors load. So a session in
    `.repos/github.com/acme/join-web/` loads the root's `AGENTS.md`, the owner-level one
@@ -114,8 +116,8 @@ an existing section. Everything else at the root is a section of the knowledge b
 9. **A code reference is `<key>:<path>#<symbol>`.** Never a line number, never an absolute
    path. `ken path <ref>` resolves it to a local path when the repo is cloned, else to the
    repo's URL, `https://<key>.git`, saying on stderr to `ken get <key>`.
-10. **External subcommands.** `ken <name> ...` runs `ken-<name>` from the root's `.bin/`,
-    each layer's `.bin/` in order, then `PATH`, with `KEN_ROOT` set. A builtin cannot be
+10. **External subcommands.** `ken <name> ...` runs `ken-<name>` from the scope's `.bin/`,
+    each of its direct layers' `.bin/` in `.ken` order, then `PATH`, with `KEN_ROOT` set. A builtin cannot be
     shadowed. That is how `ken task` reaches `ken-task`, and how a team's scripts become
     commands by being in its layer. Two kinds, one contract: a script that belongs to a
     root or layer lives in its `.bin/` and travels with git; a packaged tool is installed
@@ -126,10 +128,10 @@ an existing section. Everything else at the root is a section of the knowledge b
     model, argv, `KEN_ROOT`, inherited stdio, exit code, plus the one-record-per-line
     output of the builtins, so an extension never knows what the kernel is written in.
 11. **One settings file, shared without knowing.** `.ken` at the root is `key=value` lines
-    (`docs/files.md`). The first segment of a key names the tool that owns it; `ken` keeps
-    every key it does not own and `ken config <key>` prints one, so tools built on `ken`
-    keep their settings in the one file. Per repo, a committed `.ken` lists files to copy
-    and a setup command for new worktrees.
+    (`docs/files.md`), and holding one is what makes a folder a root. The first segment of a
+    key names the tool that owns it; `ken` keeps every key it does not own, so tools built on
+    `ken` keep their settings in the one file and read them with `sed`. There is no other
+    config file: nothing per machine, nothing per repo.
 12. **Tasks are not the kernel's business.** `ken` knows what a branch is, not what a
     task is. The seam with every task system is `ken get <key> -b <branch>`: Jira
     passes `PROJ-123`, `ken-task` passes a task's path, a human passes `feat/login`. The
@@ -162,6 +164,33 @@ an existing section. Everything else at the root is a section of the knowledge b
     `PATH` is the per-machine configuration, and a layer's `.bin/ken` is the version its
     team runs. `KEN_ROOT` still overrides, and `~/ken` is the default when `ken` runs from
     outside any root.
+20. **Scope and top.** Every folder holding `.ken` is a root, and `ken` acts on the nearest
+    one above the current directory, the scope, as git acts on the nearest repository;
+    `KEN_ROOT` overrides, and outside any root the script's own root (19), then `~/ken`. A
+    layer is a root, so `cd` into one scopes every command to it. Roots nest only through
+    `.repos/`, and the outermost root reached that way is the top: every checkout lives in
+    the top's `.repos/`, one clone per key per machine, however deep the layer that asked.
+    `path code`, `which` and `get`'s clone answer from the top; the index, the settings, the
+    `.bin/` and the links are the scope's. Inside a layer, `ken` behaves as it would if that
+    layer were your root, except that its code is hoisted and the resolver is the only thing
+    that knows where. Paths are compared real (15), so the link at the root and the clone
+    it points to are one scope.
+21. **A layer contributes every surface a root has, and the nearer wins.** The order is
+    the scope, then its layers in `.ken` order, each followed by its own layers, then
+    `PATH`. Each surface unions by its own mechanism: pages by the link at the root, index
+    entries by merge, commands by lookup order, owner context and skills by a link where
+    the scope has none. Checkouts are not a surface, they are hoisted. Settings are not a
+    surface: a layer's `.ken` configures the layer alone. Hooks and deny rules are not a
+    surface: hooks are the root's, one line each, and call commands.
+22. **Layers install their layers, nested; only direct layers run.** Installing a layer
+    clones the layers it lists, hoisted to the top, and makes its tracked links to them
+    resolve, so a layer is complete wherever it is added: B, a layer of A, is the section
+    `A/B`, never a section of the root. Pages, index entries and owner context arrive
+    transitively; commands and skills come only from a layer the scope lists itself, since
+    those execute on your machine: what you add directly runs, what arrives through it is
+    read. A layer reached twice is one clone with two links, and search finds its pages
+    twice; the index merges first-wins in walk order. A cycle is visited once; an offline
+    layer's own layers are unknown until it is cloned.
 
 ## Pieces
 
@@ -179,31 +208,30 @@ there. There is no scaffolding package: `ken init` makes a root, and a template 
 
 ## The kernel: `ken`
 
-Ten commands. Output is for a shell: a listing prints one record per line, tab-separated
-under `--porcelain`, and `ken config <key>` prints one value. Everything is offline except
-`get` when the clone is missing, `layer add`, and `init` when a layer's clone is missing.
+Eight commands. Output is for a shell: a listing prints one record per line, tab-separated
+under `--porcelain`. Everything is offline except `get` when the clone is missing,
+`layer add`, and `init` when a layer's clone is missing. "Scope" and "top" are decision 20.
 
-| Group     | Command                                               | Does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
-| --------- | ----------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| root      | `init [<dir>]`                                        | Create the skeleton `ken` owns in `<dir>`, default the current directory: `.repos/index` (empty), `.ken`, `.gitignore` with the depth-three rule and `.env` (an existing one gains only the lines it lacks), `.bin/` with a copy of the running `ken` when none is there (decision 19), and a front page `README.md` (with `## Sections` and `## Layers`) and an `AGENTS.md` that says how to make a section and a page, and that another root can add this one as a layer. Only what is missing: it never overwrites a file, so on a root it fills in the rest and says what it made. A root is a directory holding `.ken`; `init` refuses `<dir>` when a strict ancestor, by real path, is one, naming it. Then it installs the layers: each layer in `.ken` whose clone is missing is cloned as `get` does, in `.ken` order, so the tracked root link and owner links resolve; it does not relink or touch `.ken` or the front page, and a clone already there is left alone, with no fetch. These clones neither prompt nor wait forever: `GIT_TERMINAL_PROMPT=0`, no askpass, ssh with `BatchMode=yes`, a connect timeout and a keepalive that drops a stalled connection, put right after the ssh word of the user's own `GIT_SSH_COMMAND` or `core.sshCommand`, before its options since ssh takes the first value of each (appended when it has none, a wrapper) (a `GIT_SSH` program is left alone), http with a low-speed limit and time. A layer that cannot be cloned is offline on this machine: `init` says so on stderr with git's reason and the `ken init <dir>` to run once it can be reached, and still exits 0. When `<dir>` is not the root `ken` would find, it prints the `ln -s` onto `PATH` or the `KEN_ROOT=` that points `ken` at it. Does not `git init`: that is the user's.                                                                                                                                                                              |
-|           | `config [<key>]`                                      | Effective settings, where each came from (`.ken`, environment, the script's own path, default), the layers with whether each is cloned and linked, and every other tool's keys verbatim. With `<key>`, that one value and nothing else, exit 1 when unset.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
-| resolve   | `path <what>`                                         | The one resolver, forward. `root`, `repos`, `bin`; `layer <name>`; `code <key> [<branch>]` for a clone or worktree path, whether or not it exists; `<key>:<path>[#<symbol>]` for a code reference, `<clone>/<path>` when cloned (the symbol is the reader's to find), else `https://<key>.git` with exit 0 and a line on stderr to run `ken get <key>`, since `ken` knows no host's web layout; `<file>` for its README chain, the `README.md` of each folder from the root down to the file's own, those that exist, then the file, taken logically so a page through a layer's link keeps the link; a folder ends with its own README; a file outside the root is refused. The words come first, then a `<host>/<owner>/<repo>:` prefix is a reference, anything else a file: a file named like a word is `./root`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
-|           | `which [<path>]`                                      | Reverse. For a path, default the cwd, compared as a real path: the key, whether it is the clone or a worktree, and the branch, as `<key> <clone\|worktree> <branch>`. An existing checkout is asked of git, a worktree keyed by its clone; a path not checked out yet is answered from its shape, with no branch, so a hook can ask about a repo not cloned yet (`<repo>.<x>` beside an existing clone `<repo>` is its worktree). Outside `.repos/<host>/<owner>/<folder>`, or outside the root, it says so and exits 1.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| layout    | `get <url\|key> [-b <branch> [--from <ref>]]`         | The one write into the layout, idempotent: make `<key>` ready here and print its path, the only thing on stdout. Clone to `.repos/<key>` if missing (blobless unless `.ken` says `clone.blobless: false`; a key alone resolves through the host as `https://<key>.git`; an empty remote leaves an unborn default branch; a failed clone leaves no folder behind and names the command to rerun). A clone already there is used as it is, with no fetch; anything else there, a plain folder, a file, a link or a worktree, is refused and left untouched. Every time, set `worktree.useRelativePaths` and run `git worktree repair` in the clone, so `mv` then `get` adopts a clone; a git older than 2.48 is refused. When no index, the root's or a layer's, has an entry for the key, write one without `desc` into the root's and say on stderr to run `ken index set <key> desc="..."`. With `-b`: create `<branch>` from the clone's default branch as it stands (no fetch), or from `--from`, and its worktree at `.repos/<key>.<folder>`; copy each file the repo's `.ken` lists from the clone to the same path in the worktree and run its `setup` there with `sh -c`, its output on stderr; print the worktree path. An existing branch gets its worktree, and `--from` with it is refused; a branch that already has one prints the existing path; the default branch prints the clone. An unborn default branch with no `--from` is refused: nothing to branch from. A folder in the way, or one in `<owner>/` differing only by case, is refused before anything is created. Branch creation is the lock: git's ref lock means two callers never get one branch, and the loser is told to rerun. A failure after it, up to reading `.ken`, removes the worktree and deletes the branch again; a failure in the copy, a missing source included, or the setup keeps the worktree and prints the commands to finish by hand. |
-| index     | `repos [<key> \| --layer <name>] [--porcelain]`       | The merged index times the disk. The root's `.repos/index`, then each layer's in `.ken` order, a whole entry winning by that order; a layer not cloned, offline, is left out with a line on stderr to run `ken init`. Then every folder at depth three under `.repos/` whose `.git` is a folder, a clone, and its `git worktree list`. One row per key, sorted: its `desc`, which workspace listed it (`root` or the layer's name), whether it is cloned and on which branch, its worktrees with branches, and each stray with the command that fixes it: a clone no index lists (`ken index set <key> desc="..."`); an entry with no `desc` (the same, with `--layer` when a layer listed it); a clone not on its default branch, `refs/remotes/origin/HEAD`, skipped when there is none (`git switch` back, then `ken get <key> -b <branch>`); a worktree beside the clone whose folder does not match its branch, or one outside the layout (`git worktree move` to its path); a detached worktree is listed, not a stray. `--layer <name>` keeps the keys that workspace's own index lists, `root` the root's. For one key: the same row, the merged entry and the index it came from, then the text files under the root that contain the key, the walk skipping hidden entries (so nothing in `.repos/`) and following the layer links at the top. `--porcelain` prints one line per key, tab-separated: key, desc, listed by, cloned, branch; for one key, its stanza then the mentioning files. Offline.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                         |
-|           | `index set <key> <field>=<value>... [--layer <name>]` | Write fields into the root's index, or a layer's (`.repos/<layer key>/.repos/index`, the layer named in `.ken`). Creates the entry and its owner. An offline layer, not cloned, is refused with the `ken init` that clones it. A value is the text as written; a list field is its items separated by spaces (`tags="sales join"`). Comments, order and unknown fields are kept: the one stanza is rewritten, the file written beside and renamed over (`docs/files.md`).                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
-|           | `index unset <key> [<field>...] [--layer <name>]`     | Remove fields, or the whole entry; an owner left with nothing goes too. `desc` alone is not removed: set it, or unset the entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-| layers    | `layer add <url\|key> [--as <name>]`                  | `get` into `.repos/`; symlink the clone at the root as `<name>`, default the repo name, with a relative link; symlink each of the layer's `.repos/<host>/<owner>/AGENTS.md` into the root's matching owner folder when the root has none there (the root's own wins); add `- [<name>](<name>/README.md): <first line of prose of the layer's README>` under `## Layers` in the front page, the heading made at the end when missing; last, append `layer.<name>=<key>` to `.ken`, keeping its comments and other keys, so a layer listed there is a layer complete. Refuses, before writing anything, a reserved name (in any case), a name anything is at (a dangling link included) or another layer has, and a key already a layer, naming the clash and suggesting `--as`. Each step checks before acting, so a rerun after a failure finishes the job: its own link to the clone is no clash. Prints what it did and the `git add` and `ken repos --layer <name>` to run next.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
-|           | `layer remove <name>`                                 | Reverse of `add`: the front-page line, the owner links that point into the layer's clone and nothing else, the root link, then the `.ken` entry, last so a rerun still knows the key. The clone stays; it prints the `rm -rf "$(ken path code <key>)"` that deletes it. A name that is not a layer has nothing to remove, which it says, exiting 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                |
-| extension | `ken <name> ...`                                      | Decision 10. `ken-<name>` is looked for in `<root>/.bin/`, then each layer's `.repos/<layer key>/.bin/` in `.ken` order, then `PATH`; the first executable file wins, and a builtin is checked first. It runs with the arguments as given, stdio inherited and `KEN_ROOT` set to the real root, and `ken` exits with its code, 128 + the signal number when it was killed; a SIGINT, SIGQUIT, SIGTERM or SIGHUP sent to `ken` is passed on to it. Not found, `ken` names the folders it looked in, in order, and points at `ken help`, which lists the external commands found by where they came from; a match that is not executable is named with the `chmod +x` to run.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                        |
+| Group     | Command                                          | Does                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                              |
+| --------- | ------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| root      | `init [<dir>]`                                   | Make `<dir>`, default the current directory, a root with only what `ken` owns: `.ken`, `.repos/index` (empty), `.bin/` with a copy of the running `ken` when none is there (19), and `.gitignore` with `.repos/*/*/*/` and `.env` (an existing one gains only the lines it lacks). Never overwrites, so a rerun creates nothing; writes no page, no `AGENTS.md`: those are a template's. Refuses a `<dir>` under a root unless through its `.repos/` (20). Then reconciles the layers, the one place derived state is made to match `.ken`: walking the scope's layers and theirs (22), clone each missing one as `get` does, unattended (`GIT_TERMINAL_PROMPT=0`, no askpass, ssh `BatchMode=yes` with a connect timeout and keepalive put after the ssh word of the user's own command, http low-speed limits); in each layer's clone, link `.repos/<key>` of each of its layers to the hoisted clone and list the link in the clone's `.git/info/exclude`; at the scope, link each reachable layer's `.repos/<host>/<owner>/AGENTS.md` and each direct layer's `.agents/skills/<name>` where the scope has none, and remove such links into clones no longer reachable. A clone already there is left alone, no fetch. A layer that cannot be cloned is offline on this machine: said on stderr with git's reason and the `ken init` to rerun, exit 0. When `<dir>` is not the root `ken` would find from here, prints the `ln -s` onto `PATH` or the `KEN_ROOT=` to use. Does not `git init`. |
+| resolve   | `path root \| code <key> [<branch>] \| <ref>`    | Forward. `root`: the scope. `code <key> [<branch>]`: the clone in the top's `.repos/`, or the worktree of `<branch>` beside it, `/` as `-`, whether or not it exists. `<key>:<path>[#<symbol>]`, a code reference: `<clone>/<path>` when cloned (the symbol is the reader's to find), else `https://<key>.git` with exit 0 and a line on stderr to run `ken get <key>`. A `<key>` may be a git URL.                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+|           | `which [<path>]`                                 | Reverse. For a path, default the cwd, compared as a real path against the top's `.repos/`: `<key> <clone\|worktree> <branch>`. An existing checkout is asked of git, a worktree keyed by its clone; a path not checked out yet is answered from its shape, with no branch, so a hook can ask about a repo not cloned (`<repo>.<x>` beside a clone `<repo>` is its worktree). A layer's clone is a checkout of the root above it. Outside `.repos/<host>/<owner>/<folder>`, or outside the top, exits 1 saying so.                                                                                                                                                                                                                                                                                                                                          |
+| layout    | `get <url\|key> [-b <branch> [--from <ref>]]`    | The one write into the layout, idempotent: make `<key>` ready at the top and print its path, the only thing on stdout. Clone to `<top>/.repos/<key>` if missing (blobless unless the scope's `.ken` says `clone.blobless=false`; a key alone clones `https://<key>.git`; an empty remote leaves an unborn default branch; a failed clone leaves no folder and names the command to rerun). A clone already there is used as it is, no fetch; anything else there is refused and left untouched. Every time, set `worktree.useRelativePaths`, run `git worktree repair`, and when no index of the scope or its layers lists the key, write an entry into the scope's and say on stderr to run `ken index set <key> desc="..."`. A git older than 2.48 is refused. With `-b`: create `<branch>` from the default branch as it stands (no fetch), or from `--from`, and its worktree at `.repos/<key>.<folder>`; print that path. An existing branch gets its worktree, `--from` with it is refused, a branch with a worktree prints it, the default branch prints the clone, an unborn default branch without `--from` is refused. A folder in the way, or one in `<owner>/` differing only by case, is refused before anything is made. Branch creation is the lock: two callers never get one branch, and the loser is told to rerun; a failure after it undoes what this caller made. A worktree of a repo that holds `.ken` is a root (20): its layers are reconciled as `init` does. Nothing is copied or run: that is the task tool's, after `get -b` returns. |
+| index     | `repos [--porcelain]`                            | The merged index times the disk. The scope's `.repos/index`, then each reachable layer's in walk order (22), a whole entry winning by that order; an offline layer is left out with a line on stderr. One row per key, sorted: its `desc`, which workspace listed it, whether it is cloned at the top and on which branch, its worktrees, and each stray with the command that fixes it: an entry with no `desc`; a clone not on its default branch (`refs/remotes/origin/HEAD`, skipped when none); a worktree whose folder does not match its branch, or one outside the layout. At the top only, also every clone no index lists: disk strays are the top's. `--porcelain`: one line per key, tab-separated, key, desc, listed by, cloned, branch. Which pages mention a key is `grep -rl` (decision 1).                                                                                                                                                                                                                                      |
+|           | `index set <key> <field>=<value>...`             | Write fields into the scope's index, creating the entry when missing. A value is the text as written; a list field is its items separated by spaces (`tags="sales join"`); `desc` is not empty. Comments, order and unknown fields are kept: the one stanza is rewritten, the file written beside and renamed over (`docs/files.md`). To write a layer's index, `cd` into the layer (20).                                                                                                                                                                                                                                                                                                                                                                                                                                             |
+|           | `index unset <key> [<field>...]`                 | Remove fields, or the whole entry. `desc` alone is not removed: set it, or unset the entry.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| layers    | `layer add <url\|key> [--as <name>]`             | Refuses, before writing, a reserved name (in any case), a name anything is at (a dangling link included) or another direct layer has, and a key already a direct layer, naming the clash and suggesting `--as`. Then `get` it; link it at the scope as `<name>`, default the repo name, relative; append `layer.<name>=<key>` to `.ken`, keeping its comments and other keys; reconcile as `init` does, which brings its layers (22) and the owner and skill links. Each step checks before acting, so a rerun finishes a job that failed halfway. Prints what it did and the `git add` to run; the front-page line is the agent's, checked by `ken lint`.                                                                                                                                                                                                                                                                                 |
+|           | `layer remove <name>`                            | Remove its `.ken` line and its link at the scope, then reconcile, which removes the owner and skill links into clones no longer reachable. The clones stay; it prints the `rm -rf "$(ken path code <key>)"` that deletes this one. A name that is not a layer has nothing to remove, which it says, exit 0.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| extension | `ken <name> ...`                                 | Decision 10. `ken-<name>` is looked for in the scope's `.bin/`, then each direct layer's `.repos/<key>/.bin/` in `.ken` order, then `PATH`; the first executable wins, a builtin is checked first. It runs with the arguments as given, stdio inherited and `KEN_ROOT` the real scope, by `exec`, so signals and the exit code are its own. Not found, `ken` names the folders it looked in and points at `ken help`, which lists the external commands found by where they came from; a match that is not executable is named with the `chmod +x` to run. `help [<command>]` prints every command with examples, or one in full.                                                                                                                                                                                                                                              |
 
 **Everything else is git**, run by the agent or a script against the path `ken path`
 prints: `git worktree list`, `git worktree remove` and `git branch -d` to finish a branch,
 `rm -rf "$(ken path code <key>)"` and its worktrees to drop a clone (the entry stays, so
 the repo is lazy again), `git init "$(ken path code <key>)"` then `ken get <key>` for a
-new repo, `mv <old> "$(ken path code <key>)"` then `ken get <key>` to adopt one. `ken`
-wraps no git command that carries none of its rules; it prevents at the one write it owns
-and detects everywhere else, in `repos`.
+new repo, `mv <old> "$(ken path code <key>)"` then `ken get <key>` to adopt one, `git pull`
+in a layer's clone to update it. `ken` wraps no git command that carries none of its
+rules; it prevents at the one write it owns and detects everywhere else, in `repos`.
 
 **Collisions and guards.** A folder in the way of a clone or worktree is named in the
 refusal. A key is validated as `<host>/<owner>/<repo>` with one slash each, each part
@@ -213,52 +241,74 @@ own rules (`git check-ref-format --branch`), and `@` is refused as `git branch` 
 it. A root that does not exist, or is not a folder, is an error naming the path and where
 it came from.
 
-**Deliberately not in `ken`:** tasks and branch naming policy; anything about Claude Code
-or another harness; anything about GitHub beyond git; git commands that carry no rule;
-knowledge commands beyond `path`, because the file system is the union and `rg -L`,
-`find -L` and the READMEs are the interface; lint rules, thresholds and flows; status,
+**Deliberately not in `ken`:** a `config` command (the file is the API); a README chain
+or any knowledge command (the file system is the union and `rg -L`, `find -L` and the
+READMEs are the interface); editing any Markdown; copying files or running a setup in a new
+worktree (the task tool's, after `get -b`); `--layer` flags (`cd` into the layer); tasks and
+branch naming policy; anything about Claude Code or another harness; anything about GitHub
+beyond git; git commands that carry no rule; lint rules, thresholds and flows; status,
 doctor, grep, promote, ingest.
 
 ## Layers
 
 A layer is a root someone else adds: a front page, sections, `.repos/index`,
-`.repos/<host>/<owner>/` context files, `.bin/`, optionally `.claude/`. Any root is one, so
-there is no layer template: make a root, push it, and `ken layer add <key>` it from another;
-its clones stay behind, ignored. What it should hold is what its readers should receive:
-the root is private because it is yours, a layer is public because it is shared. Layers are one level deep: `ken` reads only the root's
-`.ken`, so a layer's own `layer.*`, `org.*` and `clone.*` do nothing for the root that adds
-it, and a layer added inside a layer is a dangling link there. Installing one is `ken layer
-add <key>`. Installing a root installs its layers, the
-way `npm install` installs the dependencies: `git clone <root> ~/ken && ~/ken/.bin/ken init`
-clones every layer `.ken` lists, and a rerun after `git pull` gets one a teammate
-added.
+`.repos/<host>/<owner>/` context files, `.bin/`, `.agents/skills/`, and layers of its own.
+Any root is one, so there is no layer template: make a root, push it, and `ken layer add
+<key>` it from another. Installing a root installs its layers the way `npm install` installs
+the dependencies: `git clone <root> ~/ken && ~/ken/.bin/ken init` clones every layer `.ken`
+lists, and theirs, and a rerun after `git pull` gets one a teammate added.
 
-**Offline.** A layer listed in `.ken` with no clone on this machine is offline, such
-as a company layer on a personal laptop. Offline is derived, never stored, so another
-machine never sees it and a later `ken init` that clones it brings it back. The rest of the
-root works without it: its link and owner links dangle, and its index, scripts and pages are
-left out. `ken config`, `ken repos` and `index set --layer` name it offline and point at
-`ken init`.
+**A layer is a workspace.** Its clone holds `.ken`, so it is a root, and `cd ~/ken/sales-atlas`
+scopes every command to it (decision 20):
+
+| inside `~/ken/sales-atlas` | acts on                                                                 |
+| -------------------------- | ----------------------------------------------------------------------- |
+| `path code`, `which`       | the top's checkouts, shared with the root                               |
+| `get`                      | clones at the top, registers the entry in the layer's index             |
+| `repos`                    | the layer's index and its layers', against the top's disk               |
+| `index`, `layer`, `init`   | the layer's index, `.ken` and links                                     |
+| `ken <name>`               | the layer's `.bin/`, then its direct layers', then `PATH`; not the root's |
+
+What is not as if it were your root: context cascades along the physical path, so a session
+in a clone loads the top's `AGENTS.md`, not the layer's, which the owner-level links close
+most of the way; and the clone is on its default branch, so a contribution is made in a
+worktree, `ken get <key> -b <branch>`, which holds `.ken` and is a root with the same
+guarantees. Dispatch sets `KEN_ROOT` to the scope; an extension that needs code asks
+`ken path code`, which answers from the top.
+
+**Nested, hoisted.** A layer's layers are sections inside it, `sales-atlas/handbook`, never
+of the root; their clones are hoisted to the top like every checkout, and `init` makes the
+layer's tracked link resolve with a link in the layer's `.repos/`, listed in that clone's
+`.git/info/exclude`. The root's section namespace stays what its owner chose, the tree is
+visible in the file system, `rg -L ~/ken` finds every page once unless the root also adds a
+layer one of its layers brings, and no layer ever holds a clone (decision 22).
+
+**Offline.** A layer listed in `.ken` with no clone on this machine is offline, such as a
+company layer on a personal laptop. Offline is derived, never stored, so another machine
+never sees it and a later `ken init` that clones it brings it back. The rest works without
+it: its link and owner links dangle, its index, scripts, skills and layers are left out.
+`ken repos` names it and points at `ken init`.
 
 **Two unions, one in the file system and one in code.**
 
-- Pages: the symlink is the union. `~/ken/sales-atlas/systems/x.md` is a page like any
-  other; `rg -L` finds it, `ken path` prints its README chain through the link.
-- Index entries: `ken repos` merges the root's `.repos/index` with each layer's, in
-  `.ken` order, the root first; a whole entry wins by that order. One table. A layer
-  contributes repos to your workspace just by being added: a team layer lists the team's repos once, and everyone who adds it can `ken get` any of them by
-  key, with the description already there.
+- Pages: the link is the union. `~/ken/sales-atlas/systems/x.md` is a page like any other,
+  and `~/ken/sales-atlas/handbook/x.md` through two links; `rg -L` finds both.
+- Index entries: `ken repos` merges the scope's `.repos/index` with each reachable layer's
+  in walk order, the scope first; a whole entry wins by that order. One table. A layer
+  contributes repos to your workspace just by being added: a team layer lists the team's
+  repos once, and everyone who adds it can `ken get` any of them by key, with the
+  description already there.
 
-**Update** is `git pull` in the layer's clone. **Contribute** is a move: a page from a
-root section into the layer's section, or an entry with `index unset` here and `index set
---layer` there; then the ordinary flow on the layer's repo, a branch, a worktree, a PR.
-Private notes never touch the shared history. **A new joiner** with nothing of their own:
-`ken init ~/ken && ken layer add github.com/acme/sales-atlas`; on a team that shares a
-root, `git clone <root> ~/ken && ~/ken/.bin/ken init`.
+**Update** is `git pull` in the layer's clone, then `ken init` for anything it now lists.
+**Contribute** is a move into a worktree of the layer: a page from a root section into the
+layer's section, or an entry with `index unset` here and `index set` there; then the
+ordinary flow, a branch, a PR. Private notes never touch the shared history. **A new
+joiner** with nothing of their own: `ken init ~/ken && ken layer add github.com/acme/sales-atlas`;
+on a team that shares a root, `git clone <root> ~/ken && ~/ken/.bin/ken init`.
 
 **A layer is a unit of sharing, not of organisation.** A group of repos only you care
 about is a section and tags in the root. It becomes a layer the day someone else should
-receive it, or it needs a different visibility. Two layers cannot share a section name.
+receive it, or it needs a different visibility. Two direct layers cannot share a name.
 
 ## The index: `.repos/index`
 
@@ -311,8 +361,7 @@ repo and where it bites is knowledge about our use of it, and belongs here.
 - **A `README.md` per folder is the index** (decision 8). The front page says what the
   knowledge base is, links the few evergreen pages, which live in sections like any other, gives one line per section with its
   page count and one line per layer. A section's README lists its pages one line each;
-  over the cap it splits. GitHub renders a folder's README; `ken path <file>` prints the
-  chain top down.
+  over the cap it splits. GitHub renders a folder's README.
 - **`log.md`** is append-only, one dated line per change, never read whole. Grepped by
   date or key; rolled per year if it bothers.
 - **Sections** are the root's own: a folder at the top with a `README.md` listing its
@@ -341,10 +390,11 @@ repo and where it bites is knowledge about our use of it, and belongs here.
 
 ## Configuration
 
-Per machine, nothing to edit. The root is `KEN_ROOT` when set; else the root the script
+Per machine, nothing to edit. The root is `KEN_ROOT` when set; else the scope, the nearest
+folder holding `.ken` above the current directory, compared real; else the root the script
 runs from, `<root>/.bin/ken`, a symlink on `PATH` resolved to it; else `~/ken`. `ken` sets
-`KEN_ROOT` for every external subcommand. State `ken` owns on a machine belongs in
-`~/.local/state/ken`.
+`KEN_ROOT` to the scope for every external subcommand. State `ken` owns on a machine
+belongs in `~/.local/state/ken`.
 
 Per root, `.ken`, tracked, `key=value` lines (`docs/files.md`):
 
@@ -355,22 +405,12 @@ layer.sales-atlas=github.com/acme/sales-atlas
 task.folder=tasks
 ```
 
-Every key is optional and a missing file is all defaults. A value `ken` cannot read, or a
+Every key is optional and an empty file is all defaults. A value `ken` cannot read, or a
 line that is not `key=value`, stops every command that reads the file, naming the file, the
-line and what it expects. `root` is refused here, since the root is per machine. `layer
-add` and `layer remove` edit the `layer.*` lines in place, keeping comments and every other
-key. `ken config` prints `root` and `clone.blobless` with their sources, the `org.*` keys,
-each layer with whether its clone and its root link exist (no clone is an offline layer,
-which `ken init` clones), then every other tool's keys as written; `ken config <key>`
-prints one value, so a tool reads its own with `ken config task.folder`.
-
-Per repo, a committed `.ken` at the repo root, read by `get -b` from the new worktree:
-
-```
-copy=platform/worker/.env
-copy=platform/worker/.dev.vars
-setup=pnpm install
-```
+line and what it expects. `root` is refused here, since the root is per machine. `layer add`
+and `layer remove` edit the `layer.*` lines in place, keeping comments and every other key.
+There is no `config` command: a tool reads its own key with
+`sed -n 's/^task\.folder=//p' "$KEN_ROOT/.ken"`, and `ken path root` prints the scope.
 
 **Environment** is direnv's job. The root `.envrc` is the top of a chain:
 `.repos/<host>/<owner>/.envrc` with `source_up_if_exists` and `dotenv_if_exists`, so a
@@ -392,10 +432,11 @@ accepted.
 Plain-text tasks in one folder of the root, one file per task, the file's path as its
 identity, tied to code by repo key and branch name. Its own package, `@unclex/ken-task`,
 installed by the user beside `ken` and reached as `ken task` through `PATH` (decision
-10); its PRD is `docs/ken-task.md`. It depends on `ken` for `config`,
-`which`, `path code` and `get -b`, and `ken` never depends on it. The kernel knows two
-things of it: the `task.*` keys of `.ken`, kept and printed, and a branch named
-after a task, passed to `get -b` like any other.
+10); its PRD is `docs/ken-task.md`. It depends on `ken` for `which`, `path code` and
+`get -b`, reads `task.folder` from `.ken`, and `ken` never depends on it. The kernel knows
+two things of it: the `task.*` keys of `.ken`, kept, and a branch named after a task,
+passed to `get -b` like any other. What a new worktree needs beyond git, files copied from
+the clone and a setup command, is its job after `get -b` returns, not the kernel's.
 
 ## `ken-lint`
 
@@ -403,18 +444,18 @@ The knowledge-base lint, its own package, `@unclex/ken-lint`, installed beside `
 reached as `ken lint` through `PATH` (decision 10), like `ken-task`. It is a package and
 not a `.bin/` script because it parses Markdown as CommonMark (`mdast-util-from-markdown`),
 so a link, a code span and a link's label are what a Markdown reader sees, never a guess
-at where one ends. It reads `ken config` for the layers and `ken config task.folder` for the task folder, and
-runs `ken path` for every code reference.
+at where one ends. It reads `.ken` for the layers and the task folder, and runs `ken path`
+for every code reference.
 
 It walks the root's sections and each layer's, through the layer links as `find -L` does,
 each folder once, skipping hidden entries and the task folders: the root's, and each
-layer's from its own `.ken` (`KEN_ROOT=<layer> ken config task.folder`), compared by
-real path; a config it cannot read stops it with `ken`'s message. Each problem names its file,
+layer's from its own `.ken`, compared by real path; a `.ken` it cannot read stops it. Each problem names its file,
 and its line when it has one, and what to do. Errors, exit 1: a page in no section
 `README.md` or in more than one; a `.md` at the top of the root or a layer other than
 `README.md`, `AGENTS.md`, `CLAUDE.md` and `log.md`, a page in no section; a Markdown link or
 reference definition to a file that does not exist; a code reference, in prose or a code
-span, that `ken path` resolves to a file not in the clone; the front page over 60 lines, a
+span, that `ken path` resolves to a file not in the clone; a direct layer with no line under
+`## Layers` in the front page, or a line there for no layer; the front page over 60 lines, a
 section README over 150, the root `AGENTS.md` over 40, constants at the top of its source.
 Notes, exit 0: references into repos not cloned, counted with the `ken get` to run; a page
 nobody links to (a section README's listing does not count) and unchanged in a year by
@@ -433,13 +474,15 @@ keeps and prints. There is no scaffolding tool: anything that needs to know a ru
 kernel primitive, and the rest is `git clone`.
 
 `minimal` is the hello world: it assumes nothing about what the root is for, not even
-software. It is what `ken init` makes plus `CLAUDE.md -> AGENTS.md`, and an agent grows it
-from the `AGENTS.md`, `ken help` and the messages. A layer starts the same way: any root
+software. It is what `ken init` makes plus a front page, an `AGENTS.md` that says how to
+make a section and a page, and `CLAUDE.md -> AGENTS.md`; an agent grows it from there,
+`ken help` and the messages. `ken init` alone writes no page: a root with no template has
+`.ken`, an empty index and a `.bin/`, which is all a layer needs to be one. A layer starts the same way: any root
 is one (see "Layers").
 
 | Template  | Holds                                                                                         |
 | --------- | --------------------------------------------------------------------------------------------- |
-| `minimal` | nothing beyond `ken init` and `CLAUDE.md -> AGENTS.md`: no sections, no `log.md`, no `.envrc` |
+| `minimal` | `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`: no sections, no `log.md`, no `.envrc` |
 | `agents`  | `minimal` plus the harness files below: hooks, deny rules, skills, and the `.bin/` scripts    |
 
 **Harness files.** Two of the four surfaces a harness reads have a standard every harness
@@ -453,7 +496,8 @@ surface and one thin adapter per harness, each pointing at the shared file:
 
 ```
 AGENTS.md                      every harness; Claude Code only while no CLAUDE.md is above it, so the link stays
-.agents/skills/<name>/         Codex and pi read it; Claude Code does not: one link per skill in .claude/skills/
+.agents/skills/<name>/         Codex and pi read it; a direct layer's skills are linked here by ken (decision 21)
+.claude/skills -> ../.agents/skills   one link, so Claude Code sees every skill a layer brings (to verify: a folder link)
 .agents/hooks.json             one hooks object in Claude Code's schema; Codex reads it as it is
 .bin/ken-status                the script the session-start hook runs
 .claude/settings.json          hooks (a copy of the object: a settings file holds other keys) and permissions.deny
@@ -484,12 +528,12 @@ after a docs, skill or model change.
 
 | Piece                                                                  | Built from                                                                                                                                                                                      |
 | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `ken-status`, run by the session-start hook as `ken status`            | `repos`, `config`, `ken task ready`: one screen so the agent never lists folders. A repo it shows as not cloned is the agent's to `ken get` before reading in it: no hook clones behind a tool. |
+| `ken-status`, run by the session-start hook as `ken status`            | `repos`, `.ken`, `ken task ready`: one screen so the agent never lists folders. A repo it shows as not cloned is the agent's to `ken get` before reading in it: no hook clones behind a tool. |
 | deny rules in the root's `.claude/settings.json`, Claude Code only     | `.repos/**/node_modules/**`, `dist`, `.next`, `coverage`, lockfiles.                                                                                                                            |
 | `ken-doctor`                                                           | `repos` plus `gh` for remote states, the lint, the strays `repos` names, clones with `AGENTS.md` and no `CLAUDE.md`, layers behind upstream.                                                    |
 | `ken-pull`                                                             | entries for unlisted clones, `desc` from `gh repo view`, through `index set`.                                                                                                                   |
 | `ken-grep`                                                             | `rg` over cloned repos in scope, paths passed explicitly; names the uncloned.                                                                                                                   |
-| `ken-promote`                                                          | `git mv` plus `index unset` and `index set --layer`.                                                                                                                                            |
+| `ken-promote`                                                          | `git mv` into a worktree of the layer, `index unset` here, `cd` there and `index set`.                                                                                                                                            |
 | `ken-jira`                                                             | Jira issue picker into `get <key> -b <issue>`; no task file involved.                                                                                                                           |
 | skills: `start-task`, `where-is`, `ingest`, `kb`, `capture`, `promote` | the flows above. A team's playbooks are skills in its layer.                                                                                                                                    |
 
@@ -573,6 +617,24 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
   The formats are owned here, and a stanza edit is one `awk` line.
 - **A scaffolding package, `create-ken`.** Copying a template out of a package is what
   `git clone` does; the prompt and `--diff` were the rest. A template is a root.
+- **Layers one level deep.** A layer whose pages link to its own layers was broken wherever
+  it was added. Hoisting removed the reason: its layers are cloned once at the top and
+  nested inside it (decision 22).
+- **Hoisting with a link per clone in each layer's `.repos/`**, pnpm's mechanism. The
+  folder is tracked, the ignore rule `.repos/*/*/*/` does not match links, and the links
+  are derived state nobody owns. The resolver knows where code is; only the links a tracked
+  layer link needs are made, and excluded locally.
+- **Transitive commands.** Adding one layer would put scripts from repos you never named on
+  your command path, npm's supply-chain problem. Pages are read; commands run from direct
+  layers only.
+- **`ken config`, `--layer`, `ken path layer|repos|bin|<file>`, `repos <key>`.** Each
+  restated a rule or reached into a layer. The file is the API, the link is the resolver,
+  `cd` is the scope, `grep -rl` finds mentions.
+- **Copy and setup in `get -b`, and the per-repo `.ken`.** Not a rule, the kernel's only
+  execution of configured commands, and a `.ken` in a clone would read as a root marker.
+  The task tool does it after `get -b`.
+- **The kernel editing `README.md`.** One line per layer in the front page is a lint rule;
+  the agent writes it, `ken lint` checks it. The kernel touches no knowledge content.
 
 ## Prior art
 
@@ -604,3 +666,7 @@ a shorter root. Windows needs `LongPathsEnabled` and `core.longpaths` regardless
 - yadm, `git-subtree`, rbenv, myrepos: one shell or Perl file wrapping git, installed by
   copying; rbenv's `rbenv-<name>` dispatch.
 - `deb822` control files and `/etc/os-release`: the stanza and `key=value` formats.
+- git's repository discovery and submodules: the nearest root is the scope, and inside a
+  nested one commands act on it.
+- pnpm: one physical store, hoisted, with the logical tree kept; npm: transitive install,
+  and the supply-chain lesson that made commands direct-only here.

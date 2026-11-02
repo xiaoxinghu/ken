@@ -1405,6 +1405,23 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(ken(['repos'], { cwd: odd }).stdout).not.toContain('worktree move')
 		})
 
+		it('a layer named root: the fix for a scope entry still writes the scope index', () => {
+			const at = join(dir, `repos-${shell}-named-root`)
+			write(join(at, '.ken'), 'layer.root=example.com/acme/team\n')
+			write(join(at, '.repos/index'), 'repo: example.com/acme/mine\n')
+			repo(join(at, '.repos/example.com/acme/team'))
+			write(join(at, '.repos/example.com/acme/team/.ken'), '')
+			write(
+				join(at, '.repos/example.com/acme/team/.repos/index'),
+				'repo: example.com/acme/theirs\n'
+			)
+			const r = ken(['repos'], { cwd: at })
+			expect(r.stdout).toContain('Run `ken index set example.com/acme/mine desc="..."`.')
+			expect(r.stdout).toContain(
+				`Run \`cd ${at}/.repos/example.com/acme/team && ken index set example.com/acme/theirs desc="..."\`.`
+			)
+		})
+
 		it('with no repo at all says so and what to run', () => {
 			const empty = join(dir, `repos-empty-${shell}`)
 			write(join(empty, '.ken'), '')

@@ -306,25 +306,27 @@ index_read() {
 # Rewrites the index file $2 by the pass in mode $1 (set, unset or drop): written beside it and
 # renamed over, so a reader never sees half of it, and nothing written when it cannot be read.
 # Writers take turns: the lock is $2.lock, a symlink to the holder's PID that ln -s makes in one
-# step, so each write reads the index as the last one left it; a dead holder's lock is removed.
+# step, so each write reads the index as the last one left it. Only its holder removes it: a
+# lock whose holder is gone is refused, since removing it could race a writer taking it anew.
 index_write() {
 	mkdir -p "$(dir_of "$2")"
 	lock=$2.lock
 	while ! ln -s "$$" "$lock" 2>/dev/null; do
-		holder=$(readlink "$lock" 2>/dev/null) || holder=
-		if [ -z "$holder" ]; then
-			if ln -s "$$" "$lock"; then break; fi
-			die "could not take the lock $lock (the reason is above), so ken cannot write $2." \
-				"Fix that, then rerun."
+		if absent "$lock"; then
+			if made=$(ln -s "$$" "$lock" 2>&1); then break; fi
+			if absent "$lock"; then die "could not take the lock $lock: $made. Fix that, then rerun."; fi
 		fi
+		holder=$(readlink "$lock" 2>/dev/null) || continue
 		if kill -0 "$holder" 2>/dev/null; then
 			sleep 1
 		elif [ "$(readlink "$lock" 2>/dev/null)" = "$holder" ]; then
-			rm -f "$lock"
+			die "$lock is the lock on $2, left by process $holder, which ended before releasing it," \
+				"so no write waiting on it would ever start. Check that no ken is running, then run" \
+				"\`rm $(q "$lock")\` and rerun."
 		fi
 	done
 	tmp=$2.tmp.$$
-	if ! index_read "$@" >"$tmp"; then
+	if ! (index_read "$@") >"$tmp"; then
 		rm -f "$tmp" "$lock"
 		exit 1
 	fi
@@ -703,6 +705,12 @@ cmd_which() {
 		"\`git -C $(q "$clone") worktree move $(q "$dir") $(q "${clone%/*}/$folder")\`."
 }
 
+# Sets worktree.useRelativePaths in the repo $1 when it is unset.
+relative_paths() {
+	git -C "$1" config --get worktree.useRelativePaths >/dev/null ||
+		git -C "$1" config worktree.useRelativePaths true
+}
+
 cmd_get() {
 	if [ $# -ne 1 ] || [ "${1#-}" != "$1" ]; then
 		die "ken get takes one repo key or git URL, got $(q "$(redact "$*")")." \
@@ -800,8 +808,11 @@ cmd_get() {
 			"replaces it. Move it aside, e.g. \`mv $(q "$clone") ~/${KEY##*/}.aside\`, then run" \
 			"\`ken get $KEY\` again.$init"
 	fi
-	if ! git -C "$clone" config --get worktree.useRelativePaths >/dev/null; then
-		git -C "$clone" config worktree.useRelativePaths true
+	# another get of an existing repo may hold git's config lock, setting the same: wait, recheck
+	if ! relative_paths "$clone" 2>/dev/null && ! { sleep 1 && relative_paths "$clone"; }; then
+		die "could not set worktree.useRelativePaths in $clone (the reason is above), which lets" \
+			"its <owner>/ folder move. Run \`git -C $(q "$clone") config worktree.useRelativePaths true\`," \
+			"then \`ken get $KEY\` again."
 	fi
 	git -C "$clone" worktree repair >&2
 	file=$SCOPE/.repos/index

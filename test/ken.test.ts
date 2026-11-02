@@ -9,6 +9,7 @@ import {
 	readFileSync,
 	readlinkSync,
 	realpathSync,
+	rmSync,
 	statSync,
 	symlinkSync,
 	writeFileSync
@@ -538,14 +539,24 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('writers take turns, so parallel sets of different repos lose none', async () => {
 			const r = fresh('')
 			const keys = [1, 2, 3, 4, 5, 6].map((i) => `github.com/acme/r${i}`)
-			// a lock left by a writer that died is cleared, not waited on forever
-			symlinkSync(String(spawnSync('true').pid), `${r.index}.lock`)
 			const all = await Promise.all(
 				keys.map((k) => kenAsync(['index', 'set', k, 'desc=R.'], r.cwd))
 			)
 			expect(all.map((a) => a.status)).toEqual(keys.map(() => 0))
 			for (const k of keys) expect(r.read()).toContain(`repo: ${k}\ndesc: R.\n`)
 			expect(readdirSync(join(r.cwd, '.repos'))).toEqual(['index'])
+		})
+
+		it('a lock whose holder is gone is refused with the rm to run, never removed by ken', () => {
+			const r = fresh('')
+			const lock = `${r.index}.lock`
+			symlinkSync(String(spawnSync('true').pid), lock)
+			const out = ken(['index', 'set', KEY, 'desc=Web.'], r)
+			expect(out.status).toBe(1)
+			expect(out.stderr).toContain(`run \`rm ${lock}\` and rerun.`)
+			expect(r.read()).toBe('')
+			rmSync(lock)
+			expect(ken(['index', 'set', KEY, 'desc=Web.'], r).status).toBe(0)
 		})
 
 		it('set of a second repo appends its stanza, keeping the first and the comment on top', () => {
@@ -822,6 +833,14 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(both.filter((r) => r.stderr.includes('ken: registered')).length).toBe(1)
 			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual(['lib'])
 			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+		})
+
+		it('two gets at once of a repo made with git init both set it up and print the path', async () => {
+			const at = fresh()
+			repo(cloneOf(at))
+			const both = await Promise.all([kenAsync(['get', KEY], at), kenAsync(['get', KEY], at)])
+			for (const r of both) expect([r.status, r.stdout]).toEqual([0, `${cloneOf(at)}\n`])
+			expect(config(cloneOf(at), 'worktree.useRelativePaths')).toBe('true\n')
 		})
 
 		it('refuses a git older than 2.48 before touching anything', () => {

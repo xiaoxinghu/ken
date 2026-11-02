@@ -305,14 +305,31 @@ index_read() {
 
 # Rewrites the index file $2 by the pass in mode $1 (set, unset or drop): written beside it and
 # renamed over, so a reader never sees half of it, and nothing written when it cannot be read.
+# Writers take turns: the lock is $2.lock, a symlink to the holder's PID that ln -s makes in one
+# step, so each write reads the index as the last one left it; a dead holder's lock is removed.
 index_write() {
 	mkdir -p "$(dir_of "$2")"
+	lock=$2.lock
+	while ! ln -s "$$" "$lock" 2>/dev/null; do
+		holder=$(readlink "$lock" 2>/dev/null) || holder=
+		if [ -z "$holder" ]; then
+			if ln -s "$$" "$lock"; then break; fi
+			die "could not take the lock $lock (the reason is above), so ken cannot write $2." \
+				"Fix that, then rerun."
+		fi
+		if kill -0 "$holder" 2>/dev/null; then
+			sleep 1
+		elif [ "$(readlink "$lock" 2>/dev/null)" = "$holder" ]; then
+			rm -f "$lock"
+		fi
+	done
 	tmp=$2.tmp.$$
 	if ! index_read "$@" >"$tmp"; then
-		rm -f "$tmp"
+		rm -f "$tmp" "$lock"
 		exit 1
 	fi
 	mv -f "$tmp" "$2"
+	rm -f "$lock"
 }
 
 # --- layers: the layer.<name>=<key> lines of a root's .ken (docs/files.md)

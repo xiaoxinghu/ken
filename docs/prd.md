@@ -96,9 +96,10 @@ one, or with an existing section. Everything else at the root is a section.
    without touching the kernel.
 7. **Registration is the tool's job.** `.repos/index` describes every repo the workspace
    knows, cloned or not. `get` writes the entry, so a clone made by `ken` always has one, and
-   `repos` names a clone that lacks one. The only writers are `index set` and `unset`, and
-   writes are validated and atomic. Whether a repo exists is the remote's business; the key
-   is inside the file, never in a file name.
+   `repos` names a clone that lacks one. The only writers are `get`, `index set` and `unset`,
+   and writes are validated, atomic and taken in turn under `.repos/index.lock`, so writers at
+   once lose nothing. Whether a repo exists is the remote's business; the key is inside the
+   file, never in a file name.
 8. **A folder's `README.md` is its index, and is read first.** The root's is the front page,
    under about 60 lines; a section's lists its pages one line each, under about 150. Front
    page, section, page: three hops, the first two small. Nothing derivable goes in: the repo

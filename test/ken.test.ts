@@ -135,6 +135,20 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 	}
 
+	const kenAsync = (args: string[], cwd: string) =>
+		new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
+			const child = spawn(shell, [KEN, ...args], { cwd, env: env() })
+			let stdout = ''
+			let stderr = ''
+			child.stdout.on('data', (d) => {
+				stdout += d
+			})
+			child.stderr.on('data', (d) => {
+				stderr += d
+			})
+			child.on('close', (status) => resolve({ status, stdout, stderr }))
+		})
+
 	describe('init', () => {
 		const outside = () => join(dir, 'outside')
 		const files = (folder: string) =>
@@ -521,6 +535,19 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(empty.read()).toBe(`repo: ${KEY}\ndesc: Web.\n`)
 		})
 
+		it('writers take turns, so parallel sets of different repos lose none', async () => {
+			const r = fresh('')
+			const keys = [1, 2, 3, 4, 5, 6].map((i) => `github.com/acme/r${i}`)
+			// a lock left by a writer that died is cleared, not waited on forever
+			symlinkSync(String(spawnSync('true').pid), `${r.index}.lock`)
+			const all = await Promise.all(
+				keys.map((k) => kenAsync(['index', 'set', k, 'desc=R.'], r.cwd))
+			)
+			expect(all.map((a) => a.status)).toEqual(keys.map(() => 0))
+			for (const k of keys) expect(r.read()).toContain(`repo: ${k}\ndesc: R.\n`)
+			expect(readdirSync(join(r.cwd, '.repos'))).toEqual(['index'])
+		})
+
 		it('set of a second repo appends its stanza, keeping the first and the comment on top', () => {
 			const r = fresh(`${OTHERS}repo: github.com/acme/api\ndesc: API.`)
 			ken(['index', 'set', KEY, 'desc=Web.'], r)
@@ -635,19 +662,6 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			spawnSync('git', ['-C', repo, 'config', '--get', name], { encoding: 'utf8', env: env() })
 				.stdout
 		const registered = (index: string) => `ken: registered ${KEY} in ${index} with no desc`
-		const kenAsync = (args: string[], cwd: string) =>
-			new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
-				const child = spawn(shell, [KEN, ...args], { cwd, env: env() })
-				let stdout = ''
-				let stderr = ''
-				child.stdout.on('data', (d) => {
-					stdout += d
-				})
-				child.stderr.on('data', (d) => {
-					stderr += d
-				})
-				child.on('close', (status) => resolve({ status, stdout, stderr }))
-			})
 		// What is at `p`, to tell that a refusal left it untouched.
 		const shape = (p: string) => {
 			const s = lstatSync(p)

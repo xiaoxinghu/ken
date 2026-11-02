@@ -914,6 +914,12 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			git(clone, 'branch', 'old', 'v1')
 			expect(ken(['get', KEY, '-b', 'old'], { cwd: at }).stdout).toBe(`${wt('old')}\n`)
 			expect(head(wt('old'))).toBe('old')
+			// a tag named main makes git shorten the default branch to heads/main, a branch of its own
+			git(clone, 'tag', 'main')
+			expect(ken(['get', KEY, '-b', 'heads/main'], { cwd: at }).stdout).toBe(
+				`${wt('heads-main')}\n`
+			)
+			expect(ken(['get', KEY, '-b', 'main'], { cwd: at }).stdout).toBe(`${clone}\n`)
 		})
 
 		it('--from starts a new branch there, and is refused for one that exists', () => {

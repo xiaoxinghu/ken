@@ -728,12 +728,14 @@ relative_paths() {
 # The -b half of get: prints the worktree of $branch beside $clone, $clone$folder, made when
 # missing (PRD decision 2), or the clone for the default branch. cmd_get has run up to it.
 get_worktree() {
-	if ! def=$(git -C "$clone" symbolic-ref -q --short HEAD); then
+	# the full ref, as --short turns main into heads/main when a tag is named main too
+	if ! def=$(git -C "$clone" symbolic-ref -q HEAD); then
 		name=$(git -C "$clone" symbolic-ref -q --short refs/remotes/origin/HEAD) || name=origin/main
 		die "$clone has a detached HEAD, so it names no default branch, and the clone holds the default" \
 			"branch for every worktree to start from. Run \`git -C $(q "$clone") switch ${name#origin/}\`" \
 			"(or the default branch's name), then \`$again\` again."
 	fi
+	def=${def#refs/heads/}
 	exists=
 	if [ "$branch" = "$def" ] || git -C "$clone" show-ref -q --verify "refs/heads/$branch"; then exists=1; fi
 	case $exists$opts in 1*' --from '*)

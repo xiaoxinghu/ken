@@ -4,10 +4,10 @@ The files `ken` reads and writes, and their grammar. Two files, two formats, bot
 per fact, chosen so a shell script reads and edits them with `awk` and `sed` and nothing
 else. This document is the spec; `docs/prd.md` says what the files mean.
 
-| File                  | Format    | Holds                                                 |
-| --------------------- | --------- | ----------------------------------------------------- |
+| File                  | Format    | Holds                                                                            |
+| --------------------- | --------- | -------------------------------------------------------------------------------- |
 | `<root>/.ken`         | key=value | the root's settings, and other tools' keys; its presence makes the folder a root |
-| `<root>/.repos/index` | stanzas   | one record per repo, cloned or not                    |
+| `<root>/.repos/index` | stanzas   | one record per repo, cloned or not                                               |
 
 ## Rules for both
 

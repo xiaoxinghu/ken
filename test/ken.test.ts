@@ -120,7 +120,8 @@ beforeAll(() => {
 			'.repos/github.com/team-a/AGENTS.md': 'team a\n',
 			'.repos/github.com/shared/AGENTS.md': 'shared from a\n',
 			'.agents/skills/sa/SKILL.md': 'skill a\n',
-			'.agents/skills/review notes/SKILL.md': 'notes\n'
+			'.agents/skills/review notes/SKILL.md': 'notes\n',
+			'.repos/index': 'repo: github.com/team-a/notes\ndesc: Team A notes.\n'
 		}
 	)
 	layerRemote(
@@ -444,7 +445,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(readFileSync(join(`${la}.feat`, 'B/C/c.md'), 'utf8')).toBe('c\n')
 			// the link to the hoisted clone is excluded; the owner and skill links are the worktree's to track
 			expect(status(`${la}.feat`)).not.toContain('example.com')
-			expect(r.stderr).toContain(`Track the links at ${la}.feat with`)
+			expect(r.stderr).toContain(`Track the changes at ${la}.feat with`)
 		}, 20_000)
 
 		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {
@@ -478,6 +479,109 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			}
 			for (const line of ssh({ GIT_SSH: `${bin}/wrap` })) expect(line).not.toContain('BatchMode')
 		})
+	})
+
+	describe('layer', () => {
+		const outside = () => join(dir, 'outside')
+		const fresh = (name: string) => {
+			const at = join(dir, `${name}-${shell}`)
+			write(join(at, '.ken'), '# mine\norg.me=github.com/me')
+			mkdirSync(join(at, 'systems'))
+			expect(ken(['init', at], { cwd: outside() }).status).toBe(0)
+			return at
+		}
+
+		it('add links the layer, appends its line, reconciles; remove undoes all but the clones', () => {
+			const at = fresh('layer-add')
+			const ken0 = '# mine\norg.me=github.com/me\n'
+			const r = ken(['layer', 'add', 'example.com/acme/la'], { cwd: at })
+			expect(r.status).toBe(0)
+			expect(readlinkSync(join(at, 'la'))).toBe('.repos/example.com/acme/la')
+			expect(readFileSync(join(at, 'la/B/C/c.md'), 'utf8')).toBe('c\n')
+			expect(readFileSync(join(at, '.ken'), 'utf8')).toBe(`${ken0}layer.la=example.com/acme/la\n`)
+			expect(readFileSync(join(at, '.repos/github.com/team-a/AGENTS.md'), 'utf8')).toBe('team a\n')
+			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
+			expect(r.stdout).toContain(`git -C ${at} add -A -- la .ken .repos/index .repos/`)
+			expect(r.stdout).toContain('under ## Layers')
+			const repos = ken(['repos', '--porcelain'], { cwd: at }).stdout
+			expect(repos).toContain('github.com/team-a/notes\tTeam A notes.\tla\tfalse\t\n')
+			// by URL, under another name
+			const url = ken(['layer', 'add', 'https://example.com/acme/lc.git', '--as', 'handbook'], {
+				cwd: at
+			})
+			expect(url.status).toBe(0)
+			expect(readlinkSync(join(at, 'handbook'))).toBe('.repos/example.com/acme/lc')
+			expect(readFileSync(join(at, 'handbook/c.md'), 'utf8')).toBe('c\n')
+			expect(readFileSync(join(at, '.ken'), 'utf8')).toContain(
+				'\nlayer.handbook=example.com/acme/lc\n'
+			)
+			// remove both: the lines, links and owner and skill links go, the clones stay
+			for (const name of ['handbook', 'la']) {
+				const gone = ken(['layer', 'remove', name], { cwd: at })
+				expect(gone.status).toBe(0)
+				expect(gone.stdout).toContain(`git -C ${at} add -A -- .ken ${name}`)
+			}
+			expect(readFileSync(join(at, '.ken'), 'utf8')).toBe(ken0)
+			for (const name of ['la', 'handbook', '.agents/skills/sa'])
+				expect(existsSync(join(at, name))).toBe(false)
+			for (const team of ['a', 'b', 'c'])
+				expect(existsSync(join(at, `.repos/github.com/team-${team}/AGENTS.md`))).toBe(false)
+			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
+			const last = ken(['layer', 'remove', 'la'], { cwd: at })
+			expect(last.status).toBe(0)
+			expect(last.stdout).toContain(`la is not a layer of ${at}, so there is nothing to remove.`)
+		}, 30_000)
+
+		it('refuses a bad, reserved or taken name and a layer already added, before any write', () => {
+			const at = fresh('layer-refused')
+			expect(ken(['layer', 'add', 'example.com/acme/la'], { cwd: at }).status).toBe(0)
+			symlinkSync('nowhere', join(at, 'dangling'))
+			const before = readFileSync(join(at, '.ken'), 'utf8')
+			const index = readFileSync(join(at, '.repos/index'), 'utf8')
+			const cases: [string[], string][] = [
+				[['example.com/acme/la', '--as', 'other'], 'is a layer of'],
+				[['example.com/acme/lib', '--as', 'README.md'], 'is a reserved name'],
+				[['example.com/acme/lib', '--as', 'claude.MD'], 'is a reserved name'],
+				[['example.com/acme/lib', '--as', '.bin'], 'is a reserved name'],
+				[['example.com/acme/lib', '--as', 'systems'], `${at}/systems is there already`],
+				[['example.com/acme/lib', '--as', 'dangling'], `${at}/dangling is there already`],
+				[['example.com/acme/lib', '--as', 'la'], 'is the layer of example.com/acme/la in'],
+				[['example.com/acme/lib', '--as', 'a/b'], 'is not a layer name']
+			]
+			for (const [args, says] of cases) {
+				const r = ken(['layer', 'add', ...args], { cwd: at })
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(says)
+				expect(r.stderr).toMatch(/`ken (init|layer add) /)
+			}
+			expect(readFileSync(join(at, '.ken'), 'utf8')).toBe(before)
+			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(index)
+			expect(existsSync(join(at, '.repos/example.com/acme/lib'))).toBe(false)
+		}, 20_000)
+
+		it('completes an add that stopped after the link, and adds inside a layer to the layer', () => {
+			const at = fresh('layer-halfway')
+			symlinkSync('.repos/example.com/acme/la', join(at, 'la'))
+			expect(ken(['layer', 'add', 'example.com/acme/la'], { cwd: at }).status).toBe(0)
+			expect(readFileSync(join(at, '.ken'), 'utf8')).toContain('\nlayer.la=example.com/acme/la\n')
+			expect(readFileSync(join(at, 'la/page.md'), 'utf8')).toBe('a\n')
+			// inside the layer: its .ken and link, the clone hoisted to the top
+			const la = join(at, '.repos/example.com/acme/la')
+			const r = ken(['layer', 'add', 'example.com/acme/lib'], { cwd: join(at, 'la') })
+			expect(r.status).toBe(0)
+			expect(readFileSync(join(la, '.ken'), 'utf8')).toBe(
+				'layer.B=example.com/acme/lb\nlayer.lib=example.com/acme/lib\n'
+			)
+			expect(readlinkSync(join(la, 'lib'))).toBe('.repos/example.com/acme/lib')
+			expect(readFileSync(join(at, 'la/lib/README.md'), 'utf8')).toBe('lib\n')
+			expect(existsSync(join(at, '.repos/example.com/acme/lib/.git'))).toBe(true)
+			expect(readFileSync(join(at, '.ken'), 'utf8')).not.toContain('lib')
+			const gone = ken(['layer', 'remove', 'lib'], { cwd: la })
+			expect(gone.status).toBe(0)
+			expect(existsSync(join(la, 'lib'))).toBe(false)
+			expect(existsSync(join(la, '.repos/example.com/acme/lib'))).toBe(false)
+			expect(readFileSync(join(la, '.ken'), 'utf8')).toBe('layer.B=example.com/acme/lb\n')
+		}, 20_000)
 	})
 
 	describe('path', () => {
@@ -1447,7 +1551,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	describe('help', () => {
 		it('carries the same examples as <command> --help, and the external commands found', () => {
 			const all = ken(['help']).stdout
-			for (const name of ['init', 'path', 'which', 'get', 'repos', 'index']) {
+			for (const name of ['init', 'path', 'which', 'get', 'repos', 'index', 'layer']) {
 				const page = ken([name, '--help'])
 				expect(page.status).toBe(0)
 				expect(ken(['help', name]).stdout).toBe(page.stdout)

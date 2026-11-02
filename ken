@@ -18,7 +18,7 @@ unset CDPATH
 nl='
 '
 tab=$(printf '\t')
-BUILTINS='init path which get repos index help'
+BUILTINS='init path which get repos index layer help'
 
 # --- prelude
 
@@ -379,6 +379,17 @@ EOF
 	if [ -n "$found" ]; then printf '%s\n' "${found#"$nl"}"; fi
 }
 
+# Rewrites the scope's .ken without the lines of layer $1, then with the line $2 when set, every
+# other line kept: written beside and renamed over (docs/files.md, "Rules for both").
+ken_write() {
+	tmp=$SCOPE/.ken.tmp.$$
+	if ! awk -v p="layer.$1=" 'index($0, p) != 1' "$SCOPE/.ken" >"$tmp" || ! printf '%s' "${2:+$2$nl}" >>"$tmp"; then
+		rm -f "$tmp"
+		die "could not write $SCOPE/.ken (the reason is above), so it is unchanged. Fix that, then rerun."
+	fi
+	mv -f "$tmp" "$SCOPE/.ken"
+}
+
 # Prints "<section><tab><key>" for each layer reachable from root $1 and cloned at the top, in
 # walk order: each layer, then its own (PRD decision 22), a cycle visited once; its section is
 # the path of its link from $1, as atlas/handbook. An offline layer is left out with its
@@ -439,8 +450,9 @@ link_in() {
 # one unattended at the top as get does; one that cannot be cloned is offline, said on stderr,
 # and the walk goes on. Then links each layer's layers into its .repos/, excluded locally, and
 # at the scope each reachable layer's owner AGENTS.md and each direct layer's skills where the
-# scope has none, removing such links into what is no longer reachable. find_root has run; it
-# runs in a subshell, so call as reconcile || exit 1.
+# scope has none, removing such links into what is no longer reachable. TRACK, when set, holds
+# more paths for the git add it prints. find_root has run; it runs in a subshell, so call as
+# reconcile || exit 1.
 reconcile() (
 	GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
 	GIT_HTTP_LOW_SPEED_LIMIT=${GIT_HTTP_LOW_SPEED_LIMIT:-1000} GIT_HTTP_LOW_SPEED_TIME=${GIT_HTTP_LOW_SPEED_TIME:-30}
@@ -500,7 +512,7 @@ reconcile() (
 		done
 	done
 	# at the scope: links into what is no longer reachable go first, so a new layer can take their place
-	up3=$(up_to_top 3 "$SCOPE") up2=$(up_to_top 2 "$SCOPE") track='' skilled=' '
+	up3=$(up_to_top 3 "$SCOPE") up2=$(up_to_top 2 "$SCOPE") track=${TRACK-} skilled=' '
 	for key in $walked; do
 		case $direct in *" $key "*) skilled="$skilled$key " ;; esac
 	done
@@ -534,7 +546,7 @@ reconcile() (
 		done
 	done
 	if [ -n "$track" ]; then
-		printf 'Track the links at %s with `git -C %s add -A --%s`.\n' "$SCOPE" "$(q "$SCOPE")" "$track"
+		printf 'Track the changes at %s with `git -C %s add -A --%s`.\n' "$SCOPE" "$(q "$SCOPE")" "$track"
 	fi
 )
 
@@ -642,6 +654,25 @@ written beside and renamed over. For a layer'"'"'s index, cd into the layer firs
 ken index set github.com/acme/join-web tags="sales join" depends_on=join-api
 ken index unset github.com/acme/join-web tags depends_on
 ken index unset github.com/acme/join-web'
+		;;
+	layer)
+		usage='layer add <url|key> [--as <name>] | remove <name>'
+		summary="Add another root as a layer of the scope, a section linked to its clone, or remove one."
+		details='  add <url|key> [--as <name>]  get it at the top, link <name> (default the repo name) to
+                               .repos/<key>, append layer.<name>=<key> to .ken, and reconcile:
+                               its layers cloned and linked inside it, its owner AGENTS.md and
+                               skills linked here where none are. Refused before anything is
+                               written: a name that is reserved, taken by anything or by another
+                               layer, or a key that is a layer already. A rerun finishes an add
+                               that failed halfway.
+  remove <name>                delete its .ken line and its link, then reconcile. The clones
+                               stay: rm -rf "$(ken path code <key>)" deletes one.
+The line for a layer on the front page, README.md under ## Layers, is yours to write; ken
+lint checks it. To change a layer'"'"'s own layers, cd into it.'
+		examples='ken layer add github.com/acme/sales-atlas
+ken layer add git@github.com:acme/handbook.git --as handbook
+cd sales-atlas && ken layer add github.com/acme/runbooks
+ken layer remove handbook'
 		;;
 	help)
 		usage='help [<command>]'
@@ -1318,6 +1349,121 @@ cmd_index() {
 		index_write unset "$file" "$KEY" "$*"
 		printf 'Removed %s from the entry for %s, in %s.\n' "$(printf '%s' "$*" | sed 's/ /, /g')" "$KEY" "$file"
 	fi
+}
+
+cmd_layer() {
+	sub=${1-}
+	if [ $# -gt 0 ]; then shift; fi
+	case $sub in
+	add) layer_add "$@" ;;
+	remove) layer_remove "$@" ;;
+	*)
+		die "ken layer takes add or remove, got $(q "$(redact "$sub")"). Run e.g." \
+			'`ken layer add github.com/acme/sales-atlas`, or `ken layer --help` for the forms.'
+		;;
+	esac
+}
+
+# Every refusal comes before anything is written; then each step checks before it acts, so a
+# rerun finishes an add that failed halfway: the link made but no .ken line yet.
+layer_add() {
+	asked='' name=''
+	while [ $# -gt 0 ]; do
+		if [ "$1" = --as ] && [ $# -ge 2 ]; then
+			name=$2
+			shift 2
+			continue
+		fi
+		if [ -n "$asked" ] || [ "${1#-}" != "$1" ]; then
+			die "ken layer add takes one repo key or git URL, then --as <name>, not $(q "$(redact "$1")")." \
+				'Run e.g. `ken layer add github.com/acme/sales-atlas --as atlas`.'
+		fi
+		asked=$1
+		shift
+	done
+	if [ -z "$asked" ]; then die 'ken layer add needs a repo key or git URL. Run e.g. `ken layer add github.com/acme/sales-atlas`.'; fi
+	parse_key "$asked"
+	name=${name:-${KEY##*/}} again="ken layer add $(q "$(redact "$asked")")"
+	find_root
+	other="Run \`$again --as <other-name>\`"
+	case $name in . | .. | *[!A-Za-z0-9_.-]*)
+		die "$(q "$name") is not a layer name, which is a folder at $SCOPE and the key layer.<name> in" \
+			"its .ken, so letters, digits, ., _ and -, neither . nor ..; $other."
+		;;
+	esac
+	reserved=' .repos .bin .ken .agents .claude .codex .pi .envrc agents.md claude.md log.md readme.md '
+	case $reserved in *" $(lower "$name") "*)
+		die "$name is a reserved name at a root, in any case, the kernel's, a harness's or the front" \
+			"page's, so it cannot be a layer's section. $other."
+		;;
+	esac
+	layers=$(layer_lines "$SCOPE") || exit 1
+	while IFS=$tab read -r was its; do
+		if [ "$its" = "$KEY" ]; then
+			die "$KEY is a layer of $SCOPE already, as $was, and one clone is one section. Run" \
+				"\`ken init $(q "$SCOPE")\` to finish installing it, or \`ken layer remove $was\` first to rename it."
+		elif [ "$was" = "$name" ]; then
+			die "$name is the layer of $its in $SCOPE/.ken already, and a name is one section." \
+				"$other, or \`ken layer remove $name\` first."
+		fi
+	done <<EOF
+$layers
+EOF
+	at=$SCOPE/$name
+	if ! absent "$at" && [ "$(readlink "$at" 2>/dev/null)" != ".repos/$KEY" ]; then
+		die "$at is there already, so $name cannot be the layer's section, a link ken makes over" \
+			"nothing. $other."
+	fi
+	(cmd_get "$asked" >/dev/null) ||
+		die "so $name is not added, and nothing but what get said was written. Fix that, then run \`$again\` again."
+	if absent "$at"; then
+		ln -s ".repos/$KEY" "$at"
+		printf 'Linked %s -> .repos/%s\n' "$at" "$KEY"
+	fi
+	ken_write "$name" "layer.$name=$KEY"
+	printf 'Added layer.%s=%s to %s/.ken.\n' "$name" "$KEY" "$SCOPE"
+	TRACK=" $(q "$name") .ken"
+	if [ -f "$SCOPE/.repos/index" ]; then TRACK="$TRACK .repos/index"; fi
+	reconcile || exit 1
+	printf '%s\n' "Add a line for $name under ## Layers in $SCOPE/README.md, what it is and who keeps" \
+		'it: the front page lists every layer, ken edits no page, and `ken lint` checks it.'
+}
+
+layer_remove() {
+	if [ $# -ne 1 ]; then die "ken layer remove takes one layer name, got $#. Run e.g. \`ken layer remove sales-atlas\`."; fi
+	find_root
+	layers=$(layer_lines "$SCOPE") || exit 1
+	key=''
+	while IFS=$tab read -r was its; do
+		if [ -n "$was" ] && [ "$was" = "$1" ]; then key=$its; fi
+	done <<EOF
+$layers
+EOF
+	if [ -z "$key" ]; then
+		names=$(printf '%s\n' "$layers" | cut -f1 | paste -s -d ' ' -)
+		printf '%s is not a layer of %s, so there is nothing to remove. Its layers: %s.\n' \
+			"$(q "$1")" "$SCOPE" "${names:-none}"
+		return
+	fi
+	ken_write "$1" ''
+	printf 'Removed layer.%s=%s from %s/.ken.\n' "$1" "$key" "$SCOPE"
+	TRACK=' .ken' at=$SCOPE/$1
+	if [ "$(readlink "$at" 2>/dev/null)" = ".repos/$key" ]; then
+		rm -f "$at"
+		printf 'Removed the link %s.\n' "$at"
+		TRACK="$TRACK $(q "$1")"
+	elif ! absent "$at"; then
+		printf 'Left %s alone: it is not the link to .repos/%s ken made.\n' "$at" "$key"
+	fi
+	# in a layer, the link to the hoisted clone; reconcile makes it again if another line needs it
+	at=$SCOPE/.repos/$key
+	if [ "$SCOPE" != "$TOP" ] && [ "$(readlink "$at" 2>/dev/null)" = "$(up_to_top 3 "$SCOPE")/.repos/$key" ]; then
+		rm -f "$at"
+		printf 'Removed the link %s.\n' "$at"
+	fi
+	reconcile || exit 1
+	printf '%s\n' "The clone of $key stays at $TOP/.repos/$key, with its worktrees and any work in them." \
+		"When no root on this machine uses it, delete it with \`rm -rf \"\$(ken path code $key)\"\`."
 }
 
 cmd_help() {

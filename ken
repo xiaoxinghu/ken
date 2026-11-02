@@ -1,0 +1,411 @@
+#!/bin/sh
+# ken: the kernel of a ken root. One POSIX sh file; its only dependency is git.
+# The spec is docs/prd.md, "The kernel"; the files it reads are docs/files.md.
+#
+# Hazards, designed around everywhere below:
+# - An exit inside $(...) ends only the subshell, so a function that can die is called as
+#   x=$(f) || exit 1, or sets variables in this shell instead of printing.
+# - A && B || C is not if-then-else: C runs when B fails too. Write if.
+# - sed -i, stat and readlink -f differ between macOS and GNU, so they are not used.
+# - Paths pass through git with -z.
+# - CDPATH makes cd go elsewhere and print, so it is unset.
+# - sh has no local: a function's variables are global, so each is named apart from its
+#   callers'.
+# shellcheck disable=SC2016 # backquotes in messages are commands to run, not expansions
+set -eu
+unset CDPATH
+
+nl='
+'
+tab=$(printf '\t')
+BUILTINS='path help'
+
+# --- prelude
+
+die() {
+	printf 'ken: %s\n' "$*" >&2
+	exit 1
+}
+
+# $1 as one shell word: as is when nothing in it is special to a shell, else single-quoted.
+q() {
+	case $1 in
+	'' | *[!A-Za-z0-9_./@%+=:,-]*) printf "'%s'" "$(printf '%s\n' "$1" | sed "s/'/'\\\\''/g")" ;;
+	*) printf '%s' "$1" ;;
+	esac
+}
+
+# The real path of the folder $1: symlinks resolved, and on a case-insensitive disk the
+# case as stored, so roots compare as real paths (PRD decision 15).
+real() { (cd -P -- "$1" && pwd -P); }
+
+lower() { printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# $1 without the userinfo (user:token@) of any URL in it, so a message never shows a secret.
+redact() {
+	printf '%s\n' "$1" | sed -E \
+		-e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/[:space:]]*@#\1#g' \
+		-e 's#(^|[[:space:]])[^/:[:space:]]*@([^@:/[:space:]]+:)#\1\2#g'
+}
+
+dir_of() {
+	case $1 in
+	*/*) printf '%s\n' "${1%/*}" ;;
+	*) printf '.\n' ;;
+	esac
+}
+
+# --- the root
+
+# The root this file lives in as <root>/.bin/ken, through any symlinks to it, else nothing.
+script_root() {
+	self=$0
+	while [ -L "$self" ]; do
+		link=$(readlink "$self")
+		case $link in
+		/*) self=$link ;;
+		*) self=$(dir_of "$self")/$link ;;
+		esac
+	done
+	bin=$(real "$(dir_of "$self")")
+	case $bin in
+	*/.bin) if [ -f "${bin%/.bin}/.ken" ]; then printf '%s\n' "${bin%/.bin}"; fi ;;
+	esac
+}
+
+# Sets SCOPE, the root ken acts on, and TOP, the outermost root reached from it only through
+# .repos/ folders, whose .repos/ holds every checkout (PRD decision 20). Both are real paths.
+find_root() {
+	if [ -n "${KEN_ROOT-}" ]; then
+		dir=$KEN_ROOT from=KEN_ROOT
+	else
+		dir=$(pwd -P) from="the nearest .ken above the current folder"
+		while [ -n "$dir" ] && [ ! -f "$dir/.ken" ]; do dir=${dir%/*}; done
+		if [ -z "$dir" ]; then dir=$(script_root) from="the root this ken lives in, $0"; fi
+		if [ -z "$dir" ]; then dir=$HOME/ken from="the default, ~/ken"; fi
+	fi
+	if [ ! -d "$dir" ]; then
+		if [ -e "$dir" ]; then why='is not a folder'; else why='does not exist'; fi
+		die "the ken root $dir (from $from) $why, and every ken command acts on a root." \
+			"Run \`ken init $(q "$dir")\` to make one there, cd into a folder holding .ken," \
+			"or set KEN_ROOT to a root."
+	fi
+	SCOPE=$(real "$dir")
+	TOP=$SCOPE
+	while :; do
+		case $TOP in
+		*/.repos/*) up=${TOP%/.repos/*} ;;
+		*) break ;;
+		esac
+		if [ ! -f "$up/.ken" ]; then break; fi
+		TOP=$up
+	done
+}
+
+# --- keys and branches
+
+# Whether $1 is a repo key: <host>/<owner>/<repo>, lowercase, each part [a-z0-9._-], neither
+# . nor .. (PRD decision 2).
+is_key() {
+	case /$1/ in */./* | */../*) return 1 ;; esac
+	case $1 in
+	*[!a-z0-9._/-]* | */*/*/*) return 1 ;;
+	?*/?*/?*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# Sets KEY and URL from a key or a git URL (https, ssh or scp-style). A URL is kept as given,
+# for git, and loses its .git in the key; a key alone clones from https://<key>.git.
+# shellcheck disable=SC2034 # URL is read by the commands that clone
+parse_key() {
+	KEY=$(lower "$1") URL=$1
+	case $KEY in
+	*"$nl"*) KEY= ;;
+	[a-z]*://*)
+		KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^[a-z][a-z0-9+.-]*://([^/]*@)?([^/:@]*)(:[0-9]*)?/#\2/#' -e 's#\.git$##')
+		;;
+	*@*:*) KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^[^/:]*@([^@:/]+):#\1/#' -e 's#\.git$##') ;;
+	*) URL=https://$KEY.git ;;
+	esac
+	if ! is_key "$KEY"; then
+		die "$(q "$(redact "$1")") is not a repo key or git URL, so it names no folder under .repos/." \
+			"A key is <host>/<owner>/<repo> with one slash between each part, e.g. github.com/acme/join-web;" \
+			"a URL is https://github.com/acme/join-web.git, ssh://git@github.com/acme/join-web.git" \
+			"or git@github.com:acme/join-web.git. GitLab subgroups (an owner with slashes) are not supported."
+	fi
+}
+
+# The folder of branch $1's worktree beside the clone, .repos/<key>.<folder>: / as -.
+# Call as f=$(branch_folder "$b") || exit 1.
+branch_folder() {
+	case $1 in
+	@ | *@\{*) checked= ;;
+	*) checked=$(git check-ref-format --branch "$1" 2>/dev/null) || checked= ;;
+	esac
+	if [ "$checked" != "$1" ] || [ -z "$1" ]; then
+		die "$(q "$(redact "$1")") is not a branch name git accepts (git check-ref-format --branch)," \
+			"so no worktree can hold it. A branch name has no empty part between slashes, no part that" \
+			"starts with . or ends in .lock, no .., @{, space, control character or any of ~^:?*[\\," \
+			"does not start with - or end with ., and is not HEAD or @. Pick one such as feat/login."
+	fi
+	printf '%s\n' "$1" | tr / -
+}
+
+# --- builtins: each one's help, then what it runs
+
+# Sets usage, summary, details and examples for the builtin $1; fails for any other name.
+about() {
+	details=
+	case $1 in
+	path)
+		usage='path root | code <key> [<branch>] | <key>:<path>[#<symbol>]'
+		summary='Print a path, whether or not it exists. Nobody pastes absolute paths.'
+		details='  root                     the scope: the nearest root, as a real path
+  code <key> [<branch>]    the clone, <top>/.repos/<key>, or the worktree of <branch> beside
+                           it, <top>/.repos/<key>.<branch> with / as -. <key> is
+                           <host>/<owner>/<repo> or a git URL. The top is the outermost root
+                           reached through .repos/ folders: it holds every checkout.
+  <key>:<path>[#<symbol>]  a code reference: <clone>/<path> when the repo is cloned, the
+                           symbol yours to find in the file. Not cloned: https://<key>.git,
+                           and stderr says to run `ken get <key>`; exit 0.'
+		examples='ken path root
+ken path code github.com/acme/join-web
+ken path code github.com/acme/join-web feat/login   # .../join-web.feat-login
+cd "$(ken path code git@github.com:acme/join-web.git PROJ-123)"
+ken path github.com/acme/join-web:src/join.ts#submit'
+		;;
+	help)
+		usage='help [<command>]'
+		summary='Print every command with examples, or one in full as `ken <command> --help` does.'
+		examples='ken help
+ken help path'
+		;;
+	*) return 1 ;;
+	esac
+}
+
+indent() { printf '%s\n' "$2" | sed "s/^/$1/"; }
+
+# What `ken help <name>` and `ken <name> --help` print; about has run.
+full_help() {
+	printf 'ken %s\n\n%s\n' "$usage" "$summary"
+	if [ -n "$details" ]; then printf '\n%s\n' "$details"; fi
+	printf '\nExamples:\n'
+	indent '  ' "$examples"
+}
+
+cmd_path() {
+	case ${1-} in
+	root)
+		if [ $# -ne 1 ]; then die 'ken path root takes no arguments. Run `ken path root`.'; fi
+		find_root
+		printf '%s\n' "$SCOPE"
+		;;
+	code)
+		if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+			die "ken path code takes <key> [<branch>], got $(($# - 1)) arguments." \
+				'Run e.g. `ken path code github.com/acme/join-web feat/login`.'
+		fi
+		parse_key "$2"
+		folder=
+		if [ $# -eq 3 ]; then folder=.$(branch_folder "$3") || exit 1; fi
+		find_root
+		printf '%s\n' "$TOP/.repos/$KEY$folder"
+		;;
+	*:*)
+		if [ $# -ne 1 ]; then
+			die "ken path takes one reference, got $(q "$(redact "$*")"). Quote a path with spaces." \
+				'Run `ken path --help` for the forms.'
+		fi
+		parse_key "${1%%:*}"
+		rest=${1#*:} rel=${rest%%#*} depth=0
+		set -f
+		IFS=/
+		for part in $rel; do
+			case $part in
+			..) depth=$((depth - 1)) ;;
+			'' | .) ;;
+			*) depth=$((depth + 1)) ;;
+			esac
+			if [ $depth -lt 0 ]; then break; fi
+		done
+		unset IFS
+		set +f
+		if [ $depth -lt 0 ]; then
+			die "$(q "$(redact "$1")") points outside its repo: the path after the colon is relative to" \
+				"the repo's root and cannot climb out of it. Write it as $KEY:<path>[#<symbol>]."
+		fi
+		find_root
+		clone=$TOP/.repos/$KEY
+		if [ -d "$clone" ]; then
+			printf '%s\n' "$clone${rel:+/$rel}"
+		else
+			printf 'https://%s.git\n' "$KEY"
+			printf 'ken: %s is not cloned here, so %s has no local path; printed its URL instead. %s\n' \
+				"$KEY" "${rel:-its root}" \
+				"Run \`ken get $KEY\` to clone it, then \`ken path $(q "$1")\` again." >&2
+		fi
+		;;
+	*)
+		die "ken path does not take $(q "$(redact "${1-}")"): it takes root, code <key> [<branch>]," \
+			'or a code reference <key>:<path>[#<symbol>]. Run `ken path --help` for what each prints.'
+		;;
+	esac
+}
+
+cmd_help() {
+	if [ $# -gt 1 ]; then die 'ken help takes one command. Run e.g. `ken help path`.'; fi
+	if [ $# -eq 1 ]; then
+		if about "$1"; then
+			full_help
+			return
+		fi
+		shown=$(q "$(redact "$1")")
+		die "$shown is not a builtin, so ken help has no page for it. If it is an external" \
+			"command, run \`ken $shown --help\`; run \`ken help\` for every command."
+	fi
+	cat <<'EOF'
+ken: the kernel of a ken root, a workspace that is a knowledge base with every checkout
+inside it at .repos/<host>/<owner>/<repo>, and each branch beside it at <repo>.<branch>.
+
+Usage: ken <command> [<args>]
+
+Commands:
+EOF
+	for name in $BUILTINS; do
+		about "$name"
+		printf '  %s\n' "$usage"
+		indent '      ' "$summary$nl$examples"
+	done
+	cat <<'EOF'
+  <name> [<args>]
+      Run the first executable ken-<name> in the scope's .bin/, each direct layer's .bin/
+      in .ken order, then PATH, with KEN_ROOT set to the scope. A builtin always wins.
+
+EOF
+	if err=$({ find_root && places; } 2>&1); then
+		find_root
+		places
+		externals
+		printf '\nHere the scope is %s and the top is %s.\n' "$SCOPE" "$TOP"
+	else
+		printf 'External commands: none listed, because %s\n' "${err#ken: }"
+	fi
+	cat <<'EOF'
+The scope is KEN_ROOT, else the nearest folder holding .ken above the current one, else the
+root this ken lives in (<root>/.bin/ken, through a symlink on PATH), else ~/ken.
+Run `ken <command> --help` for its forms.
+EOF
+}
+
+# --- external commands (PRD decision 10)
+
+# Sets PLACES: where ken-<name> is looked for, in order, one "<folder><tab><from>" per line:
+# the scope's .bin/, each direct layer's in .ken order, then PATH. find_root has run.
+places() {
+	PLACES="$SCOPE/.bin${tab}the scope"
+	if [ -f "$SCOPE/.ken" ]; then
+		lines=$(sed -n '/^layer\./{=;p;}' "$SCOPE/.ken")
+		while read -r n && read -r line; do
+			layer=${line%%=*} key=${line#*=}
+			layer=${layer#layer.}
+			case $line in *=*) ;; *) key= ;; esac
+			case $layer in '' | *[!A-Za-z0-9_.-]*) key= ;; esac
+			if ! is_key "$key"; then
+				die "$SCOPE/.ken line $n, $(q "$(redact "$line")"), is not a layer line ken can read," \
+					"so ken cannot tell where that layer's commands are. It expects" \
+					"layer.<name>=<host>/<owner>/<repo>, lowercase, such as" \
+					"layer.sales-atlas=github.com/acme/sales-atlas. Fix or delete that line."
+			fi
+			PLACES=$PLACES$nl$TOP/.repos/$key/.bin${tab}layer\ $layer
+		done <<EOF
+$lines
+EOF
+	fi
+	set -f
+	IFS=:
+	# an empty PATH entry is the current folder, as in any shell; the : added keeps a last one
+	search=$PATH:
+	for entry in $search; do PLACES=$PLACES$nl${entry:-.}${tab}PATH; done
+	unset IFS
+	set +f
+}
+
+# Prints the external commands `ken <name>` runs, by where each was found. places has run.
+externals() {
+	seen=" $BUILTINS " found=
+	while IFS=$tab read -r dir from; do
+		names=
+		for file in "$dir"/ken-*; do
+			name=${file##*/ken-}
+			if [ -n "$name" ] && [ -f "$file" ] && [ -x "$file" ]; then
+				case $seen in
+				*" $name "*) ;;
+				*) seen="$seen$name " names="$names, $name" ;;
+				esac
+			fi
+		done
+		if [ -n "$names" ]; then found="$found$nl  $from, $dir: ${names#, }"; fi
+	done <<EOF
+$PLACES
+EOF
+	if [ -n "$found" ]; then
+		printf 'External commands, run as `ken <name>`, by where their ken-<name> was found:%s\n' "$found"
+	else
+		printf 'External commands: none found. Add one as an executable ken-<name> in %s.\n' "$SCOPE/.bin"
+	fi
+}
+
+# Runs the first executable ken-$1 found with the rest of the arguments, by exec, so signals and
+# the exit code are its own, with KEN_ROOT the real scope.
+dispatch() {
+	name=$1
+	shift
+	find_root
+	places
+	run='' plain='' looked=''
+	while IFS=$tab read -r dir from; do
+		looked="$looked$nl  $dir  ($from)"
+		file=$dir/ken-$name
+		case $name in '' | */*) continue ;; esac
+		if [ -f "$file" ] && [ -x "$file" ]; then
+			run=$file
+			break
+		fi
+		if [ -f "$file" ] && [ -z "$plain" ]; then plain=$file; fi
+	done <<EOF
+$PLACES
+EOF
+	if [ -n "$run" ]; then
+		KEN_ROOT=$SCOPE
+		export KEN_ROOT
+		exec "$run" "$@"
+	fi
+	shown=$(q "$(redact "$name")")
+	if [ -n "$plain" ]; then
+		die "$plain would run as \`ken $shown\`, but it is not executable." \
+			"Run \`chmod +x $(q "$plain")\`, then \`ken $shown\` again."
+	fi
+	die "$shown is not a ken command, and no executable ken-<name> by that name was found." \
+		"Looked in, in order:$looked${nl}Run \`ken help\` for the builtins and the external commands" \
+		"found, or add an executable ken-<name> in $SCOPE/.bin."
+}
+
+# --- main
+
+command=${1-help}
+if [ $# -gt 0 ]; then shift; fi
+case $command in -h | --help) command=help ;; esac
+if about "$command"; then
+	for arg; do
+		case $arg in -h | --help)
+			full_help
+			exit 0
+			;;
+		esac
+	done
+	"cmd_$command" "$@"
+else
+	dispatch "$command" "$@"
+fi

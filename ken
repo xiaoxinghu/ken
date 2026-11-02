@@ -18,7 +18,7 @@ unset CDPATH
 nl='
 '
 tab=$(printf '\t')
-BUILTINS='path which index help'
+BUILTINS='init path which index help'
 
 # --- prelude
 
@@ -79,6 +79,9 @@ redact() {
 		-e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/[:space:]]*@#\1#g' \
 		-e 's#(^|[[:space:]])[^/:[:space:]]*@([^@:/[:space:]]+:)#\1\2#g'
 }
+
+# Whether nothing, not even a dangling link, is at $1.
+absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
 
 dir_of() {
 	case $1 in
@@ -318,6 +321,19 @@ index_write() {
 about() {
 	details=
 	case $1 in
+	init)
+		usage='init [<dir>]'
+		summary='Make <dir>, default the current folder, a root: only the files ken owns, never overwriting.'
+		details='  .ken            settings, key=value lines; holding one is what makes a folder a root
+  .repos/index    what each repo is, one stanza per repo, cloned or not
+  .bin/ken        a copy of this ken, so the kernel travels with the root
+  .gitignore      .repos/*/*/*/ (the checkouts) and .env, added to one that lacks them
+No page, no AGENTS.md: those belong to a template. No git init. A <dir> inside another root
+is refused unless it is a checkout, <root>/.repos/<host>/<owner>/<repo>.'
+		examples='ken init ~/ken
+git clone <root> ~/ken && ~/ken/.bin/ken init
+cd "$(ken path code github.com/acme/atlas)" && ken init'
+		;;
 	path)
 		usage='path root | code <key> [<branch>] | <key>:<path>[#<symbol>]'
 		summary='Print a path, whether or not it exists. Nobody pastes absolute paths.'
@@ -384,6 +400,88 @@ full_help() {
 	if [ -n "$details" ]; then printf '\n%s\n' "$details"; fi
 	printf '\nExamples:\n'
 	indent '  ' "$examples"
+}
+
+cmd_init() {
+	if [ $# -gt 1 ]; then
+		die "ken init takes one folder, got $# arguments. Quote a path with spaces;" \
+			'run e.g. `ken init ~/ken`.'
+	fi
+	case ${1-} in -*)
+		die "ken init does not take $(q "$1"): it takes one folder, default the current one." \
+			'Run `ken init --help`.'
+		;;
+	esac
+	# the real path of the folder, which may not exist yet: its nearest existing folder made real
+	want=${1:-.}
+	case $want in /*) ;; *) want=$(pwd -P)/$want ;; esac
+	want=${want%/} rest=
+	while [ ! -d "${want:-/}" ]; do rest=/${want##*/}$rest want=${want%/*}; done
+	dir=$(real "${want:-/}")
+	dir=${dir%/}$rest
+	# a root inside another only as a checkout in its .repos/, as find_root walks to the top
+	cur=$dir
+	while :; do
+		up=${cur%/*}
+		while [ -n "$up" ] && [ ! -f "$up/.ken" ]; do up=${up%/*}; done
+		if [ -z "$up" ]; then break; fi
+		case ${cur#"$up/.repos/"} in
+		/* | */*/*/*) ;;
+		?*/?*/?*)
+			cur=$up
+			continue
+			;;
+		esac
+		die "$dir is inside the root $up but is not a checkout in its .repos/, so a root there would" \
+			"be a workspace hidden in $up's knowledge base. Make it a section of $up, with no .ken;" \
+			"share a root into $up with \`ken layer add <key>\` run there; or make a root outside $up," \
+			'e.g. `ken init ~/other`.'
+	done
+	if ! mkdir -p -- "$dir/.repos" "$dir/.bin"; then
+		die "could not make $dir/.repos and $dir/.bin (the reason is above), so $dir cannot be a root." \
+			"Fix that or pick another folder, then run \`ken init $(q "$dir")\` again."
+	fi
+	dir=$(real "$dir") made=
+	if absent "$dir/.ken"; then
+		printf '%s\n' '# ken settings: <key>=<value> lines, the first segment of a key naming its tool.' \
+			'# The format is docs/files.md in github.com/xiaoxinghu/ken.' >"$dir/.ken"
+		made="$made .ken"
+	fi
+	if absent "$dir/.repos/index"; then
+		printf '%s\n' "# .repos/index: what each repo is. Whether it exists is the remote's business." \
+			>"$dir/.repos/index"
+		made="$made .repos/index"
+	fi
+	if absent "$dir/.bin/ken"; then
+		cp -- "$0" "$dir/.bin/ken"
+		chmod +x "$dir/.bin/ken"
+		made="$made .bin/ken"
+	fi
+	ignore=$dir/.gitignore
+	for rule in '.repos/*/*/*/' .env; do
+		if [ -f "$ignore" ] && sed 's/[[:space:]]*$//' "$ignore" | grep -qxF -e "$rule"; then continue; fi
+		case $made in *" .gitignore"*) ;; *) made="$made .gitignore" ;; esac
+		# a last line without its newline gets one, so the rule is a line of its own
+		if [ -s "$ignore" ] && [ -n "$(tail -c 1 "$ignore")" ]; then printf '\n' >>"$ignore"; fi
+		printf '%s\n' "$rule" >>"$ignore"
+	done
+	if [ -n "$made" ]; then
+		printf '%s is a root. Made or added to:\n' "$dir"
+		for file in $made; do printf '  %s\n' "$file"; done
+		printf 'Track them with `git -C %s add%s`, after `git -C %s init` if it is not a repository.\n' \
+			"$(q "$dir")" "$made" "$(q "$dir")"
+	else
+		printf '%s is a root already with every file ken owns: nothing was created.\n' "$dir"
+	fi
+	# reconcile its layers here (PRD, "Reconcile") once ken has it
+	here=$(find_root 2>/dev/null && printf '%s\n' "$SCOPE") || here=
+	if [ "$here" != "$dir" ]; then
+		printf '%s\n' "ken run from here acts on ${here:-no root}, not $dir; inside $dir it finds it by" \
+			'itself. To point ken at it from anywhere, link its kernel onto PATH (used outside any' \
+			'root when KEN_ROOT is unset), or set KEN_ROOT:' \
+			"  ln -s $(q "$dir/.bin/ken") ~/.local/bin/ken" \
+			"  export KEN_ROOT=$(q "$dir")"
+	fi
 }
 
 cmd_path() {

@@ -7,6 +7,7 @@ import {
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	statSync,
 	symlinkSync,
 	writeFileSync
 } from 'node:fs'
@@ -118,6 +119,99 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 		return { status: r.status, stdout: r.stdout, stderr: r.stderr }
 	}
+
+	describe('init', () => {
+		const outside = () => join(dir, 'outside')
+		const files = (folder: string) =>
+			Object.fromEntries(
+				readdirSync(folder, { recursive: true, encoding: 'utf8' })
+					.sort()
+					.map((f) => {
+						const at = join(folder, f)
+						return [f, statSync(at).isDirectory() ? 'dir' : readFileSync(at, 'utf8')]
+					})
+			)
+
+		it('gives a fresh folder only the files ken owns, the kernel a copy; a rerun creates nothing', () => {
+			const fresh = join(dir, `fresh-${shell}/a/b`)
+			const r = ken(['init', fresh], { cwd: outside() })
+			expect(r.status).toBe(0)
+			expect(r.stdout).toContain(`${fresh} is a root.`)
+			const made = files(fresh)
+			expect(Object.keys(made)).toEqual([
+				'.bin',
+				'.bin/ken',
+				'.gitignore',
+				'.ken',
+				'.repos',
+				'.repos/index'
+			])
+			expect(made['.bin/ken']).toBe(readFileSync(KEN, 'utf8'))
+			expect(statSync(join(fresh, '.bin/ken')).mode & 0o111).toBe(0o111)
+			expect(made['.gitignore']).toBe('.repos/*/*/*/\n.env\n')
+			expect(made['.ken']).toMatch(
+				/^# .*\n# .*docs\/files\.md in github\.com\/xiaoxinghu\/ken\.\n$/
+			)
+			expect(made['.repos/index']).toMatch(/^# .repos\/index: [^\n]*\n$/)
+			const again = ken(['init', fresh], { cwd: outside() })
+			expect(again.status).toBe(0)
+			expect(again.stdout).toContain('nothing was created')
+			expect(files(fresh)).toEqual(made)
+		})
+
+		it('keeps what is there: an existing .gitignore gains only the rule it lacks', () => {
+			const kept = join(dir, `kept-${shell}`)
+			write(join(kept, '.gitignore'), 'node_modules/\n.env  ')
+			write(join(kept, '.ken'), 'org.me=github.com/me\n')
+			write(join(kept, '.bin/ken'), 'mine\n')
+			expect(ken(['init', kept], { cwd: outside() }).status).toBe(0)
+			const after = files(kept)
+			expect(after['.gitignore']).toBe('node_modules/\n.env  \n.repos/*/*/*/\n')
+			expect(after['.ken']).toBe('org.me=github.com/me\n')
+			expect(after['.bin/ken']).toBe('mine\n')
+		})
+
+		it('refuses a folder inside a root, naming the nearest root, and makes nothing', () => {
+			const cases: [string, string][] = [
+				[join(root, `notes/new-${shell}`), root],
+				[join(root, '.repos/github.com/acme/web/src'), root],
+				[join(atlas, `sub/new-${shell}`), atlas]
+			]
+			for (const [inside, above] of cases) {
+				const r = ken(['init', inside], { cwd: outside() })
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`${inside} is inside the root ${above} but`)
+				expect(existsSync(join(inside, '.ken'))).toBe(false)
+			}
+			expect(existsSync(join(root, `notes/new-${shell}`))).toBe(false)
+		})
+
+		it('accepts a checkout at <root>/.repos/<host>/<owner>/<repo>, through every root above', () => {
+			for (const checkout of [
+				join(root, `.repos/github.com/acme/new-${shell}`),
+				join(atlas, `.repos/github.com/acme/deep-${shell}`)
+			]) {
+				mkdirSync(checkout, { recursive: true })
+				expect(ken(['init'], { cwd: checkout }).status).toBe(0)
+				expect(existsSync(join(checkout, '.ken'))).toBe(true)
+			}
+		})
+
+		it('says how to point ken at the folder only when it is not the root found from here', () => {
+			const home = join(dir, `home-${shell}`)
+			const other = join(dir, `other-${shell}`)
+			const env = { HOME: home }
+			mkdirSync(home)
+			expect(ken(['init', join(home, 'ken')], { cwd: outside(), env }).stdout).not.toContain(
+				'KEN_ROOT='
+			)
+			const hint = ken(['init', other], { cwd: outside(), env }).stdout
+			expect(hint).toContain(`acts on ${home}/ken, not ${other};`)
+			expect(hint).toContain(`\n  ln -s ${other}/.bin/ken ~/.local/bin/ken\n`)
+			expect(hint).toContain(`\n  export KEN_ROOT=${other}\n`)
+			expect(ken(['init'], { cwd: other, env }).stdout).not.toContain('KEN_ROOT=')
+		})
+	})
 
 	describe('path', () => {
 		it('code lowercases the key and puts the branch worktree beside the clone, / as -', () => {
@@ -493,7 +587,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	describe('help', () => {
 		it('carries the same examples as <command> --help, and the external commands found', () => {
 			const all = ken(['help']).stdout
-			for (const name of ['path', 'which', 'index']) {
+			for (const name of ['init', 'path', 'which', 'index']) {
 				const page = ken([name, '--help'])
 				expect(page.status).toBe(0)
 				expect(ken(['help', name]).stdout).toBe(page.stdout)

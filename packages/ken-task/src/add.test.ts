@@ -131,10 +131,7 @@ describe('ken task add', () => {
 		const root = newRoot()
 		const run = () =>
 			new Promise<number | null>((done) =>
-				spawn(process.execPath, [ken, 'task', 'add', 'race'], { cwd: root, env: env(root) }).on(
-					'close',
-					done
-				)
+				spawn('sh', [ken, 'task', 'add', 'race'], { cwd: root, env: env(root) }).on('close', done)
 			)
 		const codes = await Promise.all([run(), run(), run(), run()])
 		expect(codes.sort()).toEqual([0, 1, 1, 1])

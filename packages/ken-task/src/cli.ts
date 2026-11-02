@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The task system, an external subcommand of ken: see docs/ken-task.md.
 import { spawnSync } from 'node:child_process'
-import { statSync } from 'node:fs'
+import { readFileSync, statSync } from 'node:fs'
 import { join, resolve } from 'node:path'
 import { addTask } from './add.ts'
 import { archiveTasks, purgeArchive } from './archive.ts'
@@ -15,7 +15,7 @@ import { setTask } from './set.ts'
 
 const HELP = `ken task <command>
 
-Plain-text tasks in one folder of the ken root: task.folder in .ken.yaml, relative to the
+Plain-text tasks in one folder of the ken root: task.folder in .ken, relative to the
 root or absolute, default tasks. Every file in it, at any depth, is a task, except
 README.md and dot entries; its path is its identity.
 
@@ -172,31 +172,32 @@ Examples:
   ken task set tasks/portal/print-web-views-to-pdf due 2026-11-30
   ken task set tasks/portal/print-web-views-to-pdf scheduled ''   # remove the line`
 
-/** The root and the task folder, absolute, through `ken config --json` (PRD decision 11). */
+/** The root and the task folder, absolute: KEN_ROOT, as `ken` dispatch sets it, and task.folder in its .ken. */
 function settings(): { root: string; folder: string } {
-	const r = spawnSync('ken', ['config', '--json'], { encoding: 'utf8' })
-	if (r.error) {
+	const root = process.env.KEN_ROOT
+	if (!root) {
 		throw new Error(
-			`ken-task reads the root and task.folder from \`ken config --json\`, but ken could not be run: ${r.error.message}. ` +
-				'Install @unclex/ken so `ken` is on PATH, then rerun.'
+			'ken-task reads the root from KEN_ROOT, which `ken` sets when it runs `ken task`, and KEN_ROOT is unset. ' +
+				'Run it as `ken task <command>`, e.g. `ken task list`.'
 		)
 	}
-	if (r.status !== 0) {
+	const file = join(root, '.ken')
+	let text: string
+	try {
+		text = readFileSync(file, 'utf8')
+	} catch (e) {
 		throw new Error(
-			`ken-task reads the root and task.folder from \`ken config --json\`, which failed:\n${r.stderr.trim()}`
+			`ken-task reads task.folder from ${file}, which could not be read (${e instanceof Error ? e.message : String(e)}), so it cannot find the tasks. ` +
+				'Run `ken task` from inside a ken root, or `ken init` to make one.'
 		)
 	}
-	const config = JSON.parse(r.stdout) as { root: { value: string }; task?: unknown }
-	const root = config.root.value
-	const task = config.task ?? {}
-	const folder =
-		typeof task === 'object' && !Array.isArray(task)
-			? ((task as { folder?: unknown }).folder ?? 'tasks')
-			: undefined
-	if (typeof folder !== 'string' || !folder) {
+	// a repeated key reads as its last line; the value is the rest of the line, trimmed
+	const lines = text.split('\n').filter((line) => line.startsWith('task.folder='))
+	const folder = lines.length ? (lines.at(-1) ?? '').slice('task.folder='.length).trim() : 'tasks'
+	if (!folder) {
 		throw new Error(
-			`task.folder in ${join(root, '.ken.yaml')} must be a folder, relative to the root or absolute, like \`task: { folder: tasks }\`; ` +
-				`got ${JSON.stringify(task)}, so ken-task cannot find the tasks. Fix it, then run \`ken config --json | jq .task\` to check.`
+			`task.folder in ${file} is empty, so ken-task cannot find the tasks: it is a folder, relative to the root or absolute, like \`task.folder=tasks\`. ` +
+				`Fix the line, or delete it for the default, tasks; \`sed -n 's/^task\\.folder=//p' ${file}\` prints it.`
 		)
 	}
 	return { root, folder: resolve(root, folder) }
@@ -225,7 +226,7 @@ function list(args: string[]): void {
 		process.stderr.write(
 			`${found ? `No tasks in ${folder}` : `${folder} is not a folder, so there are no tasks`}. ` +
 				`Add one by writing a file there, e.g. \`mkdir -p ${folder} && echo '# Do the thing' > ${folder}/do-the-thing.md\`, ` +
-				'or point task.folder in .ken.yaml at your tasks.\n'
+				'or point task.folder in .ken at your tasks.\n'
 		)
 	}
 	if (json) process.stdout.write(`${JSON.stringify(rows, null, 2)}\n`)
@@ -289,8 +290,9 @@ function add(args: string[]): void {
 	}
 	const { root, folder } = settings()
 	if (repo === undefined) {
-		const r = spawnSync('ken', ['which', '--json'], { encoding: 'utf8' })
-		repo = r.status === 0 ? (JSON.parse(r.stdout) as { key: string }).key : undefined
+		// `ken which` prints `<key> <clone|worktree> [<branch>]`, and fails outside a checkout
+		const r = spawnSync('ken', ['which'], { encoding: 'utf8' })
+		repo = r.status === 0 ? r.stdout.split(' ')[0]?.trim() || undefined : undefined
 		if (repo) {
 			process.stderr.write(
 				`repo: ${repo}, the clone this runs in, as \`ken which\` says; pass -r <key> for another repo.\n`
@@ -360,8 +362,8 @@ const CLAIM_HELP = `ken task claim [<task>]
 
 Start work on a ready task: make its branch, its path in the folder without extension,
 in the clone of its repo, from the default branch as it stands (no fetch); then \`ken get
-<repo> -b <branch>\` makes the worktree beside the clone, copies the files the repo's
-.ken.yaml lists and runs its setup, its output on stderr. Prints only the worktree's path.
+<repo> -b <branch>\` makes the worktree beside the clone, its output on stderr. Prints
+only the worktree's path.
 
 Without a task: the first ready task, in \`ken task ready\` order, that has a repo cloned
 here. Making the branch is the claim: of two callers only one makes it, and the other is

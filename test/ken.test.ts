@@ -268,10 +268,11 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				expect(existsSync(join(inside, '.ken'))).toBe(false)
 			}
 			expect(existsSync(join(root, `notes/new-${shell}`))).toBe(false)
+			// .. after a missing folder climbs it anyway, as real_path does, so this is inside root
 			const around = `${dir}/missing-${shell}/../root/around-${shell}`
 			const r = ken(['init', around], { cwd: outside() })
 			expect(r.status).toBe(1)
-			expect(r.stderr).toContain('climbs out of')
+			expect(r.stderr).toContain(`${root}/around-${shell} is inside the root ${root} but`)
 			expect(existsSync(join(root, `around-${shell}`))).toBe(false)
 			for (const shallow of [`dot-${shell}/./repo`, `slash-${shell}//repo`]) {
 				expect(ken(['init', `${root}/.repos/${shallow}`], { cwd: outside() }).status).toBe(1)
@@ -920,36 +921,17 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('an entry of only its repo line has no fields, and gains them on set', () => {
 			const r = fresh(`repo: ${KEY}\n`)
-			expect(ken(['index', 'unset', KEY, 'kind'], r).stderr).toContain('its fields are none')
 			ken(['index', 'set', KEY, 'kind=fe'], r)
 			expect(r.read()).toBe(`repo: ${KEY}\nkind: fe\n`)
 		})
 
-		it('unset removes the fields, or the whole entry and the blank line after it', () => {
-			const r = fresh(`${OTHERS}repo: ${KEY}\ndesc: Web.\nkind: fe\ntags: a\n\nrepo: x.io/a/b\n`)
-			expect(ken(['index', 'unset', KEY, 'kind', 'tags'], r).stdout).toBe(
-				`Removed kind, tags from the entry for ${KEY}, in ${r.index}.\n`
-			)
-			expect(r.read()).toBe(`${OTHERS}repo: ${KEY}\ndesc: Web.\n\nrepo: x.io/a/b\n`)
-			ken(['index', 'unset', KEY], r)
-			expect(r.read()).toBe(`${OTHERS}repo: x.io/a/b\n`)
-		})
-
-		it('unset refuses desc alone, a field the entry lacks, and a key with no entry', () => {
+		it('unset is no subcommand: refused, pointing at the file to edit, and the file is untouched', () => {
 			const body = `repo: ${KEY}\ndesc: Web.\nkind: fe\n`
 			const r = fresh(body)
-			const refused = (args: string[]) => {
-				const out = ken(['index', 'unset', ...args], r)
-				expect(out.status).toBe(1)
-				return out.stderr
-			}
-			expect(refused([KEY, 'kind', 'desc'])).toContain(
-				`ken index unset ${KEY}\` to remove the whole`
-			)
-			expect(refused([KEY, 'tags'])).toContain('its fields are desc, kind.')
-			expect(refused(['github.com/acme/api'])).toContain(
-				`github.com/acme/api has no entry in ${r.index}`
-			)
+			const out = ken(['index', 'unset', KEY, 'kind'], r)
+			expect(out.status).toBe(1)
+			expect(out.stderr).toContain('ken index takes set, then a repo key, got unset.')
+			expect(out.stderr).toContain('To remove a field or an entry, edit .repos/index.')
 			expect(r.read()).toBe(body)
 		})
 

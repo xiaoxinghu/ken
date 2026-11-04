@@ -180,9 +180,16 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		// offline: listed, its link dangling, no clone here; after init, which would try to clone it
 		appendFileSync(join(root, '.ken'), 'layer.gone=example.com/acme/gone\n')
 		symlinkSync('.repos/example.com/acme/gone', join(root, 'gone'))
+		// links into it have nothing to check against: a note, not an error
+		write({
+			'systems/pages/intro.md':
+				'# Intro\n\nSee [gone](../../gone/x.md), [its page](../../gone/README.md).\n'
+		})
 		const r = run('ken lint')
 		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe('ken lint: no errors in 5 pages.\n')
+		expect(r.stdout).toBe(
+			`note: not checked: 2 links into the layer gone, which has no clone here: it may not be pushed yet, or be private. Run \`ken init '${root}'\` to clone it, then \`ken lint\` again.\nken lint: no errors in 5 pages.\n`
+		)
 		expect(r.status).toBe(0)
 	})
 

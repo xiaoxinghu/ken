@@ -14,6 +14,7 @@ Errors, exit 1:
   the front page over ${FRONT_PAGE_MAX} lines, a section README.md over ${SECTION_README_MAX}, AGENTS.md over ${AGENTS_MAX}
 Notes, exit 0:
   code references into repos not cloned here, counted
+  links into a layer not cloned here (not pushed yet, or private), counted per layer
   pages nobody links to and nobody has changed in ${STALE_DAYS} days, proposed for .archive/
 
 Links and references in code blocks are examples and not checked.

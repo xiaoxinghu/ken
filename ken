@@ -4,7 +4,8 @@
 #
 # Hazards, designed around everywhere below:
 # - An exit inside $(...) ends only the subshell, so a function that can die is called as
-#   x=$(f) || exit 1, or sets variables in this shell instead of printing.
+#   x=$(f) || exit 1, or sets variables in this shell instead of printing. Under set -e the
+#   assignment x=$(cmd) exits, silently, when cmd fails: one that may is x=$(cmd) || x=''.
 # - A && B || C is not if-then-else: C runs when B fails too. Write if.
 # - sed -i, stat and readlink -f differ between macOS and GNU, so they are not used.
 # - Paths pass through git with -z.
@@ -562,7 +563,8 @@ about() {
   .bin/ken        a copy of this ken, so the kernel travels with the root
   .gitignore      .repos/*/*/*/ (the checkouts) and .env, added to one that lacks them
 No page, no AGENTS.md: those belong to a template. No git init. A <dir> inside another root
-is refused unless it is a checkout, <root>/.repos/<host>/<owner>/<repo>. Then the layers .ken
+is refused unless it is a checkout, <root>/.repos/<host>/<owner>/<repo>, and a fresh folder at a
+worktree'"'"'s place, <repo>.<x> beside a clone, is refused too. Then the layers .ken
 lists, and theirs, are cloned at the top when missing and linked: the layers of each inside it,
 owner AGENTS.md from each and skills from the direct ones where the root has none.'
 		examples='ken init ~/ken
@@ -629,7 +631,8 @@ its desc, its worktrees, and each stray with the command that fixes it: no desc;
 not on its default branch, origin/HEAD; a worktree whose folder does not match its branch.
 At the top root, also each clone no index lists. A key in more than one index takes the
 whole entry of the first: the scope'"'"'s, then each layer'"'"'s in .ken order, each followed by
-its own layers'"'"'. A layer with no clone here is left out, said on stderr.
+its own layers'"'"'. A layer with no clone here is left out, said on stderr. A clone with no
+remote-tracking branch, nothing fetched or pushed, is marked local only.
   --porcelain   one line per key, tab-separated: key, desc, listed by, cloned (true or
                 false), branch; empty fields empty.'
 		examples='ken repos
@@ -708,6 +711,20 @@ cmd_init() {
 		case ${cur#"$up/.repos/"} in
 		/* | */*/*/*) ;;
 		?*/?*/?*)
+			# a fresh <repo>.<x> beside a clone <repo> is where that repo's worktree of a branch belongs,
+			# as `ken which` reads it, and a layer is linked to a clone, never a worktree
+			if [ "$cur" = "$dir" ] && [ ! -e "$cur/.git" ]; then
+				try=${cur##*/}
+				while [ "${try%.*}" != "$try" ]; do
+					try=${try%.*}
+					if [ -n "$try" ] && [ -d "${cur%/*}/$try/.git" ]; then
+						clone=${cur%/*}/$try
+						die "$dir is where a worktree of the clone $clone belongs, <repo>.<branch>, and \`ken layer" \
+							"add\` links a clone, never a worktree, so no root is made there. Run \`ken init $(q "$clone")\`" \
+							"to make the clone a root; a branch of it gets its worktree there from \`ken get ${clone#"$up/.repos/"} -b <branch>\`."
+					fi
+				done
+			fi
 			cur=$up
 			continue
 			;;
@@ -1069,7 +1086,8 @@ cmd_get() {
 				;;
 			esac
 			die "could not clone $(redact "$URL") into $clone, so it was removed again. git said:" \
-				"$(redact "$err")$nl${hint}Fix the cause, then run \`ken get $(q "$(redact "$asked")")$opts\` again."
+				"$(redact "$err")$nl${hint}Fix the cause, then run \`ken get $(q "$(redact "$asked")")$opts\` again. If" \
+				"the repo is not pushed yet, or private to an account this machine lacks, nothing here is wrong: go on without it."
 		fi
 		trap - INT TERM HUP
 	else
@@ -1129,9 +1147,20 @@ cmd_get() {
 		done
 	fi
 	if [ -z "$listed" ]; then
-		index_write set "$file" "$KEY" ''
-		printf 'ken: %s %s\n' "registered $KEY in $file with no desc, and a desc is what lets an agent" \
-			"choose a repo before cloning it. Run \`ken index set $KEY desc=\"...\"\` with what it is, in a line." >&2
+		# a root's front page opens with what it is for (docs/templates.md), so that line is its desc
+		desc=''
+		if [ -f "$clone/.ken" ] && [ -f "$clone/README.md" ]; then
+			desc=$(awk '/^[^#[:space:]<!\[|`-]/ { sub(/[[:space:]]+$/, ""); print; exit }' "$clone/README.md") || desc=''
+		fi
+		if [ -n "$desc" ]; then
+			index_write set "$file" "$KEY" "desc=$desc$nl"
+			printf 'ken: %s %s\n' "registered $KEY in $file with the first line of its front page as desc:" \
+				"\"$desc\". Change it with \`ken index set $KEY desc=\"...\"\`." >&2
+		else
+			index_write set "$file" "$KEY" ''
+			printf 'ken: %s %s\n' "registered $KEY in $file with no desc, and a desc is what lets an agent" \
+				"choose a repo before cloning it. Run \`ken index set $KEY desc=\"...\"\` with what it is, in a line." >&2
+		fi
 	fi
 	if [ -z "$folder" ]; then
 		printf '%s\n' "$clone"
@@ -1183,7 +1212,7 @@ EOF
 	fi
 	# each key a row, of fields that only trail empty, since read joins tabs as it joins spaces
 	while IFS=$tab read -r key by from desc; do
-		clone=$TOP/.repos/$key cloned=false on='' trees='' strays=''
+		clone=$TOP/.repos/$key cloned=false on='' only='' trees='' strays=''
 		if [ -z "$by" ]; then
 			strays="$strays$nl  stray: no index lists it, so nothing says what it is and only this disk knows it."
 			strays="$strays Run \`ken index set $key desc=\"...\"\`."
@@ -1228,6 +1257,8 @@ EOF
 			# the full ref, as --short turns origin/main into remotes/origin/main beside a tag origin/main
 			def=$(git -C "$clone" symbolic-ref -q refs/remotes/origin/HEAD) || def=''
 			def=${def#refs/remotes/origin/}
+			# no remote-tracking branch: nothing fetched or pushed, so no other machine can clone it yet
+			if [ -z "$(git -C "$clone" for-each-ref --count=1 refs/remotes/)" ]; then only=', local only'; fi
 			if [ -n "$def" ] && [ "$on" != "$def" ]; then
 				was='a detached HEAD' fix="git -C $(q "$clone") switch $(q "$def")"
 				if [ -n "$on" ]; then was="the branch $on" fix="$fix\`, then \`ken get $key -b $(q "$on")"; fi
@@ -1240,7 +1271,7 @@ EOF
 			continue
 		fi
 		state='not cloned'
-		if [ $cloned = true ]; then state="cloned on ${on:-a detached HEAD}"; fi
+		if [ $cloned = true ]; then state="cloned on ${on:-a detached HEAD}$only"; fi
 		printf '%s  listed by %s, %s\n' "$key" "${by:-no index}" "$state"
 		if [ -n "$desc" ]; then printf '  %s\n' "$desc"; fi
 		trees=$trees$strays

@@ -31,6 +31,8 @@ when it has one, and what to do.
 **Notes, exit 0:**
 
 - references into repos not cloned, counted with the `ken get` to run;
+- links into a layer not cloned here, which may be unpushed or private, counted per layer with
+  the `ken init` that clones it;
 - a page nobody links to (a section README's listing does not count) and unchanged in a year
   by `git log -1`, with the `git mv` into `.archive/`.
 

@@ -275,6 +275,15 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain(`${root}/around-${shell} is inside the root ${root} but`)
 			expect(existsSync(join(root, `around-${shell}`))).toBe(false)
+			// a fresh folder beside a clone, <repo>.<x>, is where a worktree belongs, not a layer
+			const wt = join(root, '.repos/github.com/acme/wt')
+			mkdirSync(join(wt, '.git'), { recursive: true })
+			const beside = `${wt}.feat-${shell}`
+			const w = ken(['init', beside], { cwd: outside() })
+			expect(w.status).toBe(1)
+			expect(w.stderr).toContain(`${beside} is where a worktree of the clone ${wt} belongs`)
+			expect(w.stderr).toContain('`ken get github.com/acme/wt -b <branch>`')
+			expect(existsSync(beside)).toBe(false)
 			for (const shallow of [`dot-${shell}/./repo`, `slash-${shell}//repo`]) {
 				expect(ken(['init', `${root}/.repos/${shallow}`], { cwd: outside() }).status).toBe(1)
 			}
@@ -1144,6 +1153,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.stderr).toContain('does not appear to be a git repository')
 			expect(r.stderr).toContain('A key alone clones https://example.com/acme/missing.git')
 			expect(r.stderr).toContain('run `ken get example.com/acme/missing` again')
+			expect(r.stderr).toContain('not pushed yet, or private to an account this machine lacks')
 			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual([])
 			expect(existsSync(join(at, '.repos/index'))).toBe(false)
 		})
@@ -1351,7 +1361,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		// (the root's entry wins), tool, and docs, its own layer, which lists manual with no desc;
 		// the layer gone has no clone. On disk: app on main with a worktree where its branch
 		// puts it, a detached one, and one moved off its folder; lib switched to side; loose, a
-		// clone no index lists, and example.com/.dot/..tools, one whose key parts start with dots. Clones of src-lib have origin/HEAD, the others none.
+		// clone no index lists, and example.com/.dot/..tools, one whose key parts start with dots. Clones of src-lib have origin/HEAD; the others, made here, have no remote-tracking branch, so they are local only.
 		beforeAll(() => {
 			const o = own()
 			write(
@@ -1397,7 +1407,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(0)
 			expect(r.stdout).toBe(
 				[
-					'example.com/.dot/..tools  listed by no index, cloned on main',
+					'example.com/.dot/..tools  listed by no index, cloned on main, local only',
 					'  stray: no index lists it, so nothing says what it is and only this disk knows it. Run `ken index set example.com/.dot/..tools desc="..."`.',
 					'example.com/acme/app  listed by root, cloned on main',
 					'  The app.',
@@ -1405,16 +1415,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 					`  worktree (detached)  ${o}/app.pinned`,
 					`  worktree feat/x  ${o}/app.renamed`,
 					`  stray: the worktree of feat/x is at ${o}/app.renamed, not ${o}/app.feat-x, where \`ken get -b\` and \`ken path code\` look for it. Run \`git -C ${o}/app worktree move ${o}/app.renamed ${o}/app.feat-x\`.`,
-					'example.com/acme/docs  listed by team, cloned on main',
+					'example.com/acme/docs  listed by team, cloned on main, local only',
 					'  The docs layer.',
 					'example.com/acme/lib  listed by root, cloned on side',
 					`  ${noDesc} \`ken index set example.com/acme/lib desc="..."\`.`,
 					offSide(),
-					'example.com/acme/loose  listed by no index, cloned on main',
+					'example.com/acme/loose  listed by no index, cloned on main, local only',
 					'  stray: no index lists it, so nothing says what it is and only this disk knows it. Run `ken index set example.com/acme/loose desc="..."`.',
 					'example.com/acme/manual  listed by team/docs, not cloned',
 					manual(),
-					'example.com/acme/team  listed by root, cloned on main',
+					'example.com/acme/team  listed by root, cloned on main, local only',
 					'  The team layer.',
 					'example.com/acme/tool  listed by team, not cloned',
 					'  A tool.',
@@ -1452,7 +1462,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r).toEqual({
 				status: 0,
 				stdout: [
-					'example.com/acme/docs  listed by root, cloned on main',
+					'example.com/acme/docs  listed by root, cloned on main, local only',
 					'  The docs layer.',
 					'example.com/acme/lib  listed by root, cloned on side',
 					'  Lib, as the team says.',

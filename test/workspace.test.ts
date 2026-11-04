@@ -75,6 +75,7 @@ beforeAll(() => {
 		'atlas',
 		{
 			'.ken': 'layer.handbook=example.com/acme/hb\n',
+			'README.md': '# Atlas\n\nThe sales atlas.\n',
 			'.bin/ken-atlas': '#!/bin/sh\necho "atlas $KEN_ROOT"\n',
 			'.repos/index': 'repo: example.com/acme/atlas-api\ndesc: The atlas API.\n'
 		},
@@ -110,6 +111,12 @@ describe.each(SHELLS)('a layer is a workspace, under %s', (shell) => {
 		expect(ok(atlas, 'path', 'code', 'example.com/acme/lib')).toBe(`${code('lib')}\n`)
 		expect(ok(atlas, 'which')).toBe('example.com/acme/atlas clone main\n')
 		expect(ok(atlas, 'which', code('hb'))).toBe('example.com/acme/hb clone main\n')
+	})
+
+	it("layer add registers the layer with its front page's first line of prose as desc", () => {
+		expect(readFileSync(join(top, '.repos/index'), 'utf8')).toContain(
+			'\nrepo: example.com/acme/atlas\ndesc: The sales atlas.\n'
+		)
 	})
 
 	it("get clones at the top and registers in the layer's index; index set writes the layer's", () => {

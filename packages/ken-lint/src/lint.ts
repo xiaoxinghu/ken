@@ -3,7 +3,7 @@
 // Markdown reader sees, never a guess at where one ends.
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
-import { basename, dirname, join, relative, resolve } from 'node:path'
+import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { Nodes } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
 
@@ -98,6 +98,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	// dangling, has nothing to read; a layer reached twice is read once.
 	const tops = [root]
 	const taskFolders = new Set<string>()
+	const offline = new Map<string, number>() // an offline layer's link -> links into it, not checked
 	const seen = new Set([realpathSync(root)]) // folders walked, or to be walked as a top
 	for (const top of tops) {
 		const own = readKen(
@@ -109,7 +110,10 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		taskFolders.add(existsSync(own.folder) ? realpathSync(own.folder) : own.folder)
 		for (const name of own.layers) {
 			const layer = join(top, name)
-			if (!statSync(layer, { throwIfNoEntry: false })?.isDirectory()) continue
+			if (!statSync(layer, { throwIfNoEntry: false })?.isDirectory()) {
+				offline.set(layer, 0)
+				continue
+			}
 			if (seen.has(realpathSync(layer))) continue
 			seen.add(realpathSync(layer))
 			tops.push(layer)
@@ -247,6 +251,12 @@ export function lint(root: string): { lines: string[]; errors: number } {
 			const path = decode(url.replace(/[#?].*$/, ''))
 			const top = topOf.get(file) ?? root
 			const to = path.startsWith('/') ? join(top, path) : resolve(dirname(file), path)
+			// into an offline layer: nothing to check against, counted in a note, never an error
+			const off = [...offline.keys()].find((l) => to === l || to.startsWith(l + sep))
+			if (off) {
+				if (checks) offline.set(off, (offline.get(off) ?? 0) + 1)
+				return
+			}
 			if (!existsSync(to)) {
 				if (checks) {
 					report(
@@ -309,6 +319,13 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		problems.push(
 			`note: not checked: ${count} code references into ${keys.join(', ')}, not cloned here. To check them, run ${keys.map((k) => `\`ken get ${k}\``).join(' and ')}, then \`ken lint\` again.`
 		)
+	}
+	for (const [layer, count] of offline) {
+		if (count) {
+			problems.push(
+				`note: not checked: ${count} links into the layer ${relative(root, layer)}, which has no clone here: it may not be pushed yet, or be private. Run \`ken init ${quote(root)}\` to clone it, then \`ken lint\` again.`
+			)
+		}
 	}
 	const errors = problems.filter((p) => p.startsWith('error:')).length
 	problems.push(

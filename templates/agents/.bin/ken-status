@@ -1,0 +1,20 @@
+#!/bin/sh
+# The session-start hook, run as `.bin/ken status`: one screen of what this root holds, so the
+# agent never lists folders, and `ken` on the PATH of the agent's shell where the harness has a
+# way. Exit 0 always: the output is the agent's context, the errors included.
+# Claude Code sources CLAUDE_ENV_FILE before each shell command. ken dispatch put its own .bin/
+# first on this PATH, so the same folder goes there.
+if [ -n "${CLAUDE_ENV_FILE-}" ]; then
+	printf "export PATH='%s':\"\$PATH\"\n" "$(printf '%s' "$KEN_ROOT/.bin" | sed "s/'/'\\\\''/g")" >>"$CLAUDE_ENV_FILE"
+fi
+echo "This is a ken root: $KEN_ROOT. Its CLI is \`ken\`, at .bin/ken here; \`ken help\` lists the commands."
+echo
+ken repos 2>&1
+echo
+echo 'Settings, .ken:'
+sed 's/^/  /' "$KEN_ROOT/.ken" 2>&1
+if command -v ken-task >/dev/null 2>&1; then
+	echo
+	ken task ready 2>&1
+fi
+exit 0

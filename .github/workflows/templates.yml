@@ -1,0 +1,29 @@
+# Each templates/<name> on main is also the branch template/<name>: that folder alone, with its
+# history, its .bin/ken link replaced by the kernel it was pushed with, so
+# `git clone -b template/<name> --single-branch` installs it (docs/templates.md). The branches
+# are generated, so they are force-pushed.
+name: templates
+on:
+  push:
+    branches: [ main ]
+permissions:
+  contents: write
+jobs:
+  split:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - run: |
+          set -eu
+          git config user.name github-actions
+          git config user.email github-actions@github.com
+          for dir in templates/*/; do
+            name=${dir%/}; name=${name#templates/}
+            git subtree split --prefix "templates/$name" -b "template/$name"
+            git checkout -q "template/$name"
+            rm .bin/ken && git show "$GITHUB_SHA:ken" >.bin/ken && chmod +x .bin/ken
+            git add .bin/ken && git commit -q -m "ken as of $GITHUB_SHA"
+            git push --force origin "template/$name"
+            git checkout -q "$GITHUB_SHA"
+          done

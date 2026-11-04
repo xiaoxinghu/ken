@@ -15,9 +15,13 @@ few fixed rules; everything else is scripts and skills built on it.
 | `@unclex/ken-lint`, `packages/`   | `ken lint` | the knowledge-base lint: indexes, links, references |
 
 Install: `sh ken init ~/ken` makes a root holding a copy at `~/ken/.bin/ken`, then
-`ln -s ~/ken/.bin/ken ~/.local/bin/ken`. Its only dependency is git 2.48 or newer. Its tests are `test/ken.test.ts`, one command
-at a time, and `test/workspace.test.ts`, a layer that has a layer walked end to end; both
-run it under `sh` and `dash`.
+`ln -s ~/ken/.bin/ken ~/.local/bin/ken`. Or start from a template, a root with an `AGENTS.md`
+that tells an agent where the CLI is: `git clone -b template/minimal --single-branch
+https://github.com/xiaoxinghu/ken ~/ken && ~/ken/.bin/ken init`. The templates are
+[`templates/`](templates), one branch each. Its only dependency is git 2.48 or newer. Its
+tests are `test/ken.test.ts`, one command at a time, `test/workspace.test.ts`, a layer that
+has a layer walked end to end, and `test/templates.test.ts`; the first two run it under `sh`
+and `dash`.
 
 The design is [`docs/prd.md`](docs/prd.md), with [`docs/files.md`](docs/files.md) for the
 two files the kernel reads and writes, and [`docs/templates.md`](docs/templates.md) for the

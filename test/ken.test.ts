@@ -92,6 +92,7 @@ beforeAll(() => {
 	pathBin = join(dir, 'path-bin')
 	write(join(root, '.ken'), '# settings\nclone.blobless=true\nlayer.atlas=github.com/acme/atlas\n')
 	script(join(root, '.bin/ken-hello'), 'printf "%s|" "$KEN_ROOT" "$@"; exit 3')
+	script(join(root, '.bin/ken-back'), 'ken path root && command -v ken')
 	script(join(root, '.bin/ken-both'), 'echo scope')
 	script(join(root, '.bin/ken-path'), 'echo shadowed')
 	script(join(root, '.bin/ken-plain'), 'echo plain', 0o644)
@@ -782,6 +783,11 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it("runs the scope's ken-<name> with KEN_ROOT the real scope, returning its exit code", () => {
 			const r = ken(['hello', 'a b', '--help'], { env: { KEN_ROOT: join(dir, 'link') } })
 			expect(r).toEqual({ status: 3, stdout: `${root}|a b|--help|`, stderr: '' })
+		})
+
+		it("puts this ken's folder first on PATH, so the script runs `ken` back with no ken installed", () => {
+			const r = ken(['back'], { env: { PATH: '/usr/bin:/bin' } })
+			expect(r).toEqual({ status: 0, stdout: `${root}\n${KEN}\n`, stderr: '' })
 		})
 
 		it("looks in the scope's .bin, then each direct layer's, then PATH", () => {
@@ -1541,7 +1547,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				expect(examples.length).toBeGreaterThan(2)
 				for (const example of examples) expect(all).toContain(example.trim())
 			}
-			expect(all).toContain(`  the scope, ${root}/.bin: both, hello\n`)
+			expect(all).toContain(`  the scope, ${root}/.bin: back, both, hello\n`)
 			expect(all).toContain(`  layer atlas, ${atlas}/.bin: team\n`)
 			expect(all).toContain(`  PATH, ${pathBin}: far\n`)
 		})

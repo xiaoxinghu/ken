@@ -126,7 +126,12 @@ find_root() {
 			"or set KEN_ROOT to a root."
 	fi
 	SCOPE=$(real "$dir")
-	TOP=$SCOPE
+	top_of "$SCOPE"
+}
+
+# Sets TOP, the outermost root reached from the real root $1 only through .repos/ folders.
+top_of() {
+	TOP=$1
 	# a root reached through .repos/ is a checkout there: <up>/.repos/<host>/<owner>/<folder>
 	while :; do
 		case $TOP in
@@ -1431,7 +1436,9 @@ EOF
 	cat <<'EOF'
   <name> [<args>]
       Run the first executable ken-<name> in the scope's .bin/, each direct layer's .bin/
-      in .ken order, then PATH, with KEN_ROOT set to the scope. A builtin always wins.
+      in .ken order, the top's when the scope is a layer, then PATH, with KEN_ROOT set to
+      the scope and this ken's folder first on PATH, so the script can run `ken` back. A
+      builtin always wins.
 
 EOF
 	if err=$({ find_root && places; } 2>&1); then
@@ -1452,7 +1459,8 @@ EOF
 # --- external commands (PRD decision 10)
 
 # Sets PLACES: where ken-<name> is looked for, in order, one "<folder><tab><from>" per line:
-# the scope's .bin/, each direct layer's in .ken order, then PATH. find_root has run.
+# the scope's .bin/, each direct layer's in .ken order, the top's when the scope is a layer,
+# then PATH. find_root has run.
 places() {
 	PLACES="$SCOPE/.bin${tab}the scope"
 	layers=$(layer_lines "$SCOPE") || exit 1
@@ -1461,6 +1469,7 @@ places() {
 	done <<EOF
 $layers
 EOF
+	if [ "$TOP" != "$SCOPE" ]; then PLACES=$PLACES$nl$TOP/.bin${tab}the\ top; fi
 	set -f
 	IFS=:
 	# an empty PATH entry is the current folder, as in any shell; the : added keeps a last one
@@ -1516,8 +1525,10 @@ dispatch() {
 $PLACES
 EOF
 	if [ -n "$run" ]; then
-		KEN_ROOT=$SCOPE
-		export KEN_ROOT
+		# the folder this ken runs from goes first on PATH, so the script runs `ken` back
+		# whether or not one is installed: a root's hook reaches its own .bin/ken
+		KEN_ROOT=$SCOPE PATH=$(real "$(dir_of "$0")"):$PATH
+		export KEN_ROOT PATH
 		exec "$run" "$@"
 	fi
 	shown=$(q "$(redact "$name")")
@@ -1531,6 +1542,18 @@ EOF
 }
 
 # --- main
+
+# A kernel that lives in a layer's .bin/ hands the call to the kernel of the top it is in, so one
+# kernel runs on a machine whichever .bin/ken was named (PRD decision 19); the scope is still the
+# nearest .ken. One reached through PATH resolves to the root it serves, so it never hands over,
+# nor does one identical to the top's, which also ends a link from the top's back to this one.
+own=$(script_root)
+if [ -n "$own" ]; then
+	top_of "$own"
+	if [ "$TOP" != "$own" ] && [ -f "$TOP/.bin/ken" ] && ! cmp -s "$TOP/.bin/ken" "$0"; then
+		exec "$TOP/.bin/ken" "$@"
+	fi
+fi
 
 command=${1-help}
 if [ $# -gt 0 ]; then shift; fi

@@ -1,0 +1,19 @@
+{
+	"hooks": {
+		"SessionStart": [{ "hooks": [{ "type": "command", "command": ".bin/ken status" }] }]
+	},
+	"permissions": {
+		"deny": [
+			"Read(./.repos/**/node_modules/**)",
+			"Read(./.repos/**/dist/**)",
+			"Read(./.repos/**/.next/**)",
+			"Read(./.repos/**/coverage/**)",
+			"Read(./.repos/**/package-lock.json)",
+			"Read(./.repos/**/pnpm-lock.yaml)",
+			"Read(./.repos/**/yarn.lock)",
+			"Read(./.repos/**/bun.lock)",
+			"Read(./.repos/**/Cargo.lock)",
+			"Read(./.repos/**/uv.lock)"
+		]
+	}
+}

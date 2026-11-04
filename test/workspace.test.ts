@@ -2,12 +2,14 @@
 // layer that has a layer, all local, walked through the table from inside the layer.
 import { spawnSync } from 'node:child_process'
 import {
+	copyFileSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
 	readFileSync,
 	realpathSync,
+	rmSync,
 	symlinkSync,
 	writeFileSync
 } from 'node:fs'
@@ -143,16 +145,43 @@ describe.each(SHELLS)('a layer is a workspace, under %s', (shell) => {
 		ok(atlas, 'layer', 'remove', 'lib')
 	}, 20_000)
 
-	it("ken <name> finds the layer's .bin/ and its direct layer's, not the top's", () => {
+	it("ken <name> finds the layer's .bin/, its direct layer's, then the top's, the nearer winning", () => {
 		expect(ok(atlas, 'atlas')).toBe(`atlas ${atlas}\n`)
 		expect(ok(atlas, 'hb')).toBe('hb\n')
-		const r = ken(atlas, 'top')
+		expect(ok(atlas, 'top')).toBe('top\n')
+		write(join(top, '.bin/ken-hb'), '#!/bin/sh\necho top hb\n', 0o755)
+		expect(ok(atlas, 'hb')).toBe('hb\n')
+		const r = ken(atlas, 'nope')
 		expect(r.status).toBe(1)
-		expect(r.stderr).toContain(`${atlas}/.bin  (the scope)`)
-		expect(r.stderr).not.toContain(`${top}/.bin`)
+		expect(r.stderr).toContain(
+			`${atlas}/.bin  (the scope)\n  ${code('hb')}/.bin  (layer handbook)\n  ${top}/.bin  (the top)`
+		)
 		expect(ok(top, 'top')).toBe('top\n')
 		// the handbook arrives through the atlas, so its commands are read, never run, at the top
+		expect(ok(top, 'hb')).toBe('top hb\n')
+		rmSync(join(top, '.bin/ken-hb'))
 		expect(ken(top, 'hb').status).toBe(1)
+	})
+
+	it("a layer's own .bin/ken, named by path, hands the call to the top's kernel; alone, it runs", () => {
+		const layerKen = join(atlas, '.bin/ken')
+		const topKen = join(top, '.bin/ken')
+		copyFileSync(KEN, layerKen)
+		// identical to the top's: runs itself, scoped to the layer
+		expect(run(atlas, shell, layerKen, 'path', 'root').stdout).toBe(`${atlas}\n`)
+		try {
+			write(topKen, '#!/bin/sh\necho "top kernel $*"\n', 0o755)
+			expect(run(atlas, shell, layerKen, 'path', 'root').stdout).toBe('top kernel path root\n')
+			// the kernel on PATH is not a layer's: it runs as it is, scoped to the layer
+			expect(ok(atlas, 'path', 'root')).toBe(`${atlas}\n`)
+		} finally {
+			copyFileSync(KEN, topKen)
+		}
+		// cloned alone, the layer is its own top
+		const alone = join(dir, `alone-${shell}`)
+		ok(dir, 'init', alone)
+		expect(run(alone, shell, join(alone, '.bin/ken'), 'path', 'root').stdout).toBe(`${alone}\n`)
+		rmSync(layerKen)
 	})
 
 	it('a worktree of the layer made with get -b is a root whose links resolve', () => {

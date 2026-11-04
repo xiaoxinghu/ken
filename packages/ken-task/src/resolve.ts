@@ -126,3 +126,28 @@ export function resolveTask(root: string, configured: string, cwd: string, arg: 
 			'with or without its extension. Run `ken task list` to see the tasks.'
 	)
 }
+
+/**
+ * The task file `file`, then the README.md of each folder from its own up to `root`, root
+ * last, the missing ones skipped. An archived task reads the chain of the folder it was
+ * archived from, whose README.md holds its conventions; a task folder outside the root goes
+ * up to the folder, then the root.
+ */
+export function readmeChain(root: string, configured: string, file: string): string[] {
+	const folder = real(configured)
+	const top = real(root)
+	const rel = relative(folder, dirname(file)).replace(/^\.archive(\/|$)/, '')
+	const up = (from: string, to: string) => {
+		const dirs = [from]
+		for (let dir = from; dir !== to && dir !== dirname(dir); dir = dirname(dir))
+			dirs.push(dirname(dir))
+		return dirs
+	}
+	const fromTop = relative(top, folder)
+	const inRoot = fromTop !== '..' && !fromTop.startsWith('../')
+	const dirs = inRoot ? up(join(folder, rel), top) : [...up(join(folder, rel), folder), top]
+	const readmes = dirs
+		.map((dir) => join(dir, 'README.md'))
+		.filter((path) => statSync(path, { throwIfNoEntry: false })?.isFile())
+	return [file, ...readmes]
+}

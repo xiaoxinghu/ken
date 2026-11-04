@@ -140,7 +140,7 @@ describe('ken task set', () => {
 	it('writes closed on done or wontfix, removes it on todo, and says to distil on done', () => {
 		const { path, set, text } = setup('t.md', '# T\n')
 		const done = set('status', 'done')
-		expect(done.stderr).toContain(`\`ken path "${path}"\``)
+		expect(done.stderr).toContain(`\`ken task path "${path}" --readmes\``)
 		expect(text()).toBe(`---\nstatus: done\nclosed: ${today}\n---\n# T\n`)
 		expect(set('status', 'todo').status).toBe(0)
 		expect(text()).toBe('---\nstatus: todo\n---\n# T\n')

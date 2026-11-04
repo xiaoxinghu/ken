@@ -71,3 +71,40 @@ describe('ken task path', () => {
 		expect(r.stderr).toContain('two.md, two.txt')
 	})
 })
+
+describe('ken task path --readmes', () => {
+	it('prints the file, then the README.md of each folder up to the root, root last, the missing skipped', () => {
+		const root = newRoot()
+		const folder = join(root, 'tasks')
+		for (const dir of [root, folder, join(folder, 'portal')]) write(join(dir, 'README.md'), '# R\n')
+		const task = join(folder, 'portal/web/print.md')
+		write(task, '# Print\n')
+		write(join(folder, '.archive/portal/web/old.md'), '---\nstatus: done\n---\n')
+		const chain = [
+			join(folder, 'portal/README.md'),
+			join(folder, 'README.md'),
+			join(root, 'README.md')
+		]
+		expect(kenTask(root, ['path', '--readmes', 'tasks/portal/web/print'])).toEqual({
+			status: 0,
+			stdout: `${[task, ...chain].join('\n')}\n`,
+			stderr: ''
+		})
+		// archived, it reads the chain of the folder it was archived from
+		expect(kenTask(root, ['path', 'tasks/portal/web/old', '--readmes']).stdout).toBe(
+			`${[join(folder, '.archive/portal/web/old.md'), ...chain].join('\n')}\n`
+		)
+	})
+
+	it('goes up to a task folder outside the root, then the root', () => {
+		const root = newRoot()
+		const folder = join(newRoot(), 'tasks')
+		write(join(root, '.ken'), `task.folder=${folder}\n`)
+		write(join(root, 'README.md'), '# R\n')
+		write(join(folder, 'README.md'), '# T\n')
+		write(join(folder, 'a.md'), '# A\n')
+		expect(kenTask(root, ['path', 'a', '--readmes']).stdout).toBe(
+			`${[join(folder, 'a.md'), join(folder, 'README.md'), join(root, 'README.md')].join('\n')}\n`
+		)
+	})
+})

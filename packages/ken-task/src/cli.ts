@@ -10,7 +10,7 @@ import { finishTask } from './finish.ts'
 import { lintTasks } from './lint.ts'
 import { formatRows, listTasks, localDate, readyTasks } from './list.ts'
 import { renameTask } from './rename.ts'
-import { resolveTask } from './resolve.ts'
+import { readmeChain, resolveTask } from './resolve.ts'
 import { setTask } from './set.ts'
 
 const HELP = `ken task <command>
@@ -26,7 +26,9 @@ stem.
 Commands:
   list [--json]   every task with its state, what it waits on, and what needs you
   ready           the paths of the ready tasks, in the order to take them
-  path <task>     the absolute path of a task, live or archived
+  path <task> [--readmes]
+                  the absolute path of a task, live or archived; with --readmes, then
+                  the README.md of each folder up to the root
   add <path> [-r <key>] [-b <task>]...
                   create a task file, print its path
   set <task> <field> <value>
@@ -45,7 +47,7 @@ Examples:
   ken task list
   ken task ready | head -1
   ken task add portal/fix-login -b portal/web-view-profiles
-  ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"
+  ken task path tasks/portal/print-web-views-to-pdf --readmes | xargs cat
   cd "$(ken task claim)"
   ken task set tasks/portal/print-web-views-to-pdf status done
   ken task rename tasks/portal/print-web-views-to-pdf portal/print-to-pdf
@@ -100,17 +102,22 @@ Examples:
   ken task ready | head -1
   ken task ready | xargs -n1 head -5`
 
-const PATH_HELP = `ken task path <task>
+const PATH_HELP = `ken task path <task> [--readmes]
 
 The absolute path of the task file, in the folder or its .archive/. <task> is any path
 that reaches it: absolute, from here, from the root or from the folder, with or without its extension
 when exactly one file has that stem. A path outside the folder is refused; a task found
 nowhere exits 1.
 
+  --readmes   after the file, the README.md of each folder from the task's up to the
+              root, root last, one per line; a folder without one adds no line. They hold
+              the conventions the task is worked under and name where what it taught
+              goes. An archived task reads the chain of the folder it was archived from.
+
 Examples:
   ken task path tasks/portal/print-web-views-to-pdf.md
   cd tasks && ken task path portal/print-web-views-to-pdf
-  ken path "$(ken task path tasks/portal/print-web-views-to-pdf)"   # its README chain`
+  ken task path tasks/portal/print-web-views-to-pdf --readmes | xargs cat   # with its README chain`
 
 const ADD_HELP = `ken task add <path> [-r <key>] [-b <task>]...
 
@@ -250,13 +257,17 @@ function ready(args: string[]): void {
 }
 
 function path(args: string[]): void {
-	if (args.length !== 1) {
+	const readmes = args.includes('--readmes')
+	const tasks = args.filter((arg) => arg !== '--readmes')
+	if (tasks.length !== 1) {
 		throw new Error(
-			`ken task path takes one task, got ${args.length}. Run \`ken task path <task>\`, e.g. \`ken task path tasks/do-the-thing.md\`.`
+			`ken task path takes one task, got ${tasks.length}. Run \`ken task path <task> [--readmes]\`, e.g. \`ken task path tasks/do-the-thing.md\`.`
 		)
 	}
 	const { root, folder } = settings()
-	process.stdout.write(`${resolveTask(root, folder, process.cwd(), args[0] ?? '')}\n`)
+	const file = resolveTask(root, folder, process.cwd(), tasks[0] ?? '')
+	const lines = readmes ? readmeChain(root, folder, file) : [file]
+	process.stdout.write(`${lines.join('\n')}\n`)
 }
 
 function add(args: string[]): void {
@@ -321,7 +332,7 @@ function set(args: string[]): void {
 	process.stdout.write(`${path}\n`)
 	if (field === 'status' && value === 'done') {
 		process.stderr.write(
-			`Done. Before the task is archived, distil what it taught into the knowledge section its folder's README.md names; \`ken path "${path}"\` prints that README chain.\n`
+			`Done. Before the task is archived, distil what it taught into the knowledge section its folder's README.md names; \`ken task path "${path}" --readmes\` prints that README chain.\n`
 		)
 	}
 }

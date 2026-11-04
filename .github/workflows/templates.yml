@@ -1,7 +1,7 @@
 # Each templates/<name> on main is also the branch template/<name>: that folder alone, with its
 # history, its .bin/ken link replaced by the kernel it was pushed with, so
 # `git clone -b template/<name> --single-branch` installs it (docs/templates.md). The branches
-# are generated, so they are force-pushed.
+# are generated, so they are force-pushed, and one whose folder is gone is deleted.
 name: templates
 on:
   push:
@@ -26,4 +26,9 @@ jobs:
             git add .bin/ken && git commit -q -m "ken as of $GITHUB_SHA"
             git push --force origin "template/$name"
             git checkout -q "$GITHUB_SHA"
+          done
+          # the branches are the folders, no more: a template retired on main is retired on GitHub
+          git ls-remote --heads origin 'template/*' | while read -r _ ref; do
+            name=${ref#refs/heads/template/}
+            [ -d "templates/$name" ] || git push --delete origin "template/$name"
           done

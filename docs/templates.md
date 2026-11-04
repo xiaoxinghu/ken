@@ -8,9 +8,10 @@ A template is a folder of this repo, `templates/<name>/`, so it is edited, teste
 reviewed with the kernel it copies, and also a branch, `template/<name>`, holding that
 folder alone with its history: the workflow `.github/workflows/templates.yml` splits it
 off with `git subtree split` on every push to `main`, replaces the folder's `.bin/ken` link
-to the repo's kernel by a copy of it, and force-pushes the branch. The branches are
-generated: never commit to one. `test/templates.test.ts` holds each template to the rules
-below and installs it the way the workflow publishes it. There is one, `agents`.
+to the repo's kernel by a copy of it, force-pushes the branch, and deletes a branch whose
+folder is gone. The branches are generated: never commit to one. `test/templates.test.ts`
+holds each template to the rules below and installs it the way the workflow publishes it.
+There is one, `agents`.
 
 Starting from it is one clone and the kernel it brings, nothing installed first:
 

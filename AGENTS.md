@@ -27,11 +27,12 @@ run.
 - They read the root from `KEN_ROOT`, which `ken` dispatch sets, and their settings from
   its `.ken`. Their tests put the root `ken` script on `PATH` and run it under `sh`.
 
-## The templates: `templates/minimal`, `templates/agents`
+## The template: `templates/agents`
 
-- Each is a root to clone, published as the branch `template/<name>` by
-  `.github/workflows/templates.yml`; `docs/templates.md` says what each holds and why.
-- `.bin/ken` in each is a link to the kernel here, which the workflow replaces by a copy.
+- A root to clone, published as the branch `template/agents` by
+  `.github/workflows/templates.yml`; `docs/templates.md` says what it holds and why. Another
+  template would be a folder beside it, published the same way.
+- Its `.bin/ken` is a link to the kernel here, which the workflow replaces by a copy.
   `AGENTS.md` stays under 40 lines and names `.bin/ken` and `ken help` in its first paragraph.
 - `.bin/ken-<name>` scripts are POSIX `sh`, shellcheck clean, and call `ken` by name.
 

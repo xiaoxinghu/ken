@@ -4,18 +4,18 @@ A template is a root to start from, with the kernel it was made with at `.bin/ke
 ([PRD](prd.md), decision 19). There is no scaffolding tool: anything that needs to know a
 rule is a kernel primitive, and the rest is `git clone`.
 
-The templates are folders of this repo, `templates/<name>/`, so they are edited, tested and
-reviewed with the kernel they copy, and each is also a branch, `template/<name>`, holding
-that folder alone with its history: the workflow `.github/workflows/templates.yml` splits it
+A template is a folder of this repo, `templates/<name>/`, so it is edited, tested and
+reviewed with the kernel it copies, and also a branch, `template/<name>`, holding that
+folder alone with its history: the workflow `.github/workflows/templates.yml` splits it
 off with `git subtree split` on every push to `main`, replaces the folder's `.bin/ken` link
 to the repo's kernel by a copy of it, and force-pushes the branch. The branches are
 generated: never commit to one. `test/templates.test.ts` holds each template to the rules
-below and installs it the way the workflow publishes it.
+below and installs it the way the workflow publishes it. There is one, `agents`.
 
-Starting from a template is one clone and the kernel it brings, nothing installed first:
+Starting from it is one clone and the kernel it brings, nothing installed first:
 
 ```
-git clone -b template/minimal --single-branch https://github.com/xiaoxinghu/ken ~/ken
+git clone -b template/agents --single-branch https://github.com/xiaoxinghu/ken ~/ken
 ~/ken/.bin/ken init
 git -C ~/ken remote remove origin
 ```
@@ -26,21 +26,21 @@ the branch, the agent being the merge tool. Starting from nothing is `ken init ~
 an empty index and a `.bin/`, which is all a layer needs to be one; `init` writes no page and
 no `AGENTS.md`. A template's `.ken` carries `template.name`, a key `ken` keeps.
 
-| Template  | Holds                                                                                                                |
-| --------- | -------------------------------------------------------------------------------------------------------------------- |
-| `minimal` | `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`: no sections, no `log.md`, no `.envrc`         |
-| `agents`  | `minimal` plus `.envrc`, the harness files below, hooks, deny rules, and `.bin/ken-status`, the session-start script |
-
-`minimal` is the hello world: it assumes nothing about what the root is for, not even
-software. Its `AGENTS.md` is a dozen lines: where the CLI is, how to make a section and a
-page, and nothing `ken help` already says; an agent grows the root from there, `ken help` and
-the messages. A layer starts the same way: any root is one.
+`ken init` is the default for everyone: a root, or a layer, needs nothing more, and a person
+with no agent needs no template. `agents` is the opt-in for a knowledge base kept with an
+agent harness: `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`, the
+harness files below, hooks, deny rules and `.bin/ken-status`, the session-start script, and
+`.envrc`. It assumes nothing about what the root is for, not even software. Its `AGENTS.md`
+is sixteen lines: where the CLI is, how to make a section and a page, and nothing `ken help`
+already says; an agent grows the root from there, `ken help` and the messages. A layer starts
+the same way, any root is one, and under a root its harness files sit unused, the root's hooks
+and deny rules being the ones that run (PRD decision 21), until it is cloned alone.
 
 ## Where the CLI is
 
 A fresh root has nothing visible but `README.md` and `AGENTS.md`, and `ken` is on no PATH
 but the one the person who installed it set up. So the agent learns where the CLI is from
-the one file every harness reads: the first paragraph of each template's `AGENTS.md` names
+the one file every harness reads: the first paragraph of the template's `AGENTS.md` names
 `.bin/ken`, says to run it as that when `ken` is not a command, and points at `ken help`.
 That alone works in every harness, with no hook and no trust prompt.
 

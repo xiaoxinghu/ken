@@ -16,9 +16,10 @@ few fixed rules; everything else is scripts and skills built on it.
 
 Install: `sh ken init ~/ken` makes a root holding a copy at `~/ken/.bin/ken`, then
 `ln -s ~/ken/.bin/ken ~/.local/bin/ken`. Or start from a template, a root with an `AGENTS.md`
-that tells an agent where the CLI is: `git clone -b template/minimal --single-branch
-https://github.com/xiaoxinghu/ken ~/ken && ~/ken/.bin/ken init`. The templates are
-[`templates/`](templates), one branch each. Its only dependency is git 2.48 or newer. Its
+that tells an agent where the CLI is: `git clone -b template/agents --single-branch
+https://github.com/xiaoxinghu/ken ~/ken && ~/ken/.bin/ken init`. The template is
+[`templates/agents`](templates/agents), the branch `template/agents`. Its only dependency is
+git 2.48 or newer. Its
 tests are `test/ken.test.ts`, one command at a time, `test/workspace.test.ts`, a layer that
 has a layer walked end to end, and `test/templates.test.ts`; the first two run it under `sh`
 and `dash`.

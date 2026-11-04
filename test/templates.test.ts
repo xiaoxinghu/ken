@@ -45,8 +45,8 @@ beforeAll(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-templates-')))
 })
 
-it('there are the two templates docs/templates.md describes', () => {
-	expect(NAMES.sort()).toEqual(['agents', 'minimal'])
+it('there is the one template docs/templates.md describes', () => {
+	expect(NAMES).toEqual(['agents'])
 })
 
 describe.each(NAMES)('template %s', (name) => {

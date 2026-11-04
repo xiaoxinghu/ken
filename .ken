@@ -1,0 +1,3 @@
+# ken settings: <key>=<value> lines, the first segment of a key naming its tool.
+# The format is docs/files.md in github.com/xiaoxinghu/ken.
+template.name=agents

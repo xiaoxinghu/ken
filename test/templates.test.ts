@@ -149,6 +149,7 @@ describe('the agents template', () => {
 
 		it.each([
 			[['nope', 'a', 'b'], "'nope' is not a kind"],
+			[['ingest query', 'a', 'b'], "'ingest query' is not a kind"],
 			[['page', 'a b', 'c'], "'a b' is not one word"],
 			[['page', 'a', 'one\ntwo'], 'spans lines'],
 			[['page', 'a', ' '], 'is empty'],

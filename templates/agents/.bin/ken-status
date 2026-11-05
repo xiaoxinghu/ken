@@ -17,4 +17,11 @@ if command -v ken-task >/dev/null 2>&1; then
 	echo
 	ken task ready 2>&1
 fi
+# The last entries of the timeline the agents write with `ken log`, never the whole file. A
+# union merge can leave lines out of order; sort puts back those that share an offset.
+if [ -s "$KEN_ROOT/log.md" ]; then
+	echo
+	echo "Recent, log.md (now $(date +%Y-%m-%dT%H:%M%z)); grep it for older entries, never read it whole:"
+	LC_ALL=C sort "$KEN_ROOT/log.md" | tail -n 10
+fi
 exit 0

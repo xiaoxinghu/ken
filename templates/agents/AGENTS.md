@@ -11,6 +11,9 @@ printed. README.md, the front page, says what the root is for.
 - Name code the way `ken path` reads it, `<key>:<path>#<symbol>`, never by line number or
   absolute path.
 - Run `ken lint` after changing pages, then commit: git is the only sync.
+- After an ingest, an answered question, a page, task, promote or layer change, run
+  `ken log <kind> <subject> <what>` before the commit. `ken status` shows the recent lines; grep
+  `log.md` for older ones, never read it whole.
 - A clone gets `CLAUDE.md -> AGENTS.md`: this root's CLAUDE.md hides a clone's AGENTS.md from
   Claude Code.
 - Auto-memory is shared by every session at this root: knowledge goes in a page.

@@ -30,10 +30,12 @@ no `AGENTS.md`. A template's `.ken` carries `template.name`, a key `ken` keeps.
 `ken init` is the default for everyone: a root, or a layer, needs nothing more, and a person
 with no agent needs no template. `agents` is the opt-in for a knowledge base kept with an
 agent harness: `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`, the
-harness files below, hooks, deny rules and `.bin/ken-status`, the session-start script, and
-`.envrc`. It assumes nothing about what the root is for, not even software. Its `AGENTS.md`
-is sixteen lines: where the CLI is, how to make a section and a page, and nothing `ken help`
-already says; an agent grows the root from there, `ken help` and the messages. A layer starts
+harness files below, hooks, deny rules and `.bin/ken-status`, the session-start script,
+`.bin/ken-log`, which appends a line to the root's `log.md` ([PRD](prd.md), the knowledge
+base), a `.gitattributes` with `log.md merge=union`, so two machines' appends merge without a
+conflict, and `.envrc`. It assumes nothing about what the root is for, not even software. Its
+`AGENTS.md` is nineteen lines: where the CLI is, how to make a section and a page, when to
+`ken log`, and nothing `ken help` already says; an agent grows the root from there, `ken help` and the messages. A layer starts
 the same way, any root is one, and under a root its harness files sit unused, the root's hooks
 and deny rules being the ones that run (PRD decision 21), until it is cloned alone.
 
@@ -47,7 +49,8 @@ That alone works in every harness, with no hook and no trust prompt.
 
 The `agents` template goes further where a harness has a way. Its session-start hook runs
 `.bin/ken status`, whose stdout every harness puts before the model: the repos and layers,
-the settings, the ready tasks, and the sentence that names the CLI. In Claude Code the hook
+the settings, the ready tasks, the last 10 lines of `log.md` with the time now, and the
+sentence that names the CLI. In Claude Code the hook
 also appends an `export PATH=<root>/.bin:$PATH` line to the file `CLAUDE_ENV_FILE` names,
 which Claude Code sources before each shell command, so `ken` is a command for the rest of
 the session. The script itself calls `ken` by name: dispatch puts the running kernel's
@@ -74,6 +77,8 @@ AGENTS.md                      every harness; Claude Code only while no CLAUDE.m
                                brings (to verify: Claude Code documents a link per skill, not of the folder)
 .agents/hooks.json             one hooks object in Claude Code's schema; Codex reads it as it is
 .bin/ken-status                the script the session-start hook runs
+.bin/ken-log                   `ken log`, which appends to log.md
+.gitattributes                 log.md merge=union
 .claude/settings.json          hooks (a copy of the object: a settings file holds other keys) and permissions.deny
 .codex/hooks.json -> ../.agents/hooks.json
 .pi/extensions/ken-hooks.ts    a shim: reads hooks.json, runs its SessionStart hooks on session_start

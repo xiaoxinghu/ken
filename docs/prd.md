@@ -37,7 +37,7 @@ hidden name.
   README.md                        the front page: evergreen pages, one line per section, one per layer
   AGENTS.md                        < 40 lines: where the CLI is, the page conventions, the traps
   CLAUDE.md -> AGENTS.md
-  log.md                           append-only, one dated line per change
+  log.md                           the timeline: one line per action, written by the agents
   systems/  flows/  decisions/     sections, made as needed, each with a README.md
   sales-atlas -> .repos/github.com/acme/sales-atlas    a layer: its clone, as a section
   sales-atlas/handbook             a layer's own layer: nested in it, never at the root
@@ -103,7 +103,7 @@ one, or with an existing section. Everything else at the root is a section.
 8. **A folder's `README.md` is its index, and is read first.** The root's is the front page,
    under about 60 lines; a section's lists its pages one line each, under about 150. Front
    page, section, page: three hops, the first two small. Nothing derivable goes in: the repo
-   list is `ken repos`, recent changes are `log.md`. The caps belong to `ken lint`.
+   list is `ken repos`, recent changes are `log.md`, which the agents write as they act. The caps belong to `ken lint`.
 9. **A code reference is `<key>:<path>#<symbol>`.** Never a line number, never an absolute
    path. `ken path <ref>` resolves it when the repo is cloned, else prints the repo's URL
    and says on stderr to `ken get <key>`.
@@ -327,8 +327,20 @@ gets a README PR. A page on how we use a third-party repo and where it bites bel
   knowledge base is, links the few evergreen pages, which live in sections like any other,
   and gives one line per section with its page count and one per layer. A section's README
   lists its pages one line each; over the cap it splits.
-- **`log.md`** is append-only, one dated line per change, never read whole: grepped by date
-  or key, rolled per year if it bothers.
+- **`log.md`** is the root's timeline, append-only, written by the agents as they act, not by
+  `ken`: deciding what is worth a line takes judgment. One file at the root `KEN_ROOT` names,
+  whatever the current folder; a change to a layer's page is logged at the root it was made
+  in, its subject naming the layer path. One line per entry,
+  `<time> <kind> <subject>: <what>`, through the `agents` template's `ken log`:
+  `2026-11-05T15:10+1300 query flow/README.md: how a task's worktree is cleaned up`. The time
+  is local to the minute with its offset, stamped by `ken log` when the agent acts, not the
+  commit time: a commit can hold a day of work, and an answered question changes no file. The
+  kind is one of a closed list, `ingest`, `query`, `page`, `task`, `promote`, `layer`; the
+  subject is one word, a repo key, a path, a task path or a code reference. Never read whole:
+  `ken status` shows the last 10 lines, sorted, and older ones are grepped by date, kind or
+  subject. It is committed with the change it records, and `log.md merge=union` in
+  `.gitattributes` merges two machines' appends without a conflict, sorting back into order
+  where the lines share an offset. `git log` does not replace it.
 - **Sections** are folders at the top with a README, made when a topic needs one; none up
   front, since nothing is assumed about what the root is for. Pages are Markdown, each in a
   section, none beside the front page. No generated pages: an overview belongs in the repo's
@@ -377,7 +389,8 @@ bites: a host alias such as `gh/` for `github.com/`, or a shorter root.
 Windows (`MAX_PATH` 260, `core.longpaths`); `.org` pages; GitLab subgroups, an owner with
 slashes; repos with submodules, no worktrees until git recommends them; a union file system
 for layers, the link per layer is the overlay; a Backstage export; encrypting anything in a
-shared layer.
+shared layer; splitting `log.md` into a `log/` folder by year or month, decided when its size
+gets in the way; `ken-lint` checking `log.md` lines against the format.
 
 ## Considered and rejected
 
@@ -430,6 +443,11 @@ shared layer.
   execution of configured commands, and a `.ken` in a clone would read as a root marker.
 - **The kernel editing `README.md`.** One line per layer is a lint rule; the agent writes
   it. The kernel touches no knowledge content.
+- **`ken` logging its own commands, or `git log` as the timeline.** What is worth a line is
+  judgment, and a commit's date is when someone committed, not when the thing happened.
+- **A heading per log entry with a body, as Karpathy's wiki has it, or UTC times.** One line
+  keeps `tail`, `grep` and `sort` working without a parser; UTC sorts everywhere but is
+  unreadable at a glance to the person whose root it is, and the offset keeps local time exact.
 
 ## Prior art
 

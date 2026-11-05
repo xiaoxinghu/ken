@@ -340,6 +340,13 @@ describe('session digests', () => {
 		expect(digest()).not.toContain('done')
 	})
 
+	it("ken digest <transcript> in another session writes the transcript's session, not that one", () => {
+		const other = run({ KEN_SESSION: 'other', KEN_SESSION_TRANSCRIPT: '' }, 'digest', transcript)
+		expect(other.status).toBe(0)
+		expect(readdirSync(join(root, '.sessions'))).not.toContain('other.md')
+		expect(digest()).toBe(DIGEST)
+	})
+
 	it('ken log in a session writes the digest and ends the line with s=<id>; with none, logs as before', () => {
 		rmSync(join(root, '.sessions'), { recursive: true, force: true })
 		const r = run(

@@ -105,11 +105,14 @@ function you(id, pfx, time,   i, s) {
 		if (s == "text" || s == "input_text") said(id, val(pfx "." i ".text"), time, "you")
 	}
 }
-function said(id, s, time, who) {
+function said(id, s, time, who,   i, j) {
+	# a reminder the harness put in a prompt is cut out, wherever it sits
+	while (who == "you" && (i = index(s, "<system-reminder>")) && (j = index(substr(s, i), "</system-reminder>")))
+		s = substr(s, 1, i - 1) substr(s, i + j + 17)
 	sub(/^[ \t\n]+/, "", s); sub(/[ \t\n]+$/, "", s)
 	if (s == "") return
 	if (who == "you") {
-		if (s ~ /^<(task-notification|bash-stdout|local-command-|system-reminder)/) return
+		if (s ~ /^<(task-notification|bash-stdout|local-command-)/) return
 		if (harness == "codex" && s ~ /^(<(environment_context|user_instructions|external_codex_apps_open_page)>|# AGENTS\.md instructions)/) return
 		if (!(id in HEAD)) { HEAD[id]; ev(id, "you", stamp(time)) }
 		return ev(id, "prompt", s)

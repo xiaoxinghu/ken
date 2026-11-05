@@ -234,7 +234,10 @@ const CLAUDE_CODE = [
 		sessionId: 'abc-123',
 		cwd: '/w'
 	},
-	user(1, 'Why is the "sky" blue?\nAnswer with C:\\path in é'),
+	user(
+		1,
+		`<system-reminder>${SECRET}</system-reminder>Why is the "sky" blue?\nAnswer with C:\\path in é<system-reminder>${SECRET}</system-reminder>`
+	),
 	user(2, '<local-command-caveat>harness text</local-command-caveat>', { isMeta: true }),
 	claude(3, { type: 'thinking', thinking: `thought ${SECRET}` }),
 	claude(4, { type: 'text', text: 'Looking.' }),

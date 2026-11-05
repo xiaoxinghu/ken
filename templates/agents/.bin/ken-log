@@ -3,6 +3,8 @@
 # agents write as they act, `<time> <kind> <subject>: <what>`. The time is now, local, to the
 # minute with its offset; BSD date has no %:z. One short line in one >> is atomic under
 # O_APPEND, so sessions logging at once never tear a line. Prints nothing on success.
+# In a session the start hook named, KEN_SESSION, it first writes the session's digest with
+# `ken digest` and ends the line with ` s=<id>`, the link from the line to the story behind it.
 kinds='ingest query page task promote layer'
 nl='
 '
@@ -46,4 +48,14 @@ case $what in
 	exit 2
 	;;
 esac
-printf '%s %s %s: %s\n' "$(date +%Y-%m-%dT%H:%M%z)" "$kind" "$subject" "$what" >>"$KEN_ROOT/log.md"
+# A harness with no env file has its hook write the session to .ken-session instead.
+if [ -z "${KEN_SESSION-}" ] && [ -r "$KEN_ROOT/.ken-session" ]; then
+	KEN_SESSION=$(sed -n 's/^KEN_SESSION=//p' "$KEN_ROOT/.ken-session")
+	KEN_SESSION_TRANSCRIPT=$(sed -n 's/^KEN_SESSION_TRANSCRIPT=//p' "$KEN_ROOT/.ken-session")
+	export KEN_SESSION KEN_SESSION_TRANSCRIPT
+fi
+link=
+if [ -n "${KEN_SESSION-}" ] && ken digest; then
+	link=" s=$KEN_SESSION"
+fi
+printf '%s %s %s: %s%s\n' "$(date +%Y-%m-%dT%H:%M%z)" "$kind" "$subject" "$what" "$link" >>"$KEN_ROOT/log.md"

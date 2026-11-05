@@ -11,10 +11,11 @@ import {
 	readlinkSync,
 	realpathSync,
 	rmSync,
+	symlinkSync,
 	writeFileSync
 } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 
 const REPO = join(import.meta.dirname, '..')
@@ -201,5 +202,284 @@ describe('the agents template', () => {
 			expect(text).toContain('task tasks/b.md: added\n')
 			expect(text).not.toContain('<<<<<<<')
 		})
+	})
+})
+
+// A Claude Code transcript, one JSON value per line, with every kind of entry a digest keeps or
+// drops: the secret sits only where a digest never looks.
+const SECRET = 'sk-SECRET'
+const at = (s: number) => `2026-11-06T01:00:${String(s).padStart(2, '0')}.123Z`
+const user = (s: number, content: unknown, extra = {}) => ({
+	type: 'user',
+	message: { role: 'user', content },
+	timestamp: at(s),
+	sessionId: 'abc-123',
+	cwd: '/w',
+	...extra
+})
+const claude = (s: number, ...content: unknown[]) => ({
+	type: 'assistant',
+	message: { role: 'assistant', content },
+	timestamp: at(s),
+	sessionId: 'abc-123'
+})
+const CLAUDE_CODE = [
+	{ type: 'permission-mode', permissionMode: 'default', sessionId: 'abc-123' },
+	{
+		type: 'attachment',
+		attachment: { type: 'hook_success', content: SECRET },
+		timestamp: at(0),
+		sessionId: 'abc-123',
+		cwd: '/w'
+	},
+	user(1, 'Why is the "sky" blue?\nAnswer with C:\\path in é'),
+	user(2, '<local-command-caveat>harness text</local-command-caveat>', { isMeta: true }),
+	claude(3, { type: 'thinking', thinking: `thought ${SECRET}` }),
+	claude(4, { type: 'text', text: 'Looking.' }),
+	claude(5, {
+		type: 'tool_use',
+		id: 't1',
+		name: 'Bash',
+		input: { command: `echo one\n${'x'.repeat(150)}`, description: 'd' }
+	}),
+	claude(6, { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/w/a.md' } }),
+	claude(7, {
+		type: 'tool_use',
+		id: 't3',
+		name: 'WebFetch',
+		input: { url: 'https://e.x', prompt: 'p' }
+	}),
+	user(8, [{ type: 'tool_result', tool_use_id: 't1', content: SECRET }], {
+		toolUseResult: { stdout: SECRET }
+	}),
+	claude(9, { type: 'text', text: 'Rayleigh scattering.' }),
+	user(10, '<task-notification>done</task-notification>'),
+	{
+		type: 'system',
+		subtype: 'compact_boundary',
+		content: 'Conversation compacted',
+		timestamp: at(11),
+		sessionId: 'abc-123'
+	},
+	user(12, `summary ${SECRET}`, { isCompactSummary: true }),
+	user(13, [
+		{ type: 'image', source: { data: SECRET } },
+		{ type: 'text', text: 'And this?' }
+	]),
+	claude(14, { type: 'text', text: 'A cat.' })
+]
+	.map((e) => JSON.stringify(e))
+	.join('\n')
+const DIGEST = `---
+session: abc-123
+harness: claude-code
+started: 2026-11-06T01:00:00Z
+cwd: /w
+---
+
+## you 2026-11-06T01:00:01Z
+
+Why is the "sky" blue?
+Answer with C:\\path in é
+
+## claude
+
+Looking.
+
+- Bash echo one ${'x'.repeat(111)}…
+- Read /w/a.md
+- WebFetch https://e.x p
+
+Rayleigh scattering.
+
+(compacted here)
+
+## you 2026-11-06T01:00:13Z
+
+And this?
+
+## claude
+
+A cat.
+`
+
+describe('session digests', () => {
+	let root: string
+	let transcript: string
+	let lintBin: string
+	beforeAll(() => {
+		root = install('agents', 'digests')
+		mkdirSync(join(root, 'flow/deep'), { recursive: true })
+		transcript = join(dir, 'abc-123.jsonl')
+		writeFileSync(transcript, `${CLAUDE_CODE}\n`)
+		// ken-lint as a user installs it, beside node
+		lintBin = join(dir, 'lint-bin')
+		mkdirSync(lintBin)
+		symlinkSync(join(REPO, 'packages/ken-lint/src/cli.ts'), join(lintBin, 'ken-lint'))
+	})
+	const session = { KEN_SESSION: 'abc-123', KEN_SESSION_TRANSCRIPT: '' }
+	const run = (env: Record<string, string>, ...args: string[]) =>
+		sh(join(root, 'flow/deep'), env, '../../.bin/ken', ...args)
+	const digest = () => readFileSync(join(root, '.sessions/abc-123.md'), 'utf8')
+
+	it('ken digest keeps prompts, replies and tool heads in order, and nothing else, the same twice', () => {
+		for (const shell of ['sh', 'dash']) {
+			const r = spawnSync(shell, ['../../.bin/ken', 'digest', transcript], {
+				cwd: join(root, 'flow/deep'),
+				encoding: 'utf8',
+				env: { ...BARE, HOME: dir }
+			})
+			expect(r.stdout + r.stderr).toBe('')
+			expect(r.status).toBe(0)
+			expect(digest()).toBe(DIGEST)
+		}
+		expect(digest()).not.toContain('SECRET')
+		expect(digest()).not.toContain('harness text')
+		expect(digest()).not.toContain('done')
+	})
+
+	it('ken log in a session writes the digest and ends the line with s=<id>; with none, logs as before', () => {
+		rmSync(join(root, '.sessions'), { recursive: true, force: true })
+		const r = run(
+			{ ...session, KEN_SESSION_TRANSCRIPT: transcript },
+			'log',
+			'query',
+			'flow/README.md',
+			'answered',
+			'X'
+		)
+		expect(r.stdout + r.stderr).toBe('')
+		expect(digest()).toBe(DIGEST)
+		expect(run({}, 'log', 'page', 'flow/a.md', 'added').status).toBe(0)
+		const lines = readFileSync(join(root, 'log.md'), 'utf8').split('\n')
+		expect(lines[0]).toMatch(/ query flow\/README\.md: answered X s=abc-123$/)
+		expect(lines[1]).toMatch(/ page flow\/a\.md: added$/)
+	})
+
+	it('ken log with a transcript gone still logs, saying no digest was written', () => {
+		const r = run(
+			{ KEN_SESSION: 'gone', KEN_SESSION_TRANSCRIPT: join(dir, 'nope.jsonl') },
+			'log',
+			'page',
+			'p.md',
+			'x'
+		)
+		expect(r.status).toBe(0)
+		expect(r.stderr).toContain('cannot be read, so no digest was written')
+		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ page p\.md: x s=gone\n$/)
+	})
+
+	it('ken session prints a digest from any folder and greps them all; a bad id is refused', () => {
+		expect(run({}, 'session', 'abc-123').stdout).toBe(DIGEST)
+		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe('abc-123:21:Rayleigh scattering.\n')
+		const missing = run({}, 'session', 'nope')
+		expect(missing.status).toBe(1)
+		expect(missing.stderr).toContain('no digest nope.md')
+		expect(run({}, 'session', '../log').status).toBe(2)
+	})
+
+	it('ken lint passes with digests in .sessions/ and no README line for them', () => {
+		const node = dirname(process.execPath)
+		const r = sh(root, { PATH: `${lintBin}:${node}:/usr/bin:/bin` }, '.bin/ken', 'lint')
+		expect(r.stderr).toBe('')
+		expect(r.status).toBe(0)
+	})
+
+	it("ken status exports the hook's session through CLAUDE_ENV_FILE, else into .ken-session for ken log", () => {
+		const input = JSON.stringify({
+			session_id: 'abc-123',
+			transcript_path: transcript,
+			hook_event_name: 'SessionStart'
+		})
+		const envFile = join(dir, 'digest-env.sh')
+		writeFileSync(envFile, '')
+		const status = (env: Record<string, string>) =>
+			spawnSync('sh', ['.bin/ken', 'status'], {
+				cwd: root,
+				input,
+				encoding: 'utf8',
+				env: { ...BARE, ...env, HOME: dir }
+			})
+		expect(status({ CLAUDE_ENV_FILE: envFile }).status).toBe(0)
+		const sourced = sh(dir, {}, '-c', `. ${envFile} && echo "$KEN_SESSION $KEN_SESSION_TRANSCRIPT"`)
+		expect(sourced.stdout).toBe(`abc-123 ${transcript}\n`)
+		expect(readdirSync(root)).not.toContain('.ken-session')
+		// Codex: the same stdin, no env file
+		expect(status({}).status).toBe(0)
+		rmSync(join(root, '.sessions'), { recursive: true, force: true })
+		expect(run({}, 'log', 'task', 't.md', 'added').status).toBe(0)
+		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ task t\.md: added s=abc-123\n$/)
+		expect(digest()).toBe(DIGEST)
+		const ignored = spawnSync('git', ['check-ignore', '-q', '.ken-session'], { cwd: root })
+		expect(ignored.status).toBe(0)
+	})
+
+	it('ken digest reads pi from the leaf back, dropping the branch left, and Codex without its injected context', () => {
+		const pi = join(dir, 'pi.jsonl')
+		const entry = (id: string, parentId: string | null, role: string, content: unknown) =>
+			JSON.stringify({
+				type: 'message',
+				id,
+				parentId,
+				timestamp: at(1),
+				message: { role, content }
+			})
+		writeFileSync(
+			pi,
+			[
+				JSON.stringify({ type: 'session', version: 3, id: 'pi-1', timestamp: at(0), cwd: '/w' }),
+				entry('a', null, 'user', 'first'),
+				entry('b', 'a', 'assistant', [{ type: 'text', text: 'abandoned' }]),
+				JSON.stringify({
+					type: 'branch_summary',
+					id: 'c',
+					parentId: 'a',
+					timestamp: at(2),
+					summary: 's'
+				}),
+				entry('d', 'c', 'assistant', [
+					{ type: 'toolCall', id: 'x', name: 'bash', arguments: { command: 'ls' } }
+				]),
+				entry('e', 'd', 'toolResult', [{ type: 'text', text: SECRET }])
+			].join('\n')
+		)
+		expect(run({}, 'digest', pi).status).toBe(0)
+		expect(run({}, 'session', 'pi-1').stdout).toBe(
+			'---\nsession: pi-1\nharness: pi\nstarted: 2026-11-06T01:00:00Z\ncwd: /w\n---\n\n## you 2026-11-06T01:00:01Z\n\nfirst\n\n(branched here: the path below left another)\n\n## pi\n\n- bash ls\n'
+		)
+		const codex = join(dir, 'codex.jsonl')
+		const item = (payload: unknown) =>
+			JSON.stringify({ timestamp: at(1), type: 'response_item', payload })
+		writeFileSync(
+			codex,
+			[
+				JSON.stringify({
+					timestamp: at(0),
+					type: 'session_meta',
+					payload: { id: 'cx-1', timestamp: at(0), cwd: '/w' }
+				}),
+				item({
+					type: 'message',
+					role: 'user',
+					content: [{ type: 'input_text', text: '<environment_context>x</environment_context>' }]
+				}),
+				item({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }),
+				item({
+					type: 'function_call',
+					name: 'exec_command',
+					arguments: JSON.stringify({ cmd: 'ls -a' })
+				}),
+				item({ type: 'function_call_output', output: SECRET }),
+				item({
+					type: 'message',
+					role: 'assistant',
+					content: [{ type: 'output_text', text: 'done' }]
+				})
+			].join('\n')
+		)
+		expect(run({}, 'digest', codex).status).toBe(0)
+		expect(run({}, 'session', 'cx-1').stdout).toBe(
+			'---\nsession: cx-1\nharness: codex\nstarted: 2026-11-06T01:00:00Z\ncwd: /w\n---\n\n## you 2026-11-06T01:00:01Z\n\nhi\n\n## codex\n\n- exec_command ls -a\n\ndone\n'
+		)
 	})
 })

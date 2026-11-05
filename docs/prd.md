@@ -38,6 +38,7 @@ hidden name.
   AGENTS.md                        < 40 lines: where the CLI is, the page conventions, the traps
   CLAUDE.md -> AGENTS.md
   log.md                           the timeline: one line per action, written by the agents
+  .sessions/<id>.md                the agents template's digest of each session a log line names
   systems/  flows/  decisions/     sections, made as needed, each with a README.md
   sales-atlas -> .repos/github.com/acme/sales-atlas    a layer: its clone, as a section
   sales-atlas/handbook             a layer's own layer: nested in it, never at the root
@@ -340,7 +341,13 @@ gets a README PR. A page on how we use a third-party repo and where it bites bel
   `ken status` shows the last 10 lines, sorted, and older ones are grepped by date, kind or
   subject. It is committed with the change it records, and `log.md merge=union` in
   `.gitattributes` merges two machines' appends without a conflict, sorting back into order
-  where the lines share an offset. `git log` does not replace it.
+  where the lines share an offset. `git log` does not replace it. In a session whose start
+  hook named it, `ken log` first writes the session's digest, `.sessions/<id>.md`, and ends the
+  line with `s=<id>`: the user's prompts, the agent's replies and one line per tool call, taken
+  from the harness's transcript by a script, never tool results, thinking or attachments. The
+  transcript is deleted on the harness's schedule; the digest is the root's copy, committed
+  with the line, read through `ken session <id>`. It is a record of what happened, not
+  knowledge: where it and a page disagree, the page wins. Hidden, so `ken lint` and `rg` skip it.
 - **Sections** are folders at the top with a README, made when a topic needs one; none up
   front, since nothing is assumed about what the root is for. Pages are Markdown, each in a
   section, none beside the front page. No generated pages: an overview belongs in the repo's

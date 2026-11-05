@@ -224,6 +224,8 @@ const claude = (s: number, ...content: unknown[]) => ({
 	sessionId: 'abc-123'
 })
 const CLAUDE_CODE = [
+	// the first entry may name no session
+	{ type: 'file-history-snapshot', messageId: 'm', snapshot: { trackedFileBackups: {} } },
 	{ type: 'permission-mode', permissionMode: 'default', sessionId: 'abc-123' },
 	{
 		type: 'attachment',
@@ -412,6 +414,17 @@ describe('session digests', () => {
 		expect(digest()).toBe(DIGEST)
 		const ignored = spawnSync('git', ['check-ignore', '-q', '.ken-session'], { cwd: root })
 		expect(ignored.status).toBe(0)
+		// pi: a hook that names no session leaves no other session's to be logged under
+		const pi = spawnSync('sh', ['.bin/ken', 'status'], {
+			cwd: root,
+			input: JSON.stringify({ hook_event_name: 'SessionStart', cwd: root, source: 'startup' }),
+			encoding: 'utf8',
+			env: { ...BARE, HOME: dir }
+		})
+		expect(pi.status).toBe(0)
+		expect(readdirSync(root)).not.toContain('.ken-session')
+		expect(run({}, 'log', 'task', 'u.md', 'added').status).toBe(0)
+		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ task u\.md: added\n$/)
 	})
 
 	it('ken digest reads pi from the leaf back, dropping the branch left, and Codex without its injected context', () => {
@@ -463,7 +476,11 @@ describe('session digests', () => {
 					role: 'user',
 					content: [{ type: 'input_text', text: '<environment_context>x</environment_context>' }]
 				}),
-				item({ type: 'message', role: 'user', content: [{ type: 'input_text', text: 'hi' }] }),
+				item({
+					type: 'message',
+					role: 'user',
+					content: [{ type: 'input_text', text: '<task>hi</task>' }]
+				}),
 				item({
 					type: 'function_call',
 					name: 'exec_command',
@@ -479,7 +496,7 @@ describe('session digests', () => {
 		)
 		expect(run({}, 'digest', codex).status).toBe(0)
 		expect(run({}, 'session', 'cx-1').stdout).toBe(
-			'---\nsession: cx-1\nharness: codex\nstarted: 2026-11-06T01:00:00Z\ncwd: /w\n---\n\n## you 2026-11-06T01:00:01Z\n\nhi\n\n## codex\n\n- exec_command ls -a\n\ndone\n'
+			'---\nsession: cx-1\nharness: codex\nstarted: 2026-11-06T01:00:00Z\ncwd: /w\n---\n\n## you 2026-11-06T01:00:01Z\n\n<task>hi</task>\n\n## codex\n\n- exec_command ls -a\n\ndone\n'
 		)
 	})
 })

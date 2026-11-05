@@ -119,8 +119,9 @@ The session-start hook's stdin carries `session_id` and `transcript_path` in Cla
 Codex. `ken status` exports them as `KEN_SESSION` and `KEN_SESSION_TRANSCRIPT` through
 `CLAUDE_ENV_FILE`; with no env file, as in Codex, it writes them to `.ken-session`, git-ignored,
 which `ken log` reads when the environment has none; two plain sessions in one folder share
-that file, which flow avoids with a worktree per task. pi's shim sends neither yet, so a pi
-session gets no digest unless `ken digest <transcript>` is run by hand. `ken log` then runs
+that file, which flow avoids with a worktree per task. pi's shim sends neither yet, so its
+hook removes the file, and a pi session gets no digest unless `ken digest <transcript>` is run
+by hand. `ken log` then runs
 `ken digest`, which rewrites `.sessions/<id>.md` from the transcript and is idempotent, so the
 digest is current at every line and lands in the same commit; a session that logs nothing gets
 none, and the tail after its last line is not kept. Claude Code's file keeps a rewound branch,

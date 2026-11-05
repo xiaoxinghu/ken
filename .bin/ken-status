@@ -2,10 +2,25 @@
 # The session-start hook, run as `.bin/ken status`: one screen of what this root holds, so the
 # agent never lists folders, and `ken` on the PATH of the agent's shell where the harness has a
 # way. Exit 0 always: the output is the agent's context, the errors included.
+q() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
+# The hook's stdin JSON names the session and its transcript, which `ken log` needs for the
+# digest; a person running it at a terminal sends none.
+session='' transcript=''
+if [ ! -t 0 ]; then
+	input=$(cat)
+	session=$(printf '%s\n' "$input" | sed -n 's/.*"session_id" *: *"\([^"]*\)".*/\1/p')
+	transcript=$(printf '%s\n' "$input" | sed -n 's/.*"transcript_path" *: *"\([^"]*\)".*/\1/p')
+fi
 # Claude Code sources CLAUDE_ENV_FILE before each shell command. ken dispatch put its own .bin/
-# first on this PATH, so the same folder goes there.
+# first on this PATH, so the same folder goes there. A harness with no such file gets the
+# session in .ken-session, git-ignored, which `ken log` reads when the environment has none.
 if [ -n "${CLAUDE_ENV_FILE-}" ]; then
-	printf "export PATH='%s':\"\$PATH\"\n" "$(printf '%s' "$KEN_ROOT/.bin" | sed "s/'/'\\\\''/g")" >>"$CLAUDE_ENV_FILE"
+	printf "export PATH='%s':\"\$PATH\"\n" "$(q "$KEN_ROOT/.bin")" >>"$CLAUDE_ENV_FILE"
+	if [ -n "$session" ]; then
+		printf "export KEN_SESSION='%s' KEN_SESSION_TRANSCRIPT='%s'\n" "$(q "$session")" "$(q "$transcript")" >>"$CLAUDE_ENV_FILE"
+	fi
+elif [ -n "$session" ]; then
+	printf 'KEN_SESSION=%s\nKEN_SESSION_TRANSCRIPT=%s\n' "$session" "$transcript" >"$KEN_ROOT/.ken-session"
 fi
 echo "This is a ken root: $KEN_ROOT. Its CLI is \`ken\`, at .bin/ken here; \`ken help\` lists the commands."
 echo

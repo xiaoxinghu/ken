@@ -1,0 +1,215 @@
+#!/bin/sh
+# `ken digest [<transcript>]`: writes the root's record of one agent session,
+# .sessions/<id>.md, from the harness's transcript, KEN_SESSION_TRANSCRIPT or the argument, whole
+# each time, so running it twice gives the same file. The digest is the user's prompts, the
+# agent's replies and one line per tool call, `- <tool> <head of its input>`, in transcript
+# order; never tool results, attachments, system reminders, thinking or images: they are the
+# bulk and where secrets live. `ken log` runs it before each line it tags with `s=<id>`.
+# A missing or unreadable transcript is a message and exit 0, so `ken log` still logs.
+if [ -z "${KEN_ROOT-}" ]; then
+	echo "ken digest: KEN_ROOT is not set, so the root is unknown. Run it as \`ken digest\`, which sets it." >&2
+	exit 2
+fi
+t=${1:-${KEN_SESSION_TRANSCRIPT-}}
+if [ -z "$t" ]; then
+	echo "ken digest: no transcript: KEN_SESSION_TRANSCRIPT is unset and none was given, so no digest was written. The session-start hook sets it; \`ken digest <transcript>\` names one." >&2
+	exit 0
+fi
+if [ ! -r "$t" ]; then
+	echo "ken digest: the transcript $t cannot be read, so no digest was written: the harness may have deleted it." >&2
+	exit 0
+fi
+# The format, from the first line: pi's session header, Codex's session_meta, or a Claude Code
+# entry, each of which carries sessionId.
+case $(head -n 1 "$t") in
+*'"type":"session"'*) harness=pi ;;
+*'"type":"session_meta"'*) harness=codex ;;
+*'"sessionId"'*) harness=claude-code ;;
+*)
+	echo "ken digest: $t is no transcript ken reads (Claude Code, pi or Codex), so no digest was written." >&2
+	exit 0
+	;;
+esac
+mkdir -p "$KEN_ROOT/.sessions" || exit 1
+tmp=$KEN_ROOT/.sessions/.digest.$$
+# Each line is one JSON value. flatten() splits it at its quotes, so a string is one piece
+# however long, and records each value by its path, message.content.0.text: a string as the
+# range of pieces it spans, built and unescaped only when a reader asks for it, a literal as
+# its text. Byte-wise (LC_ALL=C), so a cut never splits a character.
+LC_ALL=C awk -v harness="$harness" '
+function flatten(line,   i, j, c, d, ch, lit, path, inside) {
+	split("", S); split("", L); ns = 0
+	n = split(line, P, "\"")
+	d = 0; lit = ""; inside = 0
+	for (i = 1; i <= n; i++) {
+		if (inside) {
+			# a string: its pieces end at the first one not ending in an odd run of backslashes
+			for (j = i; j < n && match(P[j], /\\+$/) && RLENGTH % 2; j++) continue
+			if (T[d] == "o" && W[d]) { K[d] = piece(i, j); W[d] = 0 }
+			else { path = at(d); S[path] = i " " j; O[++ns] = path }
+			i = j; inside = 0
+			continue
+		}
+		for (c = 1; c <= length(P[i]); c++) {
+			ch = substr(P[i], c, 1)
+			if (ch == "{" || ch == "[") { path = at(d); d++; T[d] = ch == "{" ? "o" : "a"; X[d] = path == "" ? "" : path "."; A[d] = -1; W[d] = T[d] == "o" }
+			else if (ch == "}" || ch == "]" || ch == ",") {
+				if (lit != "") { L[at(d)] = lit; lit = "" }
+				if (ch == ",") W[d] = T[d] == "o"; else d--
+			} else if (ch == ":") W[d] = 0
+			else if (ch != " " && ch != "\t" && ch != "\r" && ch != "\n") lit = lit ch
+		}
+		inside = 1
+	}
+}
+# The path of the value starting at depth d; in an array, the next index.
+function at(d) {
+	if (d == 0) return ""
+	if (T[d] == "a") return X[d] (++A[d])
+	return X[d] K[d]
+}
+function piece(i, j,   s) {
+	s = P[i]
+	while (i < j) s = s "\"" P[++i]
+	return s
+}
+# The string at path, unescaped: \uXXXX below 0x20 dropped, ASCII decoded, the rest kept as written.
+function val(path,   r, s, h, k, c) {
+	if (!(path in S)) return L[path]
+	split(S[path], r, " ")
+	s = piece(r[1], r[2])
+	gsub(/\\\\/, "\001", s)
+	gsub(/\\n/, "\n", s); gsub(/\\t/, "\t", s); gsub(/\\"/, "\"", s); gsub(/\\\//, "/", s)
+	gsub(/\\[rbf]/, "", s)
+	while (match(s, /\\u00[0-7][0-9a-fA-F]/)) {
+		h = tolower(substr(s, RSTART + 4, 2))
+		c = (index("0123456789abcdef", substr(h, 1, 1)) - 1) * 16 + index("0123456789abcdef", substr(h, 2, 1)) - 1
+		s = substr(s, 1, RSTART - 1) (c < 32 ? "" : sprintf("%c", c)) substr(s, RSTART + 6)
+	}
+	gsub(/\001/, "\\", s)
+	return s
+}
+function has(path) { return (path in S) || (path in L) }
+function stamp(s) { sub(/\.[0-9]+Z$/, "Z", s); return s }
+# One event of entry id: you (a prompt heading, with its time), prompt, said, tool, note.
+function ev(id, kind, s) {
+	if (!(id in E)) { E[id] = 0; Q[++nq] = id }
+	E[id]++; EK[id, E[id]] = kind; ES[id, E[id]] = s
+}
+# A user message: its text, a string or text blocks, under one heading. Harness-made text, a
+# background task finishing, a command output, a reminder, is not the user speaking.
+function you(id, pfx, time,   i, s) {
+	if (pfx in S) return said(id, val(pfx), time, "you")
+	for (i = 0; has(pfx "." i ".type"); i++) {
+		s = val(pfx "." i ".type")
+		if (s == "text" || s == "input_text") said(id, val(pfx "." i ".text"), time, "you")
+	}
+}
+function said(id, s, time, who) {
+	sub(/^[ \t\n]+/, "", s); sub(/[ \t\n]+$/, "", s)
+	if (s == "") return
+	if (who == "you") {
+		if (s ~ /^<(task-notification|bash-stdout|local-command-|system-reminder)/) return
+		if (harness == "codex" && s ~ /^(<[a-z_]+>|# AGENTS\.md)/) return
+		if (!(id in HEAD)) { HEAD[id]; ev(id, "you", stamp(time)) }
+		return ev(id, "prompt", s)
+	}
+	ev(id, "said", s)
+}
+# A tool call, one line: its name and the command, the path, or else its input strings in order,
+# on one line and cut at 120 bytes, backing off to a character boundary.
+function tool(id, name, pfx,   h, k, m) {
+	if (has(pfx "command")) h = val(pfx "command")
+	else if (has(pfx "cmd")) h = val(pfx "cmd")
+	else if (has(pfx "file_path")) h = val(pfx "file_path")
+	else if (has(pfx "path")) h = val(pfx "path")
+	else for (k = 1; k <= ns; k++) if (index(O[k], pfx) == 1) h = h (h == "" ? "" : " ") val(O[k])
+	gsub(/[ \t\r\n]+/, " ", h); sub(/^ /, "", h)
+	if (length(h) > 120) {
+		for (m = 120; m > 0 && substr(h, m + 1, 1) >= "\200" && substr(h, m + 1, 1) < "\300"; m--) continue
+		h = substr(h, 1, m) "…"
+	}
+	ev(id, "tool", "- " name (h == "" ? "" : " " h))
+}
+function blocks(id, pfx,   i, b, ty) {
+	for (i = 0; has(pfx "." i ".type"); i++) {
+		b = pfx "." i "."; ty = val(b "type")
+		if (ty == "text" || ty == "output_text") said(id, val(b "text"), "", "agent")
+		else if (ty == "tool_use") tool(id, val(b "name"), b "input.")
+		else if (ty == "toolCall") tool(id, val(b "name"), b "arguments.")
+	}
+}
+# Claude Code: entries in file order; isMeta text is the harness speaking, a compact summary is
+# the model rewriting the past, and a rewound branch stays in the file and in the digest.
+function claude(   t) {
+	if (session == "") session = val("sessionId")
+	if (started == "" && has("timestamp")) started = stamp(val("timestamp"))
+	if (cwd == "") cwd = val("cwd")
+	t = val("type")
+	if (t == "system" && val("subtype") == "compact_boundary") ev(NR, "note", "(compacted here)")
+	else if (t == "user" && L["isMeta"] != "true" && L["isCompactSummary"] != "true") you(NR, "message.content", val("timestamp"))
+	else if (t == "assistant") blocks(NR, "message.content")
+}
+# pi: a tree, id and parentId; the digest is the path from the last entry back to the root.
+function pi(   t, id, r) {
+	t = val("type")
+	if (t == "session") { session = val("id"); started = stamp(val("timestamp")); cwd = val("cwd"); return }
+	if (!has("id")) return
+	id = val("id"); UP[id] = val("parentId"); leaf = id
+	if (t == "compaction") ev(id, "note", "(compacted here)")
+	else if (t == "branch_summary") ev(id, "note", "(branched here: the path below left another)")
+	else if (t == "message") {
+		r = val("message.role")
+		if (r == "user") you(id, "message.content", val("timestamp"))
+		else if (r == "assistant") blocks(id, "message.content")
+	}
+}
+# Codex: the response items in file order; a function call carries its arguments as JSON text.
+function codex(   t, p, name) {
+	t = val("type")
+	if (t == "session_meta") { session = val("payload.id"); started = stamp(val("payload.timestamp")); cwd = val("payload.cwd"); return }
+	if (t == "compacted") return ev(NR, "note", "(compacted here)")
+	if (t != "response_item") return
+	p = val("payload.type")
+	if (p == "message" && val("payload.role") == "user") you(NR, "payload.content", val("timestamp"))
+	else if (p == "message" && val("payload.role") == "assistant") blocks(NR, "payload.content")
+	else if (p == "custom_tool_call") tool(NR, val("payload.name"), "payload.input")
+	else if (p == "function_call") { name = val("payload.name"); flatten(val("payload.arguments")); tool(NR, name, "") }
+}
+{ flatten($0) }
+harness == "claude-code" { claude() }
+harness == "pi" { pi() }
+harness == "codex" { codex() }
+function block(kind, s) {
+	if (!(kind == "tool" && last == "tool")) print ""
+	print s; last = kind
+}
+function render(id,   k) {
+	for (k = 1; k <= E[id]; k++) {
+		if (EK[id, k] == "you") { block("h", "## you " ES[id, k]); agent = 0; continue }
+		if ((EK[id, k] == "said" || EK[id, k] == "tool") && !agent) { block("h", "## " name); agent = 1 }
+		block(EK[id, k] == "tool" ? "tool" : "text", ES[id, k])
+	}
+}
+END {
+	name = harness == "claude-code" ? "claude" : harness
+	printf "---\nsession: %s\nharness: %s\nstarted: %s\ncwd: %s\n---\n", session, harness, started, cwd
+	if (harness == "pi") {
+		for (id = leaf; id != "" && !(id in SEEN); id = UP[id]) { SEEN[id]; PATHN[++np] = id }
+		for (; np; np--) if (PATHN[np] in E) render(PATHN[np])
+	} else for (k = 1; k <= nq; k++) render(Q[k])
+}
+' "$t" >"$tmp" || {
+	rm -f "$tmp"
+	echo "ken digest: reading $t failed, so no digest was written." >&2
+	exit 1
+}
+id=${KEN_SESSION:-$(sed -n '2s/^session: //p' "$tmp")}
+case $id in
+'' | .* | */* | *' '*)
+	rm -f "$tmp"
+	echo "ken digest: '$id' is no session id: it names the file .sessions/<id>.md. KEN_SESSION is the harness's id, set by the session-start hook." >&2
+	exit 2
+	;;
+esac
+mv "$tmp" "$KEN_ROOT/.sessions/$id.md"

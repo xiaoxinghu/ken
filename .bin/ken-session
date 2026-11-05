@@ -27,8 +27,12 @@ grep)
 		exit 1
 	fi
 	cd "$dir" || exit 1
-	# /dev/null makes grep name the file however many there are
-	grep -n -e "$pattern" -- *.md /dev/null | sed 's/\.md:/:/'
+	# /dev/null makes grep name the file however many there are; its status is the command's,
+	# 1 for no match, 2 for a bad pattern
+	found=$(grep -n -e "$pattern" -- *.md /dev/null)
+	status=$?
+	[ -z "$found" ] || printf '%s\n' "$found" | sed 's/\.md:/:/'
+	exit $status
 	;;
 .* | */*)
 	printf "ken session: '%s' is no session id: it is the word after s= in a log.md line.\n%s\n" "$1" "$usage" >&2

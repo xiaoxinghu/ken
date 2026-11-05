@@ -204,7 +204,11 @@ END {
 	echo "ken digest: reading $t failed, so no digest was written." >&2
 	exit 1
 }
-id=${KEN_SESSION:-$(sed -n '2s/^session: //p' "$tmp")}
+# The session ken log tags its line with; a transcript named by hand is its own session's.
+id=$(sed -n '2s/^session: //p' "$tmp")
+if [ $# -eq 0 ]; then
+	id=${KEN_SESSION:-$id}
+fi
 case $id in
 '' | .* | */* | *' '*)
 	rm -f "$tmp"

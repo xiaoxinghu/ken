@@ -19,17 +19,17 @@ if [ ! -r "$t" ]; then
 	echo "ken digest: the transcript $t cannot be read, so no digest was written: the harness may have deleted it." >&2
 	exit 0
 fi
-# The format, from the first line: pi's session header, Codex's session_meta, or a Claude Code
-# entry, each of which carries sessionId.
+# The format: pi's session header or Codex's session_meta is the first line; Claude Code's
+# entries carry sessionId, though the first may be a file-history snapshot that has none.
 case $(head -n 1 "$t") in
 *'"type":"session"'*) harness=pi ;;
 *'"type":"session_meta"'*) harness=codex ;;
-*'"sessionId"'*) harness=claude-code ;;
-*)
+*) harness=claude-code ;;
+esac
+if [ $harness = claude-code ] && ! grep -q '"sessionId"' "$t"; then
 	echo "ken digest: $t is no transcript ken reads (Claude Code, pi or Codex), so no digest was written." >&2
 	exit 0
-	;;
-esac
+fi
 mkdir -p "$KEN_ROOT/.sessions" || exit 1
 tmp=$KEN_ROOT/.sessions/.digest.$$
 # Each line is one JSON value. flatten() splits it at its quotes, so a string is one piece
@@ -110,7 +110,7 @@ function said(id, s, time, who) {
 	if (s == "") return
 	if (who == "you") {
 		if (s ~ /^<(task-notification|bash-stdout|local-command-|system-reminder)/) return
-		if (harness == "codex" && s ~ /^(<[a-z_]+>|# AGENTS\.md)/) return
+		if (harness == "codex" && s ~ /^(<(environment_context|user_instructions|external_codex_apps_open_page)>|# AGENTS\.md instructions)/) return
 		if (!(id in HEAD)) { HEAD[id]; ev(id, "you", stamp(time)) }
 		return ev(id, "prompt", s)
 	}

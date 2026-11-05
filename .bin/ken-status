@@ -5,7 +5,7 @@
 q() { printf '%s' "$1" | sed "s/'/'\\\\''/g"; }
 # The hook's stdin JSON names the session and its transcript, which `ken log` needs for the
 # digest; a person running it at a terminal sends none.
-session='' transcript=''
+session='' transcript='' input=''
 if [ ! -t 0 ]; then
 	input=$(cat)
 	session=$(printf '%s\n' "$input" | sed -n 's/.*"session_id" *: *"\([^"]*\)".*/\1/p')
@@ -21,6 +21,9 @@ if [ -n "${CLAUDE_ENV_FILE-}" ]; then
 	fi
 elif [ -n "$session" ]; then
 	printf 'KEN_SESSION=%s\nKEN_SESSION_TRANSCRIPT=%s\n' "$session" "$transcript" >"$KEN_ROOT/.ken-session"
+else
+	# a hook that names no session, pi's shim, starts one all the same: the file is stale
+	case $input in *'"hook_event_name"'*) rm -f "$KEN_ROOT/.ken-session" ;; esac
 fi
 echo "This is a ken root: $KEN_ROOT. Its CLI is \`ken\`, at .bin/ken here; \`ken help\` lists the commands."
 echo

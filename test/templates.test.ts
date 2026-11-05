@@ -381,6 +381,9 @@ describe('session digests', () => {
 	it('ken session prints a digest from any folder and greps them all; a bad id is refused', () => {
 		expect(run({}, 'session', 'abc-123').stdout).toBe(DIGEST)
 		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe('abc-123:21:Rayleigh scattering.\n')
+		const none = run({}, 'session', 'grep', 'no such words')
+		expect([none.status, none.stdout]).toEqual([1, ''])
+		expect(run({}, 'session', 'grep', '[').status).toBe(2)
 		const missing = run({}, 'session', 'nope')
 		expect(missing.status).toBe(1)
 		expect(missing.stderr).toContain('no digest nope.md')

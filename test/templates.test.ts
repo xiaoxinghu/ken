@@ -112,5 +112,93 @@ describe('the agents template', () => {
 		const r = sh(join(root, 'nowhere'), {}, '../.bin/ken', 'status')
 		expect(r.status).toBe(0)
 		expect(r.stdout).toContain(`This is a ken root: ${root}.`)
+		expect(r.stdout).not.toContain('log.md')
+	})
+
+	describe('ken log', () => {
+		let root: string
+		beforeAll(() => {
+			root = install('agents', 'log')
+			mkdirSync(join(root, 'flow/deep'), { recursive: true })
+		})
+		const log = (...args: string[]) =>
+			sh(join(root, 'flow/deep'), {}, '../../.bin/ken', 'log', ...args)
+		const lines = () => readFileSync(join(root, 'log.md'), 'utf8').split('\n').slice(0, -1)
+
+		it('from a subfolder, creates the root log.md with one line: local time and offset, kind, subject, what', () => {
+			for (const shell of ['sh', 'dash']) {
+				const r = spawnSync(
+					shell,
+					['../../.bin/ken', 'log', 'query', 'flow/README.md', 'answered', 'X'],
+					{
+						cwd: join(root, 'flow/deep'),
+						encoding: 'utf8',
+						env: { ...BARE, HOME: dir }
+					}
+				)
+				expect(r.status).toBe(0)
+				expect(r.stdout + r.stderr).toBe('')
+			}
+			expect(lines()).toHaveLength(2)
+			for (const line of lines()) {
+				expect(line).toMatch(
+					/^\d{4}-\d\d-\d\dT\d\d:\d\d[+-]\d{4} query flow\/README\.md: answered X$/
+				)
+			}
+		})
+
+		it.each([
+			[['nope', 'a', 'b'], "'nope' is not a kind"],
+			[['page', 'a b', 'c'], "'a b' is not one word"],
+			[['page', 'a', 'one\ntwo'], 'spans lines'],
+			[['page', 'a', ' '], 'is empty'],
+			[['page', 'a'], 'are needed']
+		])('refuses %j, naming the rule and the kinds, and writes nothing', (args, rule) => {
+			const before = lines().length
+			const r = log(...args)
+			expect(r.status).toBe(2)
+			expect(r.stderr).toContain(rule)
+			expect(r.stderr).toContain('ingest query page task promote layer')
+			expect(lines()).toHaveLength(before)
+		})
+
+		it('ken status ends with the last 10 lines in time order and the current time', () => {
+			const entries = Array.from(
+				{ length: 12 },
+				(_, i) => `2026-01-${String(i + 1).padStart(2, '0')}T09:00+1300 page p${i}.md: x`
+			)
+			// a union merge appends the other side after this one's: out of order
+			writeFileSync(
+				join(root, 'log.md'),
+				`${[...entries.slice(6), ...entries.slice(0, 6)].join('\n')}\n`
+			)
+			const r = sh(root, {}, '.bin/ken', 'status')
+			expect(r.status).toBe(0)
+			expect(r.stdout).toMatch(/Recent, log\.md \(now \d{4}-\d\d-\d\dT\d\d:\d\d[+-]\d{4}\)/)
+			expect(r.stdout.endsWith(`:\n${entries.slice(2).join('\n')}\n`)).toBe(true)
+		})
+
+		it('two branches that each append merge without a conflict, keeping both lines', () => {
+			const git = (...args: string[]) =>
+				spawnSync('git', ['-c', 'user.name=t', '-c', 'user.email=t@t', ...args], {
+					cwd: root,
+					encoding: 'utf8',
+					env: { ...BARE, HOME: dir }
+				})
+			git('add', '-A')
+			git('commit', '-qm', 'root')
+			git('checkout', '-qb', 'other')
+			log('task', 'tasks/b.md', 'added')
+			git('commit', '-qam', 'b')
+			git('checkout', '-q', 'main')
+			log('task', 'tasks/a.md', 'added')
+			git('commit', '-qam', 'a')
+			const merge = git('merge', '-q', '-m', 'merge', 'other')
+			expect(merge.status).toBe(0)
+			const text = readFileSync(join(root, 'log.md'), 'utf8')
+			expect(text).toContain('task tasks/a.md: added\n')
+			expect(text).toContain('task tasks/b.md: added\n')
+			expect(text).not.toContain('<<<<<<<')
+		})
 	})
 })

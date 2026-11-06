@@ -32,10 +32,11 @@ with no agent needs no template. `agents` is the opt-in for a knowledge base kep
 agent harness: `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`, the
 harness files below, hooks, deny rules and `.bin/ken-status`, the session-start script,
 `.bin/ken-log`, which appends a line to the root's `log.md` ([PRD](prd.md), the knowledge
-base), a `.gitattributes` with `log.md merge=union`, so two machines' appends merge without a
+base), `.bin/ken-digest` and `.bin/ken-session`, which keep and read the digest of the session
+behind a line (below), a `.gitattributes` with `log.md merge=union`, so two machines' appends merge without a
 conflict, and `.envrc`. It assumes nothing about what the root is for, not even software. Its
-`AGENTS.md` is nineteen lines: where the CLI is, how to make a section and a page, when to
-`ken log`, and nothing `ken help` already says; an agent grows the root from there, `ken help` and the messages. A layer starts
+`AGENTS.md` is twenty-one lines: where the CLI is, how to make a section and a page, when to
+`ken log`, how to reach a line's session, and nothing `ken help` already says; an agent grows the root from there, `ken help` and the messages. A layer starts
 the same way, any root is one, and under a root its harness files sit unused, the root's hooks
 and deny rules being the ones that run (PRD decision 21), until it is cloned alone.
 
@@ -77,7 +78,9 @@ AGENTS.md                      every harness; Claude Code only while no CLAUDE.m
                                brings (to verify: Claude Code documents a link per skill, not of the folder)
 .agents/hooks.json             one hooks object in Claude Code's schema; Codex reads it as it is
 .bin/ken-status                the script the session-start hook runs
-.bin/ken-log                   `ken log`, which appends to log.md
+.bin/ken-log                   `ken log`, which appends to log.md, digesting the session first
+.bin/ken-digest                `ken digest`, the session's transcript to .sessions/<id>.md
+.bin/ken-session               `ken session`, which prints or greps the digests
 .gitattributes                 log.md merge=union
 .claude/settings.json          hooks (a copy of the object: a settings file holds other keys) and permissions.deny
 .codex/hooks.json -> ../.agents/hooks.json
@@ -109,6 +112,22 @@ unless the clone has `CLAUDE.md -> AGENTS.md`, or the user sets `instructionFile
 `claude-md-and-agents-md` in their user settings, under the builtin plugin's options
 (`pluginConfigs."cc-plugin-agents-md@builtin".options`; project settings ignore it); and
 auto-memory is keyed on the git repo, so every session at the root shares one memory.
+
+## Session digests
+
+The session-start hook's stdin carries `session_id` and `transcript_path` in Claude Code and
+Codex. `ken status` exports them as `KEN_SESSION` and `KEN_SESSION_TRANSCRIPT` through
+`CLAUDE_ENV_FILE`; with no env file, as in Codex, it writes them to `.ken-session`, git-ignored,
+which `ken log` reads when the environment has none; two plain sessions in one folder share
+that file, which flow avoids with a worktree per task. pi's shim sends neither yet, so its
+hook removes the file, and a pi session gets no digest unless `ken digest <transcript>` is run
+by hand. `ken log` then runs
+`ken digest`, which rewrites `.sessions/<id>.md` from the transcript and is idempotent, so the
+digest is current at every line and lands in the same commit; a session that logs nothing gets
+none, and the tail after its last line is not kept. Claude Code's file keeps a rewound branch,
+so its digest does too, in file order; pi's is the path from the last entry back to the root,
+a `branch_summary` on it one line; a compaction is one line in each. Size and retention are
+decided when they bite, as for `log.md`.
 
 ## Environment
 

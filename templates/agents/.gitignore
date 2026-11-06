@@ -5,3 +5,4 @@
 .env
 CLAUDE.local.md
 node_modules
+.ken-session

@@ -1,0 +1,48 @@
+#!/bin/sh
+# `ken session <id>` prints the digest of one agent session, .sessions/<id>.md, the story
+# behind a log.md line that ends in s=<id>. `ken session grep <pattern>` searches every digest,
+# one `<id>:<line>:<text>` per match. The folder is hidden, so a grep of the root skips it.
+usage="Usage: \`ken session <id>\` prints the digest a log.md line's s=<id> names;
+\`ken session grep <pattern>\` searches every digest. Read a digest when its line is not enough;
+never list or read .sessions/ whole."
+if [ -z "${KEN_ROOT-}" ]; then
+	echo "ken session: KEN_ROOT is not set, so the root is unknown. Run it as \`ken session\`, which sets it." >&2
+	exit 2
+fi
+dir=$KEN_ROOT/.sessions
+case ${1-} in
+'')
+	printf 'ken session: a session id is needed.\n%s\n' "$usage" >&2
+	exit 2
+	;;
+grep)
+	if [ $# -ne 2 ]; then
+		printf 'ken session grep: one pattern is needed, quoted if it has spaces.\n%s\n' "$usage" >&2
+		exit 2
+	fi
+	pattern=$2
+	set -- "$dir"/*.md
+	if [ ! -e "$1" ]; then
+		echo "ken session grep: $dir holds no digest yet: \`ken log\` writes one in a session the start hook named." >&2
+		exit 1
+	fi
+	cd "$dir" || exit 1
+	# /dev/null makes grep name the file however many there are; its status is the command's,
+	# 1 for no match, 2 for a bad pattern
+	found=$(grep -n -e "$pattern" -- *.md /dev/null)
+	status=$?
+	[ -z "$found" ] || printf '%s\n' "$found" | sed 's/\.md:/:/'
+	exit $status
+	;;
+.* | */*)
+	printf "ken session: '%s' is no session id: it is the word after s= in a log.md line.\n%s\n" "$1" "$usage" >&2
+	exit 2
+	;;
+*)
+	if [ ! -r "$dir/$1.md" ]; then
+		printf "ken session: no digest %s.md in %s: check the id after s= in the log line, or \`ken session grep <pattern>\`.\n" "$1" "$dir" >&2
+		exit 1
+	fi
+	cat "$dir/$1.md"
+	;;
+esac

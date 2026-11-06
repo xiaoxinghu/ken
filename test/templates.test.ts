@@ -316,7 +316,8 @@ describe('session digests', () => {
 		root = install('agents', 'digests')
 		mkdirSync(join(root, 'flow/deep'), { recursive: true })
 		transcript = join(dir, 'abc-123.jsonl')
-		writeFileSync(transcript, `${CLAUDE_CODE}\n`)
+		// the last line is one the harness is still writing: not JSON, skipped
+		writeFileSync(transcript, `${CLAUDE_CODE}\n{"type":"user","message":{"content":"half`)
 		// ken-lint as a user installs it, beside node
 		lintBin = join(dir, 'lint-bin')
 		mkdirSync(lintBin)

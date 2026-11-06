@@ -34,7 +34,9 @@ run.
   template would be a folder beside it, published the same way.
 - Its `.bin/ken` is a link to the kernel here, which the workflow replaces by a copy.
   `AGENTS.md` stays under 40 lines and names `.bin/ken` and `ken help` in its first paragraph.
-- `.bin/ken-<name>` scripts are POSIX `sh`, shellcheck clean, and call `ken` by name.
+- `.bin/ken-<name>` scripts are POSIX `sh`, shellcheck clean, and call `ken` by name. JSON is
+  read with `jq` (`ken-digest`), never parsed by hand; a script that needs `jq` says so and
+  exits 0 when it is missing.
 
 ## Checks
 

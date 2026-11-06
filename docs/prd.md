@@ -144,7 +144,10 @@ one, or with an existing section. Everything else at the root is a section.
     read in a sitting, whose only dependency is git 2.48 or newer, which the layout needs
     anyway. No runtime, no package, no build, no binary: a file anyone reads, diffs and
     copies. Its two files are the line formats of `files.md`, read by `awk` and `sed` in the
-    kernel and by a few lines in any other language.
+    kernel and by a few lines in any other language. The one exception is in the `agents`
+    template, not the kernel: a harness's transcript is JSON lines, and `ken digest` reads it
+    with `jq`, the common tool for that, rather than a JSON parser written in `awk`; without
+    `jq` the digest says so and `ken log` still logs.
 19. **The kernel travels with the root.** It lives at `.bin/ken` in the root it serves,
     tracked like `gradlew`, and finds its root from its own path. `git clone <root> ~/ken &&
     ~/ken/.bin/ken init` is the whole install, a symlink to it on `PATH` is the per-machine

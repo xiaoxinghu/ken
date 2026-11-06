@@ -13,7 +13,8 @@ folder is gone. The branches are generated: never commit to one. `test/templates
 holds each template to the rules below and installs it the way the workflow publishes it.
 There is one, `agents`.
 
-Starting from it is one clone and the kernel it brings, nothing installed first:
+Starting from it is one clone and the kernel it brings, nothing installed first (`jq`, for
+the session digests below, is the one tool it uses beyond `sh` and git, and it works without):
 
 ```
 git clone -b template/agents --single-branch https://github.com/xiaoxinghu/ken ~/ken
@@ -126,8 +127,12 @@ by hand. `ken log` then runs
 digest is current at every line and lands in the same commit; a session that logs nothing gets
 none, and the tail after its last line is not kept. Claude Code's file keeps a rewound branch,
 so its digest does too, in file order; pi's is the path from the last entry back to the root,
-a `branch_summary` on it one line; a compaction is one line in each. Size and retention are
-decided when they bite, as for `log.md`.
+a `branch_summary` on it one line; a compaction is one line in each. The transcripts are JSON
+lines, and the script is `sh` around one `jq` program, the one dependency the template adds
+beyond the kernel's (PRD decision 18): macOS, the Linux distributions and the CI runners ship
+it, and without it `ken digest` says what to install and `ken log` logs the line anyway. A line
+that is not JSON, one still being written, is skipped. Size and retention are decided when they
+bite, as for `log.md`.
 
 ## Environment
 

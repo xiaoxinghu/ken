@@ -1,10 +1,12 @@
 #!/bin/sh
 # `ken digest [<transcript>]`: writes the root's record of one agent session,
-# .sessions/<id>.md, from the harness's transcript, KEN_SESSION_TRANSCRIPT or the argument, whole
-# each time, so running it twice gives the same file. The digest is the user's prompts, the
-# agent's replies and one line per tool call, `- <tool> <head of its input>`, in transcript
-# order; never tool results, attachments, system reminders, thinking or images: they are the
-# bulk and where secrets live. `ken log` runs it before each line it tags with `s=<id>`.
+# .sessions/<id>.jsonl, from the harness's transcript, KEN_SESSION_TRANSCRIPT or the argument,
+# whole each time, so running it twice gives the same file. A header line, then one entry per
+# line in the ghost's shape (justfiles:packages/ghost/mirror.ts#MirroredEntry): the user's
+# prompts, the agent's replies with their tool calls, a name and the head of the input, and
+# compactions, in transcript order; never tool results, attachments, system reminders, thinking
+# or images: they are the bulk and where secrets live. `ken session` reads it. `ken log` runs
+# it before each line it tags with `s=<id>`.
 # A missing or unreadable transcript, or no jq, is a message and exit 0, so `ken log` still logs.
 if [ -z "${KEN_ROOT-}" ]; then
 	echo "ken digest: KEN_ROOT is not set, so the root is unknown. Run it as \`ken digest\`, which sets it." >&2
@@ -37,84 +39,95 @@ fi
 mkdir -p "$KEN_ROOT/.sessions" || exit 1
 tmp=$KEN_ROOT/.sessions/.digest.$$
 # The transcript is read raw and split at newlines, so a line that is not JSON, one still being
-# written, is skipped rather than failing the whole file. An entry becomes events: `you`, a
-# prompt heading with its time; `prompt`; `said`; `tool`; `note`. Rendering puts a `## claude`
-# heading before the agent's first event after a prompt, a blank line between blocks, none
-# between tool lines.
-jq -R -s -j --arg harness "$harness" '
-def stamp: sub("\\.[0-9]+Z$"; "Z");
+# written, is skipped rather than failing the whole file. Each transcript entry becomes at most
+# one entry, `mid` and `join` saying which assistant entries are one reply; then the replies are
+# merged, an entry with nothing in it dropped, and `id` and `at` given.
+jq -R -s -c --arg harness "$harness" '
 def clean: sub("^[ \\t\\n]+"; "") | sub("[ \\t\\n]+$"; "");
+def time: if type == "string" and . != "" then . else null end;
 # Harness-made text, a background task finishing, a command output, a reminder, is not the user speaking.
 def spoken:
   (test("^<(task-notification|bash-stdout|local-command-)") | not)
   and ($harness != "codex" or (test("^(<(environment_context|user_instructions|external_codex_apps_open_page)>|# AGENTS\\.md instructions)") | not));
-# A user message: its text, a string or text blocks, under one heading with its time; a reminder
-# the harness put in a prompt is cut out, wherever it sits.
-def you($content; $time):
+# A user message: its text, a string or text blocks; a reminder the harness put in a prompt is
+# cut out, wherever it sits.
+def user($content; $at):
   [ ($content | if type == "string" then . else (.[]? | select(.type == "text" or .type == "input_text") | .text) end)
     | strings | gsub("<system-reminder>.*?</system-reminder>"; ""; "m") | clean | select(length > 0 and spoken) ]
-  | if length == 0 then empty else {k: "you", s: ($time | stamp)}, (.[] | {k: "prompt", s: .}) end;
-# A tool call, one line: its name and the command, the path, or else its input strings in
-# order, on one line and cut at 120 characters.
-def head:
-  (if type == "object" then first((.command, .cmd, .file_path, .path) | strings) else empty end)
-  // ([.. | strings] | join(" "))
-  | gsub("[ \\t\\r\\n]+"; " ") | sub("^ "; "")
-  | if length > 120 then .[:120] + "…" else . end;
-def tool($name; $input):
-  {k: "tool", s: ("- " + ($name // "") + ($input | head | if . == "" then "" else " " + . end))};
-def blocks($content):
-  $content | .[]?
-  | if .type == "text" or .type == "output_text" then ({k: "said", s: ((.text // "") | clean)} | select(.s != ""))
-    elif .type == "tool_use" then tool(.name; .input)
-    elif .type == "toolCall" then tool(.name; .arguments)
-    else empty end;
-# Claude Code: entries in file order; isMeta text is the harness speaking, a compact summary is
-# the model rewriting the past, and a rewound branch stays in the file and in the digest.
+  | if length == 0 then empty else {kind: "user", text: join("\n\n"), at: ($at | time)} end;
+# A tool call: its name and its input as JSON text, cut at 120 characters.
+def call($id; $name; $input):
+  {id: ($id // ""), name: ($name // ""),
+   input: ($input | if type == "string" then . else tojson end | if length > 120 then .[:120] + "…" else . end)};
+def assistant($content; $at; $mid):
+  {kind: "assistant",
+   text: ([$content | .[]? | select(.type == "text" or .type == "output_text") | (.text // "") | clean | select(. != "")] | join("\n\n")),
+   toolCalls: [$content | .[]? | if .type == "tool_use" then call(.id; .name; .input)
+                                 elif .type == "toolCall" then call(.id; .name; .arguments) else empty end],
+   at: ($at | time), mid: $mid};
+def note($summary; $at): {kind: "compaction", summary: $summary, at: ($at | time)};
+# Claude Code: entries in file order, one per content block, a reply its entries sharing
+# message.id; isMeta text is the harness speaking, a compact summary is the model rewriting the
+# past, and a rewound branch stays in the file and in the digest.
 def claude:
-  if .type == "system" and .subtype == "compact_boundary" then {k: "note", s: "(compacted here)"}
-  elif .type == "user" and .isMeta != true and .isCompactSummary != true then you(.message.content; .timestamp // "")
-  elif .type == "assistant" then blocks(.message.content)
+  if .type == "system" and .subtype == "compact_boundary" then note("(compacted here)"; .timestamp)
+  elif .type == "user" and .isMeta != true and .isCompactSummary != true then user(.message.content; .timestamp)
+  elif .type == "assistant" then
+    assistant(.message.content; .timestamp; .message.id)
+    + (if .isApiErrorMessage == true then {error: (.error // "error")} else {} end)
   else empty end;
 # pi: a tree, id and parentId; the digest is the path from the last entry back to the root.
 def pi:
-  if .type == "compaction" then {k: "note", s: "(compacted here)"}
-  elif .type == "branch_summary" then {k: "note", s: "(branched here: the path below left another)"}
-  elif .type == "message" and .message.role == "user" then you(.message.content; .timestamp // "")
-  elif .type == "message" and .message.role == "assistant" then blocks(.message.content)
+  if .type == "compaction" then note("(compacted here)"; .timestamp)
+  elif .type == "branch_summary" then note("(branched here: the path below left another)"; .timestamp)
+  elif .type == "message" and .message.role == "user" then user(.message.content; .timestamp)
+  elif .type == "message" and .message.role == "assistant" then
+    assistant(.message.content; .timestamp; null)
+    + (if .message.stopReason == "error" or .message.stopReason == "aborted"
+       then {error: (.message.errorMessage // .message.stopReason)} else {} end)
   else empty end;
 def pi_path:
   (map(select(has("id"))) | map({key: (.id | tostring), value: .}) | from_entries) as $by
   | [ {id: (map(select(has("id")))[-1].id // "" | tostring), seen: {}, path: []}
       | until(.id == "" or .seen[.id]; .seen[.id] = true | .path += [.id] | .id = ($by[.id].parentId // "" | tostring))
       | .path[] ] | reverse | map($by[.]);
-# Codex: the response items in file order; a function call carries its arguments as JSON text.
+# Codex: the response items in file order; a tool call is an item of its own, joined to the
+# reply before it.
 def codex:
-  if .type == "compacted" then {k: "note", s: "(compacted here)"}
+  if .type == "compacted" then note("(compacted here)"; .timestamp)
   elif .type != "response_item" then empty
-  elif .payload.type == "message" and .payload.role == "user" then you(.payload.content; .timestamp // "")
-  elif .payload.type == "message" and .payload.role == "assistant" then blocks(.payload.content)
-  elif .payload.type == "custom_tool_call" then tool(.payload.name; .payload.input)
-  elif .payload.type == "function_call" then tool(.payload.name; (.payload.arguments | if type == "string" then (try fromjson catch .) else . end))
+  elif .payload.type == "message" and .payload.role == "user" then user(.payload.content; .timestamp)
+  elif .payload.type == "message" and .payload.role == "assistant" then assistant(.payload.content; .timestamp; null)
+  elif .payload.type == "custom_tool_call" or .payload.type == "function_call" then
+    {kind: "assistant", text: "", toolCalls: [call(.payload.call_id; .payload.name; .payload.input // .payload.arguments)],
+     at: (.timestamp | time), join: true}
   else empty end;
-def render($name):
-  reduce .[] as $e ({agent: false, last: "", out: ""};
-    if $e.k == "you" then .out += "\n## you " + $e.s + "\n" | .agent = false | .last = "h"
-    else
-      (if ($e.k == "said" or $e.k == "tool") and (.agent | not) then .out += "\n## " + $name + "\n" | .agent = true | .last = "h" else . end)
-      | .out += (if $e.k == "tool" and .last == "tool" then "" else "\n" end) + $e.s + "\n"
-      | .last = (if $e.k == "tool" then "tool" else "text" end)
-    end) | .out;
-def header($session; $started; $cwd):
-  "---\nsession: " + ($session // "") + "\nharness: " + $harness + "\nstarted: " + (($started // "") | stamp) + "\ncwd: " + ($cwd // "") + "\n---\n";
+def merge:
+  reduce .[] as $e ([];
+    (length - 1) as $i
+    | if $e.kind == "assistant" and $i >= 0 and .[$i].kind == "assistant"
+         and ($e.join == true or ($e.mid != null and $e.mid == .[$i].mid))
+      then .[$i] |= (.text = ([.text, $e.text] | map(select(. != "")) | join("\n\n"))
+                     | .toolCalls += $e.toolCalls
+                     | if $e.error then .error = $e.error else . end)
+      else . + [$e] end)
+  | map(select(.kind != "assistant" or .text != "" or (.toolCalls | length) > 0 or .error));
+# An entry without a time takes the one before it, the first the time the session started.
+def number($started):
+  reduce .[] as $e ({n: 0, at: ($started // ""), out: []};
+    .n += 1 | .at = ($e.at // .at)
+    | .out += [{id: .n, at: .at, kind: $e.kind} + ($e | del(.at, .kind, .mid, .join))])
+  | .out[];
+def emit($session; $started; $cwd; entries):
+  {kind: "session", session: ($session // ""), harness: $harness, started: ($started // ""), cwd: ($cwd // "")},
+  ([entries] | merge | number($started | time));
 split("\n") | map(select(length > 0) | fromjson? | select(type == "object"))
 | if $harness == "pi" then
-    (.[0] | header(.id; .timestamp; .cwd)) + (pi_path | [.[] | pi] | render("pi"))
+    (.[0] as $h | emit($h.id; $h.timestamp; $h.cwd; pi_path | .[] | pi))
   elif $harness == "codex" then
-    (.[0].payload | header(.id; .timestamp; .cwd)) + ([.[] | codex] | render("codex"))
+    (.[0].payload as $h | emit($h.id; $h.timestamp; $h.cwd; .[] | codex))
   else
-    header(first(.[] | .sessionId | strings); first(.[] | .timestamp | strings); first(.[] | .cwd | strings))
-    + ([.[] | claude] | render("claude"))
+    emit(first(.[] | .sessionId | strings); first(.[] | .timestamp | strings); first(.[] | .cwd | strings); .[] | claude)
   end
 ' "$t" >"$tmp" || {
 	rm -f "$tmp"
@@ -122,15 +135,15 @@ split("\n") | map(select(length > 0) | fromjson? | select(type == "object"))
 	exit 1
 }
 # The session ken log tags its line with; a transcript named by hand is its own session's.
-id=$(sed -n '2s/^session: //p' "$tmp")
+id=$(head -n 1 "$tmp" | jq -r .session)
 if [ $# -eq 0 ]; then
 	id=${KEN_SESSION:-$id}
 fi
 case $id in
 '' | .* | */* | *' '*)
 	rm -f "$tmp"
-	echo "ken digest: '$id' is no session id: it names the file .sessions/<id>.md. KEN_SESSION is the harness's id, set by the session-start hook." >&2
+	echo "ken digest: '$id' is no session id: it names the file .sessions/<id>.jsonl. KEN_SESSION is the harness's id, set by the session-start hook." >&2
 	exit 2
 	;;
 esac
-mv "$tmp" "$KEN_ROOT/.sessions/$id.md"
+mv "$tmp" "$KEN_ROOT/.sessions/$id.jsonl"

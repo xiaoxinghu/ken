@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import {
 	copyFileSync,
+	cpSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -387,6 +388,18 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 			expect(readFileSync(join(at, 'A/B/C/c.md'), 'utf8')).toBe('c\n')
 			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
+			// copied to yet another KEN_SRC, the old one kept: the skills follow the layer links
+			const copied = `${at}.copied`
+			cpSync(moved, copied, { recursive: true, verbatimSymlinks: true })
+			expect(ken(['init', at], { cwd: at, env: { KEN_SRC: copied } }).status).toBe(0)
+			expect(readlinkSync(join(at, 'A'))).toBe(clone('la', copied))
+			expect(readlinkSync(join(at, '.agents/skills/sa'))).toBe(
+				join(clone('la', copied), '.agents/skills/sa')
+			)
+			expect(ken(['init', at], { cwd: at, env: { KEN_SRC: moved } }).status).toBe(0)
+			expect(readlinkSync(join(at, '.agents/skills/sa'))).toBe(
+				join(clone('la', moved), '.agents/skills/sa')
+			)
 			// a layer's own layer no longer listed, as after a pull: its link goes, in the clone too
 			writeFileSync(join(clone('la', moved), '.ken'), '')
 			const pulled = ken(['init', at], { cwd: at, env: { KEN_SRC: moved } })

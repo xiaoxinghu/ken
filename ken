@@ -609,8 +609,8 @@ EOF
 	for key in $skilled; do
 		for at in "$SRC/$key"/.agents/skills/*; do
 			link=$SCOPE/.agents/skills/${at##*/}
-			# one left dangling by a move of SRC is made again
-			if [ -L "$link" ] && [ ! -e "$link" ] && ! linked_above "$link" >/dev/null; then
+			# one into this skill elsewhere, as after a move or a change of SRC, is made again
+			if [ -L "$link" ] && [ "$(readlink "$link")" != "$at" ] && ! linked_above "$link" >/dev/null; then
 				case $(readlink "$link") in *"/$key/.agents/skills/${at##*/}") rm -f "$link" ;; esac
 			fi
 			if [ -e "$at" ] && link_in "$link" "$at"; then exclude "$SCOPE" ".agents/skills/${at##*/}"; fi

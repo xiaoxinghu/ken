@@ -13,18 +13,22 @@ if [ ! -t 0 ]; then
 fi
 # Claude Code sources CLAUDE_ENV_FILE before each shell command. ken dispatch put its own .bin/
 # first on this PATH, so the same folder goes there, and KEN_ROOT, so `ken` in a checkout, which
-# has no .ken above it, acts on this root. A harness with no such file gets the session in
-# .ken-session, git-ignored, which `ken log` reads when the environment has none.
+# has no .ken above it, acts on this root. A harness with no such file gets the session in a
+# pointer `ken log` reads when the environment has none: machine-local state, so under
+# ~/.local/state/ken, one per root named by its path with / as -, never in the root, where a
+# file sync would carry one machine's session to another.
+pointer=${HOME-}/.local/state/ken/$(printf '%s' "$KEN_ROOT" | tr / -)
 if [ -n "${CLAUDE_ENV_FILE-}" ]; then
 	printf "export KEN_ROOT='%s' PATH='%s':\"\$PATH\"\n" "$(q "$KEN_ROOT")" "$(q "$KEN_ROOT/.bin")" >>"$CLAUDE_ENV_FILE"
 	if [ -n "$session" ]; then
 		printf "export KEN_SESSION='%s' KEN_SESSION_TRANSCRIPT='%s'\n" "$(q "$session")" "$(q "$transcript")" >>"$CLAUDE_ENV_FILE"
 	fi
 elif [ -n "$session" ]; then
-	printf 'KEN_SESSION=%s\nKEN_SESSION_TRANSCRIPT=%s\n' "$session" "$transcript" >"$KEN_ROOT/.ken-session"
+	mkdir -p "${pointer%/*}"
+	printf 'KEN_SESSION=%s\nKEN_SESSION_TRANSCRIPT=%s\n' "$session" "$transcript" >"$pointer"
 else
 	# a hook that names no session, pi's shim, starts one all the same: the file is stale
-	case $input in *'"hook_event_name"'*) rm -f "$KEN_ROOT/.ken-session" ;; esac
+	case $input in *'"hook_event_name"'*) rm -f "$pointer" ;; esac
 fi
 echo "This is a ken root: $KEN_ROOT. Its CLI is \`ken\`, at .bin/ken here; \`ken help\` lists the commands."
 echo

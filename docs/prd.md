@@ -94,7 +94,9 @@ one, or with an existing section. Everything else at the root is a section.
    rules.** No checkout is inside the root, so nothing forces a sync rule on the pages: git is
    the default, and the template's `.gitignore` keeps `.env` and tool leavings out of it; a
    root under a file sync is not refused. One warning stays: `.env` is in the root and a file
-   sync carries it, so such a root keeps its secrets elsewhere. `log.md` is the timeline, so
+   sync carries it, so such a root keeps its secrets elsewhere. Machine-local state leaves the
+   root for the same reason, to `~/.local/state/ken`, as the agents template's session
+   pointer does. `log.md` is the timeline, so
    nothing is lost with git's history where git is not used. `init` and `get` make `$KEN_SRC`
    when it is missing and, where nothing is there, link `$KEN_SRC/AGENTS.md` and
    `$KEN_SRC/CLAUDE.md` to the root's `AGENTS.md`, both names since Claude Code reads the

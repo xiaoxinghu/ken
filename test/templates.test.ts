@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import {
 	copyFileSync,
 	cpSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -416,7 +417,8 @@ describe('session digests', () => {
 		expect(r.status).toBe(0)
 	})
 
-	it("ken status exports the hook's session through CLAUDE_ENV_FILE, else into .ken-session for ken log", () => {
+	it("ken status exports the hook's session through CLAUDE_ENV_FILE, else into a pointer out of the root for ken log", () => {
+		const pointer = join(dir, '.local/state/ken', root.replaceAll('/', '-'))
 		const input = JSON.stringify({
 			session_id: 'abc-123',
 			transcript_path: transcript,
@@ -434,15 +436,17 @@ describe('session digests', () => {
 		expect(status({ CLAUDE_ENV_FILE: envFile }).status).toBe(0)
 		const sourced = sh(dir, {}, '-c', `. ${envFile} && echo "$KEN_SESSION $KEN_SESSION_TRANSCRIPT"`)
 		expect(sourced.stdout).toBe(`abc-123 ${transcript}\n`)
-		expect(readdirSync(root)).not.toContain('.ken-session')
-		// Codex: the same stdin, no env file
+		expect(existsSync(pointer)).toBe(false)
+		// Codex: the same stdin, no env file: the pointer is machine-local, never in the root
 		expect(status({}).status).toBe(0)
+		expect(readFileSync(pointer, 'utf8')).toBe(
+			`KEN_SESSION=abc-123\nKEN_SESSION_TRANSCRIPT=${transcript}\n`
+		)
+		expect(readdirSync(root)).not.toContain('.ken-session')
 		rmSync(join(root, '.sessions'), { recursive: true, force: true })
 		expect(run({}, 'log', 'task', 't.md', 'added').status).toBe(0)
 		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ task t\.md: added s=abc-123\n$/)
 		expect(digest()).toBe(DIGEST)
-		const ignored = spawnSync('git', ['check-ignore', '-q', '.ken-session'], { cwd: root })
-		expect(ignored.status).toBe(0)
 		// pi: a hook that names no session leaves no other session's to be logged under
 		const pi = spawnSync('sh', ['.bin/ken', 'status'], {
 			cwd: root,
@@ -451,7 +455,7 @@ describe('session digests', () => {
 			env: { ...BARE, HOME: dir }
 		})
 		expect(pi.status).toBe(0)
-		expect(readdirSync(root)).not.toContain('.ken-session')
+		expect(existsSync(pointer)).toBe(false)
 		expect(run({}, 'log', 'task', 'u.md', 'added').status).toBe(0)
 		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ task u\.md: added\n$/)
 	})

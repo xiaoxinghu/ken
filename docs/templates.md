@@ -125,10 +125,12 @@ auto-memory is keyed on the git repo, so every session at the root shares one me
 
 The session-start hook's stdin carries `session_id` and `transcript_path` in Claude Code and
 Codex. `ken status` exports them as `KEN_SESSION` and `KEN_SESSION_TRANSCRIPT` through
-`CLAUDE_ENV_FILE`; with no env file, as in Codex, it writes them to `.ken-session`, git-ignored,
-which `ken log` reads when the environment has none; two plain sessions in one folder share
-that file, which flow avoids with a worktree per task. pi's shim sends neither yet, so its
-hook removes the file, and a pi session gets no digest unless `ken digest <transcript>` is run
+`CLAUDE_ENV_FILE`; with no env file, as in Codex, it writes them to a pointer,
+`~/.local/state/ken/<root as a path with / as ->`, which `ken log` reads when the environment
+has none. The pointer is machine-local state, so it is out of the root, where a file sync
+would carry one machine's session to another (PRD decision 5); two such sessions of one root
+share it. pi's shim sends neither yet, so its
+hook removes the pointer, and a pi session gets no digest unless `ken digest <transcript>` is run
 by hand. `ken log` then runs
 `ken digest`, which rewrites `.sessions/<id>.md` from the transcript and is idempotent, so the
 digest is current at every line and lands in the same commit; a session that logs nothing gets

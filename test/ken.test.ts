@@ -387,15 +387,29 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 			expect(readFileSync(join(at, 'A/B/C/c.md'), 'utf8')).toBe('c\n')
 			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
-			// A no longer listed: its skills go, with their exclude lines; the clones stay
+			// a layer's own layer no longer listed, as after a pull: its link goes, in the clone too
+			writeFileSync(join(clone('la', moved), '.ken'), '')
+			const pulled = ken(['init', at], { cwd: at, env: { KEN_SRC: moved } })
+			expect(pulled.stdout).toContain(
+				`Removed ${clone('la', moved)}/B, the link to example.com/acme/lb, a layer ${clone('la', moved)}/.ken no longer lists.`
+			)
+			expect(existsSync(join(clone('la', moved), 'B'))).toBe(false)
+			expect(exclude(clone('la', moved))).not.toContain('/B')
+			// A no longer listed: its link and skills go, with their exclude lines; a link of
+			// the user's into a clone's folder, not a clone, stays; the clones stay
+			symlinkSync(join(moved, 'example.com/acme/la/.agents'), join(at, 'mine'))
 			write(join(at, '.ken'), 'layer.gone=example.com/acme/gone\n')
 			const removed = ken(['init', at], { cwd: at, env: { KEN_SRC: moved } })
 			expect(removed.status).toBe(0)
 			expect(removed.stdout).toContain(
 				`Removed ${at}/.agents/skills/sa, a link into example.com/acme/la`
 			)
+			expect(removed.stdout).toContain(`Removed ${at}/A, the link to example.com/acme/la`)
 			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(false)
+			expect(lstatSync(join(at, 'A'), { throwIfNoEntry: false })).toBeUndefined()
+			expect(readlinkSync(join(at, 'mine'))).toBe(join(moved, 'example.com/acme/la/.agents'))
 			expect(exclude(at)).not.toContain('skills')
+			expect(exclude(at).split('\n')).not.toContain('/A')
 			expect(readdirSync(join(moved, 'example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
 		}, 20_000)
 

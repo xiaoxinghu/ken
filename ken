@@ -573,11 +573,22 @@ reconcile() (
 	for root in "$SCOPE" $walked; do
 		case $root in /*) ;; *) root=$SRC/$root ;; esac
 		lines=$(layer_lines "$root") || exit 1
+		names=' '
 		while IFS=$tab read -r name key; do
 			if [ -n "$name" ]; then layer_link "$root" "$name" "$key"; fi
+			names="$names$name "
 		done <<EOF
 $lines
 EOF
+		# a link to a clone in SRC is a layer's, untracked: one no longer listed goes, no other
+		for at in "$root"/* "$root"/.[!.]*; do
+			to=$(readlink "$at" 2>/dev/null) || continue
+			case $names in *" ${at##*/} "*) continue ;; esac
+			if [ "${to#"$SRC/"}" = "$to" ] || ! is_key "${to#"$SRC/"}"; then continue; fi
+			rm -f "$at"
+			exclude "$root" "${at##*/}" remove
+			printf 'Removed %s, the link to %s, a layer %s/.ken no longer lists.\n' "$at" "${to#"$SRC/"}" "$root"
+		done
 	done
 	# at the scope: skill links into a layer no longer direct go first, so a new one can take their place
 	skilled=' '

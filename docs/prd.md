@@ -233,7 +233,9 @@ each missing one as `get` does, unattended: `GIT_TERMINAL_PROMPT=0`, no askpass,
 own command, http low-speed limits. In the scope and in each layer's clone, link each layer
 it lists, `<name> -> $KEN_SRC/<key>`, absolute, since a link cannot say `~`: made, or
 repointed when it points elsewhere, as after the clones move; anything else there is left,
-which it says. At the scope, link each direct layer's `.agents/skills/<name>` where the scope
+which it says. A link to a clone in `$KEN_SRC` under a name the `.ken` no longer lists, as
+after a pull that removed the layer, is removed: being untracked, nothing else would remove
+it; any other link stays. At the scope, link each direct layer's `.agents/skills/<name>` where the scope
 has none, made again when a move left it dangling, and remove such links into a layer no
 longer direct; a skills folder that is a link is left alone, which it says. No link is
 tracked: each is listed in the `.git/info/exclude` of the repo it is in, when there is one,

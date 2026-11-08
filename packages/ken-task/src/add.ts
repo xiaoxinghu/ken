@@ -8,7 +8,7 @@ const PART = /^[\p{L}\p{N}][\p{L}\p{N}-]*$/u
 const EXT = /\.[\p{L}\p{N}]+$/u
 const KEY = /^[a-z0-9._-]+\/[a-z0-9._-]+\/[a-z0-9._-]+$/
 
-/** Whether `text` is a repo key, `<host>/<owner>/<repo>` in lowercase, naming a folder under .repos/. */
+/** Whether `text` is a repo key, `<host>/<owner>/<repo>` in lowercase, naming a folder under $KEN_SRC. */
 export const isKey = (text: string) =>
 	KEY.test(text) && text.split('/').every((p) => p !== '.' && p !== '..')
 const stemOf = (name: string) => name.replace(/(.)\.[^.]*$/, '$1')

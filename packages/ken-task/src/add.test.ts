@@ -112,7 +112,7 @@ describe('ken task add', () => {
 
 	it("writes the repo of the clone it runs in, saying so, and -r's over it", () => {
 		const root = newRoot()
-		const clone = join(root, '.repos/github.com/acme/portal')
+		const clone = join(`${root}.src`, 'github.com/acme/portal')
 		mkdirSync(clone, { recursive: true })
 		execFileSync('git', ['init', '-q', clone])
 		const r = kenTask(root, ['add', 'fix-login'], clone)

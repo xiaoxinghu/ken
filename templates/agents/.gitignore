@@ -1,8 +1,4 @@
-# The clones and worktrees, .repos/<host>/<owner>/<folder>/, and nothing else: the index and
-# each owner's AGENTS.md and .envrc stay tracked.
-.repos/*/*/*/
 # Secrets and machine-local files, which leave the machine through no git push.
 .env
 CLAUDE.local.md
 node_modules
-.ken-session

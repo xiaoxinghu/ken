@@ -1,5 +1,7 @@
 {
 	"hooks": {
-		"SessionStart": [{ "hooks": [{ "type": "command", "command": ".bin/ken status" }] }]
+		"SessionStart": [
+			{ "hooks": [{ "type": "command", "command": "\"${KEN_ROOT:-.}/.bin/ken\" status" }] }
+		]
 	}
 }

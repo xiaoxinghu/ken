@@ -4,6 +4,7 @@ import { spawnSync } from 'node:child_process'
 import {
 	copyFileSync,
 	cpSync,
+	existsSync,
 	mkdirSync,
 	mkdtempSync,
 	readdirSync,
@@ -57,10 +58,8 @@ describe.each(NAMES)('template %s', (name) => {
 	it('holds what ken init makes, .bin/ken a link to the kernel the workflow copies in', () => {
 		expect(readlinkSync(join(at, '.bin/ken'))).toBe('../../../ken')
 		expect(read('.ken')).toContain(`\ntemplate.name=${name}\n`)
-		expect(read('.repos/index')).toMatch(/^# \.repos\/index:/)
-		expect(read('.gitignore').split('\n')).toEqual(
-			expect.arrayContaining(['.repos/*/*/*/', '.env'])
-		)
+		expect(read('.repos')).toMatch(/^# \.repos:/)
+		expect(read('.gitignore').split('\n')).toContain('.env')
 	})
 
 	it('has a front page, and an AGENTS.md under 40 lines that says where the CLI is', () => {
@@ -87,9 +86,23 @@ describe('the agents template', () => {
 	it('keeps one hooks object, copied into Claude Code settings and linked for Codex', () => {
 		const hooks = JSON.parse(readFileSync(join(at, '.agents/hooks.json'), 'utf8'))
 		const settings = JSON.parse(readFileSync(join(at, '.claude/settings.json'), 'utf8'))
-		expect(settings.hooks).toEqual(hooks.hooks)
-		expect(hooks.hooks.SessionStart[0].hooks[0].command).toBe('.bin/ken status')
+		expect(settings).toEqual({ hooks: hooks.hooks })
+		// biome-ignore lint/suspicious/noTemplateCurlyInString: the hook line is shell, run by sh -c
+		expect(hooks.hooks.SessionStart[0].hooks[0].command).toBe('"${KEN_ROOT:-.}/.bin/ken" status')
 		expect(readlinkSync(join(at, '.codex/hooks.json'))).toBe('../.agents/hooks.json')
+	})
+
+	it("the hook runs the root's ken status from a checkout once KEN_ROOT is set, and from the root without", () => {
+		// a root path with a space is one word in the hook
+		const root = install('agents', 'hooked root')
+		const hook = JSON.parse(readFileSync(join(at, '.agents/hooks.json'), 'utf8')).hooks
+			.SessionStart[0].hooks[0].command
+		const checkout = join(dir, 'src/example.com/acme/app')
+		mkdirSync(checkout, { recursive: true })
+		expect(sh(checkout, { KEN_ROOT: root }, '-c', hook).stdout).toContain(
+			`This is a ken root: ${root}.`
+		)
+		expect(sh(root, {}, '-c', hook).stdout).toContain(`This is a ken root: ${root}.`)
 	})
 
 	it('.bin/ken status: a screen naming the CLI, exit 0, and ken on PATH through CLAUDE_ENV_FILE', () => {
@@ -102,9 +115,12 @@ describe('the agents template', () => {
 		expect(r.stdout).toContain('`ken help`')
 		expect(r.stdout).toContain('nothing to list')
 		expect(r.stdout).toContain('  template.name=agents\n')
-		// sourced before each shell command, it makes `ken` this root's kernel
+		// sourced before each shell command, it makes `ken` this root's kernel, acting on this root
+		// from a folder with no .ken above it, as a checkout is
 		const sourced = sh(dir, {}, '-c', `. ${envFile} && command -v ken && ken path root`)
 		expect(sourced.stdout).toBe(`${root}/.bin/ken\n${root}\n`)
+		const ken = sh(dir, {}, '-c', `. ${envFile} && echo "$KEN_ROOT" && ${KEN} path root`)
+		expect(ken.stdout).toBe(`${root}\n${root}\n`)
 	})
 
 	it('.bin/ken status with no CLAUDE_ENV_FILE writes no file and still exits 0', () => {
@@ -401,7 +417,8 @@ describe('session digests', () => {
 		expect(r.status).toBe(0)
 	})
 
-	it("ken status exports the hook's session through CLAUDE_ENV_FILE, else into .ken-session for ken log", () => {
+	it("ken status exports the hook's session through CLAUDE_ENV_FILE, else into a pointer out of the root for ken log", () => {
+		const pointer = join(dir, '.local/state/ken', root.replaceAll('/', '-'))
 		const input = JSON.stringify({
 			session_id: 'abc-123',
 			transcript_path: transcript,
@@ -419,15 +436,17 @@ describe('session digests', () => {
 		expect(status({ CLAUDE_ENV_FILE: envFile }).status).toBe(0)
 		const sourced = sh(dir, {}, '-c', `. ${envFile} && echo "$KEN_SESSION $KEN_SESSION_TRANSCRIPT"`)
 		expect(sourced.stdout).toBe(`abc-123 ${transcript}\n`)
-		expect(readdirSync(root)).not.toContain('.ken-session')
-		// Codex: the same stdin, no env file
+		expect(existsSync(pointer)).toBe(false)
+		// Codex: the same stdin, no env file: the pointer is machine-local, never in the root
 		expect(status({}).status).toBe(0)
+		expect(readFileSync(pointer, 'utf8')).toBe(
+			`KEN_SESSION=abc-123\nKEN_SESSION_TRANSCRIPT=${transcript}\n`
+		)
+		expect(readdirSync(root)).not.toContain('.ken-session')
 		rmSync(join(root, '.sessions'), { recursive: true, force: true })
 		expect(run({}, 'log', 'task', 't.md', 'added').status).toBe(0)
 		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ task t\.md: added s=abc-123\n$/)
 		expect(digest()).toBe(DIGEST)
-		const ignored = spawnSync('git', ['check-ignore', '-q', '.ken-session'], { cwd: root })
-		expect(ignored.status).toBe(0)
 		// pi: a hook that names no session leaves no other session's to be logged under
 		const pi = spawnSync('sh', ['.bin/ken', 'status'], {
 			cwd: root,
@@ -436,7 +455,7 @@ describe('session digests', () => {
 			env: { ...BARE, HOME: dir }
 		})
 		expect(pi.status).toBe(0)
-		expect(readdirSync(root)).not.toContain('.ken-session')
+		expect(existsSync(pointer)).toBe(false)
 		expect(run({}, 'log', 'task', 'u.md', 'added').status).toBe(0)
 		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ task u\.md: added\n$/)
 	})

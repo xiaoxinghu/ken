@@ -48,10 +48,12 @@ case $what in
 	exit 2
 	;;
 esac
-# A harness with no env file has its hook write the session to .ken-session instead.
-if [ -z "${KEN_SESSION-}" ] && [ -r "$KEN_ROOT/.ken-session" ]; then
-	KEN_SESSION=$(sed -n 's/^KEN_SESSION=//p' "$KEN_ROOT/.ken-session")
-	KEN_SESSION_TRANSCRIPT=$(sed -n 's/^KEN_SESSION_TRANSCRIPT=//p' "$KEN_ROOT/.ken-session")
+# A harness with no env file has its hook write the session to a pointer instead, the
+# root's under ~/.local/state/ken, as `ken status` names it.
+pointer=${HOME-}/.local/state/ken/$(printf '%s' "$KEN_ROOT" | tr / -)
+if [ -z "${KEN_SESSION-}" ] && [ -r "$pointer" ]; then
+	KEN_SESSION=$(sed -n 's/^KEN_SESSION=//p' "$pointer")
+	KEN_SESSION_TRANSCRIPT=$(sed -n 's/^KEN_SESSION_TRANSCRIPT=//p' "$pointer")
 	export KEN_SESSION KEN_SESSION_TRANSCRIPT
 fi
 link=

@@ -1,6 +1,7 @@
 import { spawn, spawnSync } from 'node:child_process'
 import {
 	copyFileSync,
+	cpSync,
 	existsSync,
 	lstatSync,
 	mkdirSync,
@@ -25,6 +26,7 @@ const SHELLS = hasDash ? ['sh', 'dash'] : ['sh']
 
 let dir: string
 let root: string
+let src: string
 let atlas: string
 let pathBin: string
 
@@ -57,8 +59,8 @@ const repo = (path: string) => {
 	git(path, 'commit', '-q', '--allow-empty', '-m', 'init')
 }
 
-// A layer's remote, remotes/acme/<name>.git: a root whose .ken lists `layers`, each with its
-// tracked link <name> -> .repos/<key>, and holding `files`.
+// A layer's remote, remotes/acme/<name>.git: a root whose .ken lists `layers`, holding `files`
+// and no link to a layer, which reconcile makes.
 const layerRemote = (
 	name: string,
 	layers: Record<string, string>,
@@ -72,23 +74,24 @@ const layerRemote = (
 			.map(([n, k]) => `layer.${n}=${k}\n`)
 			.join('')
 	)
-	for (const [n, k] of Object.entries(layers)) symlinkSync(`.repos/${k}`, join(src, n))
 	for (const [file, body] of Object.entries(files)) write(join(src, file), body)
 	git(src, 'add', '-A')
 	git(src, 'commit', '-q', '-m', 'layer')
 	git(dir, 'clone', '-q', '--bare', `src-${name}`, `remotes/acme/${name}.git`)
 }
 
-// A root with one direct layer and its link, a clone with a worktree beside it and a detached
-// one elsewhere, a folder with no .git where a checkout belongs, a worktree of a clone outside
-// the root, a nested root that is not a layer, a folder on PATH, and a HOME with no ~/ken, so
-// nothing outside the temp folder is ever found. HOME's git config sends https://example.com/
-// to bare repos under remotes/, which serve blobless clones (acme/lib: v1, an empty commit, then
-// a README), and old-git/ holds a git 2.47.
+// A root with one direct layer and its link, and the checkouts in src/, KEN_SRC: a clone with a
+// worktree beside it and a detached one elsewhere, a folder with no .git where a checkout
+// belongs, a worktree of a clone outside src/; a nested root that is not a layer, a folder on
+// PATH, and a HOME of its own, so nothing outside the temp folder is ever found. HOME's git
+// config sends https://example.com/ to bare repos under remotes/, which serve blobless clones
+// (acme/lib: v1, an empty commit, then a README; acme/agents: an AGENTS.md), and old-git/ holds
+// a git 2.47. A test that clones takes its own KEN_SRC, `<root>.src` beside its root.
 beforeAll(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-')))
 	root = join(dir, 'root')
-	atlas = join(root, '.repos/github.com/acme/atlas')
+	src = join(dir, 'src')
+	atlas = join(src, 'github.com/acme/atlas')
 	pathBin = join(dir, 'path-bin')
 	write(join(root, '.ken'), '# settings\nclone.blobless=true\nlayer.atlas=github.com/acme/atlas\n')
 	script(join(root, '.bin/ken-hello'), 'printf "%s|" "$KEN_ROOT" "$@"; exit 3')
@@ -111,6 +114,11 @@ beforeAll(() => {
 	git(join(dir, 'src-lib'), 'add', 'README.md')
 	git(join(dir, 'src-lib'), 'commit', '-q', '-m', 'readme')
 	git(dir, 'clone', '-q', '--bare', 'src-lib', 'remotes/acme/lib.git')
+	repo(join(dir, 'src-agents'))
+	write(join(dir, 'src-agents/AGENTS.md'), 'agents\n')
+	git(join(dir, 'src-agents'), 'add', 'AGENTS.md')
+	git(join(dir, 'src-agents'), 'commit', '-q', '-m', 'agents')
+	git(dir, 'clone', '-q', '--bare', 'src-agents', 'remotes/acme/agents.git')
 	script(join(dir, 'old-git/git'), 'echo "git version 2.47.1"')
 	// three layers, A listing B, B listing C, and C listing A again
 	layerRemote(
@@ -118,32 +126,19 @@ beforeAll(() => {
 		{ B: 'example.com/acme/lb' },
 		{
 			'page.md': 'a\n',
-			'.repos/github.com/team-a/AGENTS.md': 'team a\n',
-			'.repos/github.com/shared/AGENTS.md': 'shared from a\n',
 			'.agents/skills/sa/SKILL.md': 'skill a\n',
 			'.agents/skills/review notes/SKILL.md': 'notes\n',
-			'.repos/index': 'repo: github.com/team-a/notes\ndesc: Team A notes.\n'
+			'.repos': 'repo: github.com/team-a/notes\ndesc: Team A notes.\n'
 		}
 	)
-	layerRemote(
-		'lb',
-		{ C: 'example.com/acme/lc' },
-		{
-			'.repos/github.com/team-b/AGENTS.md': 'team b\n',
-			'.agents/skills/sb/SKILL.md': 'skill b\n'
-		}
-	)
-	layerRemote(
-		'lc',
-		{ A: 'example.com/acme/la' },
-		{ 'c.md': 'c\n', '.repos/github.com/team-c/AGENTS.md': 'team c\n' }
-	)
+	layerRemote('lb', { C: 'example.com/acme/lc' }, { '.agents/skills/sb/SKILL.md': 'skill b\n' })
+	layerRemote('lc', { A: 'example.com/acme/la' }, { 'c.md': 'c\n' })
 	// an ssh and a wrapper that log their arguments and fail, as an unreachable host would
 	for (const name of ['ssh-bin/ssh', 'ssh-bin/wrap', 'ssh bin/ssh'])
 		script(join(dir, name), 'echo "$*" >>"$LOG"; exit 255')
 	repo(atlas)
-	symlinkSync('.repos/github.com/acme/atlas', join(root, 'atlas'))
-	const app = join(root, '.repos/github.com/acme/app')
+	symlinkSync(atlas, join(root, 'atlas'))
+	const app = join(src, 'github.com/acme/app')
 	repo(app)
 	mkdirSync(join(app, 'src/deep'), { recursive: true })
 	git(app, 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
@@ -151,19 +146,12 @@ beforeAll(() => {
 	git(app, 'worktree', 'add', '-q', '--detach', '../../other/elsewhere')
 	git(app, 'worktree', 'add', '-q', '-b', 'feat+fix', '../app.feat+fix')
 	write(join(app, 'src/a.ts'), '')
-	symlinkSync('.repos/github.com/acme/app/src/a.ts', join(root, 'a.ts'))
-	symlinkSync('.repos/github.com/acme/offline', join(root, 'offline'))
+	symlinkSync(join(app, 'src/a.ts'), join(root, 'a.ts'))
+	symlinkSync(join(src, 'github.com/acme/offline'), join(root, 'offline'))
 	symlinkSync('loop', join(root, 'loop'))
 	repo(join(dir, 'away'))
-	git(
-		join(dir, 'away'),
-		'worktree',
-		'add',
-		'-q',
-		'--detach',
-		join(root, '.repos/github.com/acme/stray')
-	)
-	mkdirSync(join(root, '.repos/github.com/acme/web/src'), { recursive: true })
+	git(join(dir, 'away'), 'worktree', 'add', '-q', '--detach', join(src, 'github.com/acme/stray'))
+	mkdirSync(join(src, 'github.com/acme/web/src'), { recursive: true })
 	write(join(root, 'notes/inner/.ken'), '')
 	script(join(pathBin, 'ken-both'), 'echo path')
 	script(join(pathBin, 'ken-team'), 'echo path')
@@ -177,7 +165,13 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		PATH: `${pathBin}:${process.env.PATH}`,
 		HOME: join(dir, 'home'),
 		GIT_CONFIG_NOSYSTEM: '1',
+		KEN_SRC: src,
 		...more
+	})
+	// how a test runs ken in a root of its own: from it, with its own KEN_SRC beside it
+	const inRoot = (root: string, more?: Record<string, string>) => ({
+		cwd: root,
+		env: { KEN_SRC: `${root}.src`, ...more }
 	})
 	const ken = (
 		args: string[],
@@ -193,7 +187,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 	const kenAsync = (args: string[], cwd: string) =>
 		new Promise<{ status: number | null; stdout: string; stderr: string }>((resolve) => {
-			const child = spawn(shell, [KEN, ...args], { cwd, env: env() })
+			const child = spawn(shell, [KEN, ...args], { cwd, env: env(inRoot(cwd).env) })
 			let stdout = ''
 			let stderr = ''
 			child.stdout.on('data', (d) => {
@@ -223,21 +217,14 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.status).toBe(0)
 			expect(r.stdout).toContain(`${fresh} is a root.`)
 			const made = files(fresh)
-			expect(Object.keys(made)).toEqual([
-				'.bin',
-				'.bin/ken',
-				'.gitignore',
-				'.ken',
-				'.repos',
-				'.repos/index'
-			])
+			expect(Object.keys(made)).toEqual(['.bin', '.bin/ken', '.gitignore', '.ken', '.repos'])
 			expect(made['.bin/ken']).toBe(readFileSync(KEN, 'utf8'))
 			expect(statSync(join(fresh, '.bin/ken')).mode & 0o111).toBe(0o111)
-			expect(made['.gitignore']).toBe('.repos/*/*/*/\n.env\n')
+			expect(made['.gitignore']).toBe('.env\n')
 			expect(made['.ken']).toMatch(
 				/^# .*\n# .*docs\/files\.md in github\.com\/xiaoxinghu\/ken\.\n$/
 			)
-			expect(made['.repos/index']).toMatch(/^# .repos\/index: [^\n]*\n$/)
+			expect(made['.repos']).toMatch(/^# \.repos: [^\n]*\n$/)
 			const again = ken(['init', fresh], { cwd: outside() })
 			expect(again.status).toBe(0)
 			expect(again.stdout).toContain('nothing was created')
@@ -246,48 +233,44 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('keeps what is there: an existing .gitignore gains only the rule it lacks', () => {
 			const kept = join(dir, `kept-${shell}`)
-			write(join(kept, '.gitignore'), 'node_modules/\n.env  ')
+			write(join(kept, '.gitignore'), 'node_modules/')
 			write(join(kept, '.ken'), 'org.me=github.com/me\n')
 			write(join(kept, '.bin/ken'), 'mine\n')
 			expect(ken(['init', kept], { cwd: outside() }).status).toBe(0)
 			const after = files(kept)
-			expect(after['.gitignore']).toBe('node_modules/\n.env  \n.repos/*/*/*/\n')
+			expect(after['.gitignore']).toBe('node_modules/\n.env\n')
 			expect(after['.ken']).toBe('org.me=github.com/me\n')
 			expect(after['.bin/ken']).toBe('mine\n')
+			write(join(kept, '.gitignore'), '.env  ')
+			expect(ken(['init', kept], { cwd: outside() }).stdout).toContain('nothing was created')
 		})
 
 		it('refuses a folder inside a root, naming the nearest root, and makes nothing', () => {
 			const cases: [string, string][] = [
+				[join(root, `new-${shell}`), root],
 				[join(root, `notes/new-${shell}`), root],
-				[join(root, '.repos/github.com/acme/web/src'), root],
 				[join(atlas, `sub/new-${shell}`), atlas]
 			]
 			for (const [inside, above] of cases) {
 				const r = ken(['init', inside], { cwd: outside() })
 				expect(r.status).toBe(1)
-				expect(r.stderr).toContain(`${inside} is inside the root ${above} but`)
-				expect(existsSync(join(inside, '.ken'))).toBe(false)
+				expect(r.stderr).toContain(`${inside} is inside the root ${above}, so`)
+				expect(existsSync(inside)).toBe(false)
 			}
-			expect(existsSync(join(root, `notes/new-${shell}`))).toBe(false)
 			// .. after a missing folder climbs it anyway, as real_path does, so this is inside root
 			const around = `${dir}/missing-${shell}/../root/around-${shell}`
 			const r = ken(['init', around], { cwd: outside() })
 			expect(r.status).toBe(1)
-			expect(r.stderr).toContain(`${root}/around-${shell} is inside the root ${root} but`)
+			expect(r.stderr).toContain(`${root}/around-${shell} is inside the root ${root}, so`)
 			expect(existsSync(join(root, `around-${shell}`))).toBe(false)
-			// a fresh folder beside a clone, <repo>.<x>, is where a worktree belongs, not a layer
-			const wt = join(root, '.repos/github.com/acme/wt')
-			mkdirSync(join(wt, '.git'), { recursive: true })
-			const beside = `${wt}.feat-${shell}`
-			const w = ken(['init', beside], { cwd: outside() })
-			expect(w.status).toBe(1)
-			expect(w.stderr).toContain(`${beside} is where a worktree of the clone ${wt} belongs`)
-			expect(w.stderr).toContain('`ken get github.com/acme/wt -b <branch>`')
-			expect(existsSync(beside)).toBe(false)
-			for (const shallow of [`dot-${shell}/./repo`, `slash-${shell}//repo`]) {
-				expect(ken(['init', `${root}/.repos/${shallow}`], { cwd: outside() }).status).toBe(1)
-			}
-			expect(existsSync(join(root, `.repos/dot-${shell}`))).toBe(false)
+		})
+
+		it('refuses a folder that holds KEN_SRC, which would put the code in the root', () => {
+			const holder = join(dir, `holder-${shell}`)
+			const r = ken(['init', holder], { cwd: outside(), env: { KEN_SRC: join(holder, 'src') } })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`${holder} holds ${holder}/src, the folder of every checkout`)
+			expect(existsSync(holder)).toBe(false)
 		})
 
 		it('refuses a .ken that is a folder or a dangling link, which marks no root', () => {
@@ -303,30 +286,51 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			}
 		})
 
-		it('accepts a checkout at <root>/.repos/<host>/<owner>/<repo>, through every root above', () => {
-			for (const checkout of [
-				join(root, `.repos/github.com/acme/new-${shell}`),
-				join(atlas, `.repos/github.com/acme/deep-${shell}`)
-			]) {
-				mkdirSync(checkout, { recursive: true })
-				expect(ken(['init'], { cwd: checkout }).status).toBe(0)
-				expect(existsSync(join(checkout, '.ken'))).toBe(true)
+		it('makes a root of a clone in KEN_SRC, which is inside no root', () => {
+			const clone = join(src, `github.com/acme/new-${shell}`)
+			mkdirSync(clone, { recursive: true })
+			expect(ken(['init'], { cwd: clone }).status).toBe(0)
+			expect(existsSync(join(clone, '.ken'))).toBe(true)
+		})
+
+		it("gives KEN_SRC the root's rules where nothing is there; a second root is told and replaces nothing", () => {
+			const first = join(dir, `rules-${shell}`)
+			const checkouts = `${first}.src`
+			write(join(first, 'AGENTS.md'), 'rules\n')
+			write(join(first, '.envrc'), 'export X=1\n')
+			const r = ken(['init', first], inRoot(first))
+			expect(r.status).toBe(0)
+			for (const name of ['AGENTS.md', 'CLAUDE.md']) {
+				expect(readlinkSync(join(checkouts, name))).toBe(join(first, 'AGENTS.md'))
+				expect(r.stdout).toContain(`Linked ${checkouts}/${name} -> ${first}/AGENTS.md\n`)
 			}
+			expect(readFileSync(join(checkouts, '.envrc'), 'utf8')).toBe(
+				`export KEN_ROOT=${first}\nsource_env ${first}/.envrc\n`
+			)
+			expect(r.stdout).toContain(`Run \`direnv allow ${checkouts}\`.`)
+			expect(ken(['init', first], inRoot(first)).stdout).not.toMatch(/Linked|Wrote|Left/)
+			// a second root on the machine: told once, nothing replaced
+			const second = join(dir, `rules-${shell}-second`)
+			write(join(second, 'AGENTS.md'), 'other rules\n')
+			write(join(second, '.envrc'), '')
+			const other = ken(['init', second], { cwd: second, env: { KEN_SRC: checkouts } })
+			expect(other.status).toBe(0)
+			expect(other.stdout).toContain(
+				`Left AGENTS.md CLAUDE.md .envrc in ${checkouts} as they are: another root made them`
+			)
+			expect(readlinkSync(join(checkouts, 'CLAUDE.md'))).toBe(join(first, 'AGENTS.md'))
+			// a root with no AGENTS.md and no .envrc gives none
+			const bare = join(dir, `rules-${shell}-bare`)
+			expect(ken(['init', bare], { ...inRoot(bare), cwd: outside() }).status).toBe(0)
+			expect(readdirSync(`${bare}.src`)).toEqual([])
 		})
 
 		it('says how to point ken at the folder only when it is not the root found from here', () => {
-			const home = join(dir, `home-${shell}`)
 			const other = join(dir, `other-${shell}`)
-			const env = { HOME: home }
-			mkdirSync(home)
-			expect(ken(['init', join(home, 'ken')], { cwd: outside(), env }).stdout).not.toContain(
-				'KEN_ROOT='
-			)
-			const hint = ken(['init', other], { cwd: outside(), env }).stdout
-			expect(hint).toContain(`acts on ${home}/ken, not ${other};`)
-			expect(hint).toContain(`\n  ln -s ${other}/.bin/ken ~/.local/bin/ken\n`)
+			const hint = ken(['init', other], { cwd: outside() }).stdout
+			expect(hint).toContain(`acts on no root, not ${other}.`)
 			expect(hint).toContain(`\n  export KEN_ROOT=${other}\n`)
-			expect(ken(['init'], { cwd: other, env }).stdout).not.toContain('KEN_ROOT=')
+			expect(ken(['init'], { cwd: other }).stdout).not.toContain('KEN_ROOT=')
 		})
 	})
 
@@ -335,15 +339,14 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		const status = (repo: string) =>
 			spawnSync('git', ['-C', repo, 'status', '--porcelain'], { encoding: 'utf8', env: env() })
 				.stdout
+		const exclude = (repo: string) => readFileSync(join(repo, '.git/info/exclude'), 'utf8')
 
-		it('clones layers and theirs at the top, links them, and undoes the links of a layer removed', () => {
+		it('clones layers and theirs into KEN_SRC, links each in its root, excluded, and repoints them after a move', () => {
 			const at = join(dir, `layered-${shell}`)
-			const clone = (name: string) => join(at, '.repos/example.com/acme', name)
-			const owner = (name: string) => join(at, '.repos/github.com', name, 'AGENTS.md')
+			const clone = (name: string, from = `${at}.src`) => join(from, 'example.com/acme', name)
+			repo(at)
 			write(join(at, '.ken'), 'layer.A=example.com/acme/la\nlayer.gone=example.com/acme/gone\n')
-			write(owner('shared'), 'mine\n')
-			symlinkSync('.repos/example.com/acme/la', join(at, 'A'))
-			const r = ken(['init', at], { cwd: outside() })
+			const r = ken(['init', at], inRoot(at))
 			expect(r.status).toBe(0)
 			expect(r.stdout).toContain(`Layer A: cloned example.com/acme/la at ${clone('la')}.`)
 			expect(r.stdout).toContain('Layer A/B: cloned example.com/acme/lb')
@@ -353,110 +356,161 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 			expect(r.stderr).toContain('does not appear to be a git repository')
 			expect(r.stderr).toContain(`run \`ken init ${at}\` again`)
-			// the tracked links resolve through the hoisted clones, the cycle back to A included
+			// each root's layers are links to the clones, the cycle back to A included
+			expect(readlinkSync(join(at, 'A'))).toBe(clone('la'))
+			expect(readlinkSync(join(clone('la'), 'B'))).toBe(clone('lb'))
 			expect(readFileSync(join(at, 'A/B/C/c.md'), 'utf8')).toBe('c\n')
 			expect(readFileSync(join(at, 'A/B/C/A/page.md'), 'utf8')).toBe('a\n')
+			// offline: the link is made, and dangles until a clone is
+			expect(readlinkSync(join(at, 'gone'))).toBe(clone('gone'))
+			expect(existsSync(join(at, 'gone'))).toBe(false)
+			// no link is tracked: each is excluded in the repo it is in
 			for (const name of ['la', 'lb', 'lc']) expect(status(clone(name))).toBe('')
-			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
-			// owner context from every reachable layer where the root has none; skills from A only
-			for (const name of ['a', 'b', 'c']) {
-				expect(readFileSync(owner(`team-${name}`), 'utf8')).toBe(`team ${name}\n`)
-			}
-			expect(readFileSync(owner('shared'), 'utf8')).toBe('mine\n')
+			expect(exclude(at).split('\n')).toEqual(expect.arrayContaining(['/A', '/gone']))
+			expect(status(at)).not.toMatch(/^\?\? (A|gone|\.agents)/m)
+			expect(readdirSync(join(`${at}.src`, 'example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
+			// skills from A only, the direct layer, excluded too
 			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
 			expect(existsSync(join(at, '.agents/skills/sb'))).toBe(false)
-			expect(r.stdout).toContain(` '.agents/skills/review notes' .agents/skills/sa `)
-			const again = ken(['init', at], { cwd: outside() })
+			expect(exclude(at).split('\n')).toEqual(
+				expect.arrayContaining(['/.agents/skills/review notes', '/.agents/skills/sa'])
+			)
+			const again = ken(['init', at], inRoot(at))
 			expect(again.stdout).toContain('Layer A/B/C: example.com/acme/lc is cloned already')
 			expect(again.stdout).not.toContain('Linked')
-			// A no longer listed: its links and those of the layers it brought go, the clones stay
+			// the clones moved to another KEN_SRC: every link is repointed
+			const moved = `${at}.moved`
+			renameSync(`${at}.src`, moved)
+			const repointed = ken(['init', at], { cwd: at, env: { KEN_SRC: moved } })
+			expect(repointed.stdout).toContain(`Repointed ${at}/A -> ${clone('la', moved)}\n`)
+			expect(repointed.stdout).toContain(
+				`Repointed ${clone('la', moved)}/B -> ${clone('lb', moved)}\n`
+			)
+			expect(readFileSync(join(at, 'A/B/C/c.md'), 'utf8')).toBe('c\n')
+			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
+			// copied to yet another KEN_SRC, the old one kept: the skills follow the layer links
+			const copied = `${at}.copied`
+			cpSync(moved, copied, { recursive: true, verbatimSymlinks: true })
+			expect(ken(['init', at], { cwd: at, env: { KEN_SRC: copied } }).status).toBe(0)
+			expect(readlinkSync(join(at, 'A'))).toBe(clone('la', copied))
+			expect(readlinkSync(join(at, '.agents/skills/sa'))).toBe(
+				join(clone('la', copied), '.agents/skills/sa')
+			)
+			expect(ken(['init', at], { cwd: at, env: { KEN_SRC: moved } }).status).toBe(0)
+			expect(readlinkSync(join(at, '.agents/skills/sa'))).toBe(
+				join(clone('la', moved), '.agents/skills/sa')
+			)
+			// a layer's own layer no longer listed, as after a pull: its link goes, in the clone too
+			writeFileSync(join(clone('la', moved), '.ken'), '')
+			const pulled = ken(['init', at], { cwd: at, env: { KEN_SRC: moved } })
+			expect(pulled.stdout).toContain(
+				`Removed ${clone('la', moved)}/B, the link to example.com/acme/lb, a layer ${clone('la', moved)}/.ken no longer lists.`
+			)
+			expect(existsSync(join(clone('la', moved), 'B'))).toBe(false)
+			expect(exclude(clone('la', moved))).not.toContain('/B')
+			// A no longer listed: its link and skills go, with their exclude lines; a link of
+			// the user's into a clone's folder, not a clone, stays; the clones stay
+			symlinkSync(join(moved, 'example.com/acme/la/.agents'), join(at, 'mine'))
 			write(join(at, '.ken'), 'layer.gone=example.com/acme/gone\n')
-			const removed = ken(['init', at], { cwd: outside() })
+			const removed = ken(['init', at], { cwd: at, env: { KEN_SRC: moved } })
 			expect(removed.status).toBe(0)
 			expect(removed.stdout).toContain(
-				`Removed ${owner('team-c')}, a link into example.com/acme/lc`
+				`Removed ${at}/.agents/skills/sa, a link into example.com/acme/la`
 			)
-			for (const name of ['a', 'b', 'c']) expect(existsSync(owner(`team-${name}`))).toBe(false)
+			expect(removed.stdout).toContain(`Removed ${at}/A, the link to example.com/acme/la`)
 			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(false)
-			expect(readFileSync(owner('shared'), 'utf8')).toBe('mine\n')
-			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
+			expect(lstatSync(join(at, 'A'), { throwIfNoEntry: false })).toBeUndefined()
+			expect(readlinkSync(join(at, 'mine'))).toBe(join(moved, 'example.com/acme/la/.agents'))
+			expect(exclude(at)).not.toContain('skills')
+			expect(exclude(at).split('\n')).not.toContain('/A')
+			expect(readdirSync(join(moved, 'example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
 		}, 20_000)
 
 		it('takes only a real clone as a layer that is there, and adds an exclude rule as its own line', () => {
 			const at = join(dir, `there-${shell}`)
-			const la = join(at, '.repos/example.com/acme/la')
+			const la = join(`${at}.src`, 'example.com/acme/la')
 			write(join(at, '.ken'), 'layer.A=example.com/acme/la\nlayer.P=example.com/acme/plain\n')
-			write(join(at, '.repos/example.com/acme/plain/.ken'), 'layer.X=example.com/acme/lc\n')
-			mkdirSync(join(at, '.repos/example.com/acme/plain/.git'))
+			write(join(`${at}.src`, 'example.com/acme/plain/.ken'), 'layer.X=example.com/acme/lc\n')
+			mkdirSync(join(`${at}.src`, 'example.com/acme/plain/.git'))
 			git(dir, 'clone', '-q', join(dir, 'remotes/acme/la.git'), la)
 			write(join(la, '.git/info/exclude'), 'mine')
-			const r = ken(['init', at], { cwd: outside() })
+			const r = ken(['init', at], inRoot(at))
 			expect(r.status).toBe(0)
 			expect(r.stderr).toContain('ken: layer P, example.com/acme/plain, is offline')
 			expect(r.stderr).toContain('but it is a folder whose .git git does not take as its repo')
 			expect(r.stdout).toContain('Layer A: example.com/acme/la is cloned already')
 			expect(r.stdout).not.toContain('Layer P')
-			expect(existsSync(join(at, '.repos/example.com/acme/plain/.repos'))).toBe(false)
-			expect(readFileSync(join(la, '.git/info/exclude'), 'utf8')).toBe(
-				'mine\n/.repos/example.com/acme/lb\n'
-			)
+			expect(existsSync(join(`${at}.src`, 'example.com/acme/plain/X'))).toBe(false)
+			expect(exclude(la)).toBe('mine\n/B\n')
 			expect(status(la)).toBe('')
 		}, 20_000)
 
-		it('leaves a folder that is a link alone, and drops the skills of a direct layer gone offline', () => {
+		it("leaves what is not a link in a layer link's place, and a skills folder that is a link", () => {
 			const at = join(dir, `linked-${shell}`)
-			const la = join(at, '.repos/example.com/acme/la')
+			const la = join(`${at}.src`, 'example.com/acme/la')
 			const away = join(dir, `linked-away-${shell}`)
 			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
-			git(dir, 'clone', '-q', join(dir, 'remotes/acme/la.git'), la)
+			write(join(at, 'A/mine.md'), 'mine\n')
 			mkdirSync(away)
-			symlinkSync(away, join(la, '.repos/example.com'))
-			const r = ken(['init', at], { cwd: outside() })
+			mkdirSync(join(at, '.agents'))
+			symlinkSync(away, join(at, '.agents/skills'))
+			const r = ken(['init', at], inRoot(at))
+			expect(r.status).toBe(0)
 			expect(r.stdout).toContain(
-				`Left ${la}/.repos/example.com/acme/lb alone: ${la}/.repos/example.com is a link`
+				`Left ${at}/A alone: it is not a link, so the layer A has no section`
+			)
+			expect(r.stdout).toContain(
+				`Left ${at}/.agents/skills/sa alone: ${at}/.agents/skills is a link`
 			)
 			expect(readdirSync(away)).toEqual([])
-			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(true)
-			// .repos itself a link in another layer's clone: left alone too
-			const lb = join(at, '.repos/example.com/acme/lb')
-			rmSync(join(lb, '.repos/example.com/acme/lc'))
-			renameSync(join(lb, '.repos'), join(lb, 'moved'))
-			symlinkSync('moved', join(lb, '.repos'))
-			expect(ken(['init', at], { cwd: outside() }).stdout).toContain(
-				`Left ${lb}/.repos/example.com/acme/lc alone: ${lb}/.repos is a link`
+			expect(readFileSync(join(at, 'A/mine.md'), 'utf8')).toBe('mine\n')
+			expect(existsSync(join(la, '.git'))).toBe(true)
+		}, 20_000)
+
+		it('a root made a git repo after init gets the exclude lines of the links it has', () => {
+			const at = join(dir, `late-git-${shell}`)
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			git(at, 'init', '-q')
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			expect(exclude(at).split('\n')).toEqual(
+				expect.arrayContaining(['/A', '/.agents/skills/sa', '/.agents/skills/review notes'])
 			)
-			expect(existsSync(join(lb, 'moved/example.com/acme/lc'))).toBe(false)
-			// the scope's .repos a link: A is offline, its skills go, and nothing under the link is touched
-			const repos = join(dir, `linked-repos-${shell}`)
-			const teamA = join(repos, 'github.com/team-a/AGENTS.md')
-			renameSync(join(at, '.repos'), repos)
-			symlinkSync(repos, join(at, '.repos'))
-			const offline = ken(['init', at], { cwd: outside() })
+			expect(status(at)).not.toMatch(/^\?\? (A|\.agents)/m)
+		}, 20_000)
+
+		it('drops the skills of a direct layer gone offline', () => {
+			const at = join(dir, `dropped-${shell}`)
+			const la = join(`${at}.src`, 'example.com/acme/la')
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(true)
+			// a file where the clone belongs: get refuses it, so A is offline
+			renameSync(la, `${la}.aside`)
+			write(la, 'mine')
+			const offline = ken(['init', at], inRoot(at))
 			expect(offline.stderr).toContain('ken: layer A, example.com/acme/la, is offline')
 			expect(offline.stdout).toContain(
 				`Removed ${at}/.agents/skills/sa, a link into example.com/acme/la`
 			)
 			expect(existsSync(join(at, '.agents/skills/sa'))).toBe(false)
-			expect(offline.stdout).toContain(
-				`Left ${at}/.repos/github.com/team-a/AGENTS.md alone: ${at}/.repos is a link`
-			)
-			expect(lstatSync(teamA).isSymbolicLink()).toBe(true)
 		}, 20_000)
 
 		it('get -b of a layer reconciles its worktree, saying so on stderr, stdout the path alone', () => {
 			const at = join(dir, `branched-${shell}`)
-			const la = join(at, '.repos/example.com/acme/la')
+			const la = join(`${at}.src`, 'example.com/acme/la')
 			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
-			expect(ken(['init', at], { cwd: outside() }).status).toBe(0)
-			const r = ken(['get', 'example.com/acme/la', '-b', 'feat'], { cwd: at })
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			const r = ken(['get', 'example.com/acme/la', '-b', 'feat'], inRoot(at))
 			expect(r.status).toBe(0)
 			expect(r.stdout).toBe(`${la}.feat\n`)
 			expect(r.stderr).toContain('Layer B/C: example.com/acme/lc is cloned already')
-			expect(r.stderr).toContain(`Linked ${la}.feat/.repos/example.com/acme/lb -> `)
+			expect(r.stderr).toContain(
+				`Linked ${la}.feat/B -> ${join(`${at}.src`, 'example.com/acme/lb')}`
+			)
 			expect(readFileSync(join(`${la}.feat`, 'B/C/c.md'), 'utf8')).toBe('c\n')
-			// the link to the hoisted clone is excluded; the owner and skill links are the worktree's to track
-			expect(status(`${la}.feat`)).not.toContain('example.com')
-			expect(r.stderr).toContain(`Track the changes at ${la}.feat with`)
+			// the link is excluded in the clone's common info/exclude, so the worktree is clean
+			expect(status(`${la}.feat`)).toBe('')
 		}, 20_000)
 
 		it("adds ssh's unattended options after the ssh word, or after a wrapper, never to GIT_SSH", () => {
@@ -493,104 +547,126 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	})
 
 	describe('layer', () => {
-		const outside = () => join(dir, 'outside')
 		const fresh = (name: string) => {
 			const at = join(dir, `${name}-${shell}`)
 			write(join(at, '.ken'), '# mine\norg.me=github.com/me')
 			mkdirSync(join(at, 'systems'))
-			expect(ken(['init', at], { cwd: outside() }).status).toBe(0)
-			return at
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			return { at, code: (key: string) => join(`${at}.src`, key) }
 		}
 
-		it('add links the layer, appends its line, reconciles; remove undoes all but the clones', () => {
-			const at = fresh('layer-add')
+		it('add appends its line and reconciles, the link excluded; remove undoes all but the clones', () => {
+			const { at, code } = fresh('layer-add')
+			git(at, 'init', '-q')
 			const ken0 = '# mine\norg.me=github.com/me\n'
-			const r = ken(['layer', 'add', 'example.com/acme/la'], { cwd: at })
+			const r = ken(['layer', 'add', 'example.com/acme/la'], inRoot(at))
 			expect(r.status).toBe(0)
-			expect(readlinkSync(join(at, 'la'))).toBe('.repos/example.com/acme/la')
+			expect(readlinkSync(join(at, 'la'))).toBe(code('example.com/acme/la'))
 			expect(readFileSync(join(at, 'la/B/C/c.md'), 'utf8')).toBe('c\n')
 			expect(readFileSync(join(at, '.ken'), 'utf8')).toBe(`${ken0}layer.la=example.com/acme/la\n`)
-			expect(readFileSync(join(at, '.repos/github.com/team-a/AGENTS.md'), 'utf8')).toBe('team a\n')
 			expect(readFileSync(join(at, '.agents/skills/sa/SKILL.md'), 'utf8')).toBe('skill a\n')
-			expect(r.stdout).toContain(`git -C ${at} add -A -- la .ken .repos/index .repos/`)
+			expect(r.stdout).toContain(`git -C ${at} add -- .ken .repos\`; the link is excluded`)
 			expect(r.stdout).toContain('under ## Layers')
-			const repos = ken(['repos', '--porcelain'], { cwd: at }).stdout
+			const repos = ken(['repos', '--porcelain'], inRoot(at)).stdout
 			expect(repos).toContain('github.com/team-a/notes\tTeam A notes.\tla\tfalse\t\n')
 			// by URL, under another name
-			const url = ken(['layer', 'add', 'https://example.com/acme/lc.git', '--as', 'handbook'], {
-				cwd: at
-			})
+			const url = ken(
+				['layer', 'add', 'https://example.com/acme/lc.git', '--as', 'handbook'],
+				inRoot(at)
+			)
 			expect(url.status).toBe(0)
-			expect(readlinkSync(join(at, 'handbook'))).toBe('.repos/example.com/acme/lc')
+			expect(readlinkSync(join(at, 'handbook'))).toBe(code('example.com/acme/lc'))
 			expect(readFileSync(join(at, 'handbook/c.md'), 'utf8')).toBe('c\n')
 			expect(readFileSync(join(at, '.ken'), 'utf8')).toContain(
 				'\nlayer.handbook=example.com/acme/lc\n'
 			)
-			// remove both: the lines, links and owner and skill links go, the clones stay
+			// remove both: the lines, links and skill links go, with their exclude lines; the clones stay
 			for (const name of ['handbook', 'la']) {
-				const gone = ken(['layer', 'remove', name], { cwd: at })
+				const gone = ken(['layer', 'remove', name], inRoot(at))
 				expect(gone.status).toBe(0)
-				expect(gone.stdout).toContain(`git -C ${at} add -A -- .ken ${name}`)
+				expect(gone.stdout).toContain(`git -C ${at} add -- .ken\``)
 			}
 			expect(readFileSync(join(at, '.ken'), 'utf8')).toBe(ken0)
 			for (const name of ['la', 'handbook', '.agents/skills/sa'])
 				expect(existsSync(join(at, name))).toBe(false)
-			for (const team of ['a', 'b', 'c'])
-				expect(existsSync(join(at, `.repos/github.com/team-${team}/AGENTS.md`))).toBe(false)
-			expect(readdirSync(join(at, '.repos/example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
-			const last = ken(['layer', 'remove', 'la'], { cwd: at })
+			expect(readFileSync(join(at, '.git/info/exclude'), 'utf8')).not.toMatch(/la|handbook|sa/)
+			expect(readdirSync(code('example.com/acme')).sort()).toEqual(['la', 'lb', 'lc'])
+			const last = ken(['layer', 'remove', 'la'], inRoot(at))
 			expect(last.status).toBe(0)
 			expect(last.stdout).toContain(`la is not a layer of ${at}, so there is nothing to remove.`)
 		}, 30_000)
 
+		it("remove in a worktree of the root keeps the exclude line the root's own link still needs", () => {
+			const { at } = fresh('layer-worktree')
+			git(at, 'init', '-q', '-b', 'main')
+			expect(ken(['layer', 'add', 'example.com/acme/lc'], inRoot(at)).status).toBe(0)
+			git(at, 'add', '.ken')
+			git(at, 'commit', '-q', '-m', 'root')
+			const wt = `${at}-wt`
+			git(at, 'worktree', 'add', '-q', wt)
+			expect(ken(['init'], { cwd: wt, env: { KEN_SRC: `${at}.src` } }).status).toBe(0)
+			expect(
+				ken(['layer', 'remove', 'lc'], { cwd: wt, env: { KEN_SRC: `${at}.src` } }).status
+			).toBe(0)
+			expect(existsSync(join(wt, 'lc'))).toBe(false)
+			const status = (cwd: string) =>
+				spawnSync('git', ['-C', cwd, 'status', '--porcelain'], { encoding: 'utf8', env: env() })
+					.stdout
+			expect(status(at)).not.toContain('lc')
+			// the last checkout to drop it takes the line out
+			expect(ken(['layer', 'remove', 'lc'], inRoot(at)).status).toBe(0)
+			expect(readFileSync(join(at, '.git/info/exclude'), 'utf8').split('\n')).not.toContain('/lc')
+		}, 20_000)
+
 		it('refuses a bad, reserved or taken name and a layer already added, before any write', () => {
-			const at = fresh('layer-refused')
-			expect(ken(['layer', 'add', 'example.com/acme/la'], { cwd: at }).status).toBe(0)
+			const { at, code } = fresh('layer-refused')
+			expect(ken(['layer', 'add', 'example.com/acme/la'], inRoot(at)).status).toBe(0)
 			symlinkSync('nowhere', join(at, 'dangling'))
 			const before = readFileSync(join(at, '.ken'), 'utf8')
-			const index = readFileSync(join(at, '.repos/index'), 'utf8')
+			const index = readFileSync(join(at, '.repos'), 'utf8')
 			const cases: [string[], string][] = [
 				[['example.com/acme/la', '--as', 'other'], 'is a layer of'],
 				[['example.com/acme/lib', '--as', 'README.md'], 'is a reserved name'],
 				[['example.com/acme/lib', '--as', 'claude.MD'], 'is a reserved name'],
-				[['example.com/acme/lib', '--as', '.bin'], 'is a reserved name'],
+				[['example.com/acme/lib', '--as', '.repos'], 'is a reserved name'],
 				[['example.com/acme/lib', '--as', 'systems'], `${at}/systems is there already`],
 				[['example.com/acme/lib', '--as', 'dangling'], `${at}/dangling is there already`],
 				[['example.com/acme/lib', '--as', 'la'], 'is the layer of example.com/acme/la in'],
 				[['example.com/acme/lib', '--as', 'a/b'], 'is not a layer name']
 			]
 			for (const [args, says] of cases) {
-				const r = ken(['layer', 'add', ...args], { cwd: at })
+				const r = ken(['layer', 'add', ...args], inRoot(at))
 				expect(r.status).toBe(1)
 				expect(r.stderr).toContain(says)
 				expect(r.stderr).toMatch(/`ken (init|layer add) /)
 			}
 			expect(readFileSync(join(at, '.ken'), 'utf8')).toBe(before)
-			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(index)
-			expect(existsSync(join(at, '.repos/example.com/acme/lib'))).toBe(false)
+			expect(readFileSync(join(at, '.repos'), 'utf8')).toBe(index)
+			expect(existsSync(code('example.com/acme/lib'))).toBe(false)
 		}, 20_000)
 
 		it('completes an add that stopped after the link, and adds inside a layer to the layer', () => {
-			const at = fresh('layer-halfway')
-			symlinkSync('.repos/example.com/acme/la', join(at, 'la'))
-			expect(ken(['layer', 'add', 'example.com/acme/la'], { cwd: at }).status).toBe(0)
+			const { at, code } = fresh('layer-halfway')
+			const la = code('example.com/acme/la')
+			symlinkSync(la, join(at, 'la'))
+			expect(ken(['layer', 'add', 'example.com/acme/la'], inRoot(at)).status).toBe(0)
 			expect(readFileSync(join(at, '.ken'), 'utf8')).toContain('\nlayer.la=example.com/acme/la\n')
 			expect(readFileSync(join(at, 'la/page.md'), 'utf8')).toBe('a\n')
-			// inside the layer: its .ken and link, the clone hoisted to the top
-			const la = join(at, '.repos/example.com/acme/la')
-			const r = ken(['layer', 'add', 'example.com/acme/lib'], { cwd: join(at, 'la') })
+			// inside the layer: its .ken and link, the clone in KEN_SRC
+			const r = ken(['layer', 'add', 'example.com/acme/lib'], {
+				cwd: join(at, 'la'),
+				env: { KEN_SRC: `${at}.src` }
+			})
 			expect(r.status).toBe(0)
 			expect(readFileSync(join(la, '.ken'), 'utf8')).toBe(
 				'layer.B=example.com/acme/lb\nlayer.lib=example.com/acme/lib\n'
 			)
-			expect(readlinkSync(join(la, 'lib'))).toBe('.repos/example.com/acme/lib')
+			expect(readlinkSync(join(la, 'lib'))).toBe(code('example.com/acme/lib'))
 			expect(readFileSync(join(at, 'la/lib/README.md'), 'utf8')).toBe('lib\n')
-			expect(existsSync(join(at, '.repos/example.com/acme/lib/.git'))).toBe(true)
 			expect(readFileSync(join(at, '.ken'), 'utf8')).not.toContain('lib')
-			const gone = ken(['layer', 'remove', 'lib'], { cwd: la })
+			const gone = ken(['layer', 'remove', 'lib'], { cwd: la, env: { KEN_SRC: `${at}.src` } })
 			expect(gone.status).toBe(0)
 			expect(existsSync(join(la, 'lib'))).toBe(false)
-			expect(existsSync(join(la, '.repos/example.com/acme/lib'))).toBe(false)
 			expect(readFileSync(join(la, '.ken'), 'utf8')).toBe('layer.B=example.com/acme/lb\n')
 		}, 20_000)
 	})
@@ -599,7 +675,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('code lowercases the key and puts the branch worktree beside the clone, / as -', () => {
 			expect(ken(['path', 'code', 'github.com/Acme/Join-Web', 'feat/login'])).toEqual({
 				status: 0,
-				stdout: `${root}/.repos/github.com/acme/join-web.feat-login\n`,
+				stdout: `${src}/github.com/acme/join-web.feat-login\n`,
 				stderr: ''
 			})
 			for (const url of [
@@ -607,8 +683,29 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				'git@github.com:Acme/Join-Web.git',
 				'github.com:acme/join-web.git'
 			]) {
-				expect(ken(['path', 'code', url]).stdout).toBe(`${root}/.repos/github.com/acme/join-web\n`)
+				expect(ken(['path', 'code', url]).stdout).toBe(`${src}/github.com/acme/join-web\n`)
 			}
+		})
+
+		it('code answers from KEN_SRC, ~/src when unset, inside any root or none', () => {
+			const home = join(dir, 'home/src/github.com/acme/x\n')
+			for (const cwd of [root, atlas, join(dir, 'outside')]) {
+				expect(ken(['path', 'code', 'github.com/acme/x'], { cwd }).stdout).toBe(
+					`${src}/github.com/acme/x\n`
+				)
+				expect(
+					ken(['path', 'code', 'github.com/acme/x'], { cwd, env: { KEN_SRC: '' } }).stdout
+				).toBe(home)
+			}
+		})
+
+		it('refuses a KEN_SRC inside a root, the layout of checkouts in the root', () => {
+			const r = ken(['path', 'code', 'github.com/acme/x'], { env: { KEN_SRC: join(root, 'code') } })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(
+				`the checkouts folder ${root}/code (KEN_SRC, default ~/src) is inside the ken root ${root}`
+			)
+			expect(r.stderr).toContain('`export KEN_SRC=~/src`')
 		})
 
 		it('refuses a URL with userinfo as a key or a branch, never printing the secret', () => {
@@ -634,7 +731,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('resolves a reference to a cloned repo to the file, to an uncloned one to its URL', () => {
 			expect(ken(['path', 'github.com/Acme/Web:src/a.ts#run'])).toEqual({
 				status: 0,
-				stdout: `${root}/.repos/github.com/acme/web/src/a.ts\n`,
+				stdout: `${src}/github.com/acme/web/src/a.ts\n`,
 				stderr: ''
 			})
 			const r = ken(['path', 'github.com/acme/api:src/a.ts#run'])
@@ -658,11 +755,12 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	describe('which', () => {
 		const r = (path: string, cwd = root) => ken(['which', path], { cwd })
 		const ok = (stdout: string) => ({ status: 0, stdout: `${stdout}\n`, stderr: '' })
+		const s = (path: string) => join(src, path)
 
 		it('a clone and a worktree beside it, at their roots and deep inside, from git', () => {
-			const at = join(root, '.repos/github.com/acme')
+			const at = s('github.com/acme')
 			expect(ken(['which'], { cwd: join(at, 'app') })).toEqual(ok('github.com/acme/app clone main'))
-			expect(r('.repos/github.com/acme/app/src/deep')).toEqual(ok('github.com/acme/app clone main'))
+			expect(r(s('github.com/acme/app/src/deep'))).toEqual(ok('github.com/acme/app clone main'))
 			expect(r('src/deep', join(at, 'app.feat-x'))).toEqual(
 				ok('github.com/acme/app worktree feat/x')
 			)
@@ -671,12 +769,18 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 		})
 
+		it('needs no root: a checkout is a checkout from anywhere', () => {
+			expect(r(s('github.com/acme/app'), join(dir, 'outside'))).toEqual(
+				ok('github.com/acme/app clone main')
+			)
+		})
+
 		it('a worktree is keyed by its clone wherever its folder is, detached with no branch', () => {
-			expect(r('.repos/github.com/other/elsewhere')).toEqual(ok('github.com/acme/app worktree'))
+			expect(r(s('github.com/other/elsewhere'))).toEqual(ok('github.com/acme/app worktree'))
 		})
 
 		it('a worktree whose branch has a character no key may hold is keyed by its clone', () => {
-			expect(r('.repos/github.com/acme/app.feat+fix')).toEqual(
+			expect(r(s('github.com/acme/app.feat+fix'))).toEqual(
 				ok('github.com/acme/app worktree feat+fix')
 			)
 		})
@@ -689,13 +793,13 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r('offline/x.md')).toEqual(ok('github.com/acme/offline clone'))
 		})
 
-		it('a symlink cycle ends, as a path in the root outside a checkout', () => {
+		it('a symlink cycle ends, as a path outside KEN_SRC', () => {
 			expect(r('loop').stderr).toContain(
-				`${root}/loop is in the ken root ${root} but in no checkout`
+				`${root}/loop is outside ${src}, the folder of every checkout`
 			)
 		})
 
-		it('a layer is a checkout of the root above it, through its link and from inside it', () => {
+		it('a layer is a checkout, through its link and from inside it', () => {
 			expect(r('atlas/sub')).toEqual(ok('github.com/acme/atlas clone main'))
 			expect(r('missing/../atlas/sub')).toEqual(ok('github.com/acme/atlas clone main'))
 			expect(ken(['which'], { cwd: join(root, 'atlas/sub') })).toEqual(
@@ -704,58 +808,51 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 
 		it('a path not checked out yet is answered from its shape, with no branch', () => {
-			expect(r('.repos/github.com/Acme/api/src/x.ts')).toEqual(ok('github.com/acme/api clone'))
-			expect(r('.repos/github.com/acme/app.other/src')).toEqual(ok('github.com/acme/app worktree'))
+			expect(r(s('github.com/Acme/api/src/x.ts'))).toEqual(ok('github.com/acme/api clone'))
+			expect(r(s('github.com/acme/app.other/src'))).toEqual(ok('github.com/acme/app worktree'))
 			// a worktree's .git is a file, so app.feat-x is not a clone to be a worktree of
-			expect(r('.repos/github.com/acme/app.feat-x.y')).toEqual(ok('github.com/acme/app worktree'))
-			expect(r('.repos/github.com/acme/new/../api/x')).toEqual(ok('github.com/acme/api clone'))
+			expect(r(s('github.com/acme/app.feat-x.y'))).toEqual(ok('github.com/acme/app worktree'))
+			expect(r(s('github.com/acme/new/../api/x'))).toEqual(ok('github.com/acme/api clone'))
 		})
 
 		it('a folder where a checkout belongs with no .git is refused, with the ken get to run', () => {
-			const res = r('.repos/github.com/acme/web/src')
+			const res = r(s('github.com/acme/web/src'))
 			expect(res.status).toBe(1)
-			expect(res.stderr).toContain(`${root}/.repos/github.com/acme/web is where a checkout belongs`)
+			expect(res.stderr).toContain(`${src}/github.com/acme/web is where a checkout belongs`)
 			expect(res.stderr).toContain('`ken get github.com/acme/web`')
 		})
 
-		it('a path in the root outside a checkout, or outside the top, is refused', () => {
-			for (const path of ['notes', '.repos/github.com/acme']) {
-				const res = r(path)
-				expect(res.status).toBe(1)
-				expect(res.stderr).toContain(
-					`${root}/${path} is in the ken root ${root} but in no checkout`
-				)
-			}
-			const out = r('../outside')
-			expect(out.status).toBe(1)
-			expect(out.stderr).toContain(`${dir}/outside is outside the top root ${root}`)
-		})
-
-		it('a worktree of a clone outside the root is refused, with the git worktree move', () => {
-			const res = r('.repos/github.com/acme/stray')
+		it('a path in KEN_SRC outside a checkout, or outside KEN_SRC, is refused', () => {
+			const res = r(s('github.com/acme'))
 			expect(res.status).toBe(1)
 			expect(res.stderr).toContain(
-				`\`git -C ${dir}/away worktree move ${root}/.repos/github.com/acme/stray ${dir}/stray\``
+				`${src}/github.com/acme is in ${src}, the folder of every checkout, but in no checkout`
+			)
+			for (const path of ['notes', '../outside']) {
+				const out = r(path)
+				expect(out.status).toBe(1)
+				expect(out.stderr).toMatch(
+					/ is outside .*src, the folder of every checkout on this machine/
+				)
+			}
+		})
+
+		it('a worktree of a clone outside KEN_SRC is refused, with the git worktree move', () => {
+			const res = r(s('github.com/acme/stray'))
+			expect(res.status).toBe(1)
+			expect(res.stderr).toContain(
+				`\`git -C ${dir}/away worktree move ${src}/github.com/acme/stray ${dir}/stray\``
 			)
 		})
 	})
 
 	describe('the root', () => {
-		it('a layer under <top>/.repos/ is the scope from inside it, and the top stays', () => {
+		it('a layer is the scope from inside it, its checkouts in KEN_SRC all the same', () => {
 			const cwd = join(atlas, 'sub')
 			expect(ken(['path', 'root'], { cwd }).stdout).toBe(`${atlas}\n`)
 			expect(ken(['path', 'code', 'github.com/acme/x'], { cwd }).stdout).toBe(
-				`${root}/.repos/github.com/acme/x\n`
+				`${src}/github.com/acme/x\n`
 			)
-		})
-
-		it('a .ken reached not through .repos/ is its own top, inside a layer too', () => {
-			for (const inner of [join(root, 'notes/inner'), join(atlas, 'notes/inner')]) {
-				write(join(inner, '.ken'), '')
-				expect(ken(['path', 'code', 'github.com/acme/x'], { cwd: inner }).stdout).toBe(
-					`${inner}/.repos/github.com/acme/x\n`
-				)
-			}
 		})
 
 		it('KEN_ROOT wins over the cwd, resolved to its real path', () => {
@@ -780,11 +877,24 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(r.stdout).toBe(`${own}\n`)
 		})
 
-		it('a root that does not exist is refused, naming the path and where it came from', () => {
-			const r = ken(['path', 'root'], { cwd: join(dir, 'outside') })
+		it('outside any root, with KEN_ROOT unset, stops, naming cd and KEN_ROOT', () => {
+			const r = ken(['path', 'root'], { cwd: join(src, 'github.com/acme/app') })
 			expect(r.status).toBe(1)
-			expect(r.stderr).toContain(`the ken root ${join(dir, 'home/ken')} (from the default, ~/ken)`)
-			expect(r.stderr).toContain(`ken init ${join(dir, 'home/ken')}`)
+			expect(r.stdout).toBe('')
+			expect(r.stderr).toContain(`ken: ${src}/github.com/acme/app is in no ken root`)
+			expect(r.stderr).toContain('cd into a root, or set KEN_ROOT')
+			const set = ken(['path', 'root'], {
+				cwd: join(src, 'github.com/acme/app'),
+				env: { KEN_ROOT: root }
+			})
+			expect(set.stdout).toBe(`${root}\n`)
+		})
+
+		it('a KEN_ROOT that does not exist is refused, naming the path and where it came from', () => {
+			const r = ken(['path', 'root'], { env: { KEN_ROOT: join(dir, 'nope') } })
+			expect(r.status).toBe(1)
+			expect(r.stderr).toContain(`the ken root ${join(dir, 'nope')} (from KEN_ROOT) does not exist`)
+			expect(r.stderr).toContain(`ken init ${join(dir, 'nope')}`)
 		})
 	})
 
@@ -830,10 +940,10 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('a layer named twice in .ken is the last line, and only that layer is searched', () => {
 			const twice = join(dir, `twice-${shell}`)
 			write(join(twice, '.ken'), 'layer.t=github.com/acme/old\nlayer.t=github.com/acme/new\n')
-			script(join(twice, '.repos/github.com/acme/old/.bin/ken-which-layer'), 'echo old')
-			script(join(twice, '.repos/github.com/acme/new/.bin/ken-which-layer'), 'echo new')
-			expect(ken(['which-layer'], { cwd: twice }).stdout).toBe('new\n')
-			expect(ken(['nope'], { cwd: twice }).stderr).not.toContain('acme/old')
+			script(join(`${twice}.src`, 'github.com/acme/old/.bin/ken-which-layer'), 'echo old')
+			script(join(`${twice}.src`, 'github.com/acme/new/.bin/ken-which-layer'), 'echo new')
+			expect(ken(['which-layer'], inRoot(twice)).stdout).toBe('new\n')
+			expect(ken(['nope'], inRoot(twice)).stderr).not.toContain('acme/old')
 		})
 
 		it('a layer line in .ken that ken cannot read stops it, naming the file and line', () => {
@@ -848,12 +958,12 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 	describe('index', () => {
 		const KEY = 'github.com/acme/web'
 		let n = 0
-		// A fresh root whose .repos/index holds `body`, or none when undefined.
+		// A fresh root whose index, .repos, holds `body`, or none when undefined.
 		const fresh = (body?: string) => {
 			const at = join(dir, `index-${shell}-${n++}`)
 			write(join(at, '.ken'), '')
-			if (body !== undefined) write(join(at, '.repos/index'), body)
-			const index = join(at, '.repos/index')
+			if (body !== undefined) write(join(at, '.repos'), body)
+			const index = join(at, '.repos')
 			return { cwd: at, index, read: () => readFileSync(index, 'utf8') }
 		}
 		const OTHERS = '# The index.\n\nowner: github.com/acme\ndesc: Acme.\n\n'
@@ -879,7 +989,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			)
 			expect(all.map((a) => a.status)).toEqual(keys.map(() => 0))
 			for (const k of keys) expect(r.read()).toContain(`repo: ${k}\ndesc: R.\n`)
-			expect(readdirSync(join(r.cwd, '.repos'))).toEqual(['index'])
+			expect(readdirSync(r.cwd).sort()).toEqual(['.ken', '.repos'])
 		}, 20_000)
 
 		it('a lock whose holder is gone is refused with the rm to run, never removed by ken', () => {
@@ -946,7 +1056,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			const out = ken(['index', 'unset', KEY, 'kind'], r)
 			expect(out.status).toBe(1)
 			expect(out.stderr).toContain('ken index takes set, then a repo key, got unset.')
-			expect(out.stderr).toContain('To remove a field or an entry, edit .repos/index.')
+			expect(out.stderr).toContain('To remove a field or an entry, edit .repos.')
 			expect(r.read()).toBe(body)
 		})
 
@@ -985,7 +1095,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				expect(out.stderr).toContain(`ken: ${r.index} line ${line}, `)
 				expect(out.stderr).toContain(what)
 				expect(r.read()).toBe(body)
-				expect(readdirSync(join(r.cwd, '.repos'))).toEqual(['index'])
+				expect(readdirSync(r.cwd).sort()).toEqual(['.ken', '.repos'])
 			}
 		})
 	})
@@ -999,7 +1109,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			write(join(at, '.ken'), settings)
 			return at
 		}
-		const cloneOf = (at: string, key = KEY) => join(at, '.repos', key)
+		const cloneOf = (at: string, key = KEY) => join(`${at}.src`, key)
 		const config = (repo: string, name: string) =>
 			spawnSync('git', ['-C', repo, 'config', '--get', name], { encoding: 'utf8', env: env() })
 				.stdout
@@ -1012,20 +1122,23 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			return `folder ${readdirSync(p).sort().join(' ')}`
 		}
 
-		it('clones blobless at the top, registers the key and says to describe it; again is silent', () => {
+		it('clones blobless into KEN_SRC, registers the key and says to describe it; again is silent', () => {
 			const at = fresh()
 			const clone = cloneOf(at)
-			const first = ken(['get', KEY], { cwd: join(dir, 'outside'), env: { KEN_ROOT: at } })
+			const first = ken(['get', KEY], {
+				cwd: join(dir, 'outside'),
+				env: { KEN_ROOT: at, KEN_SRC: `${at}.src` }
+			})
 			expect(first.status).toBe(0)
 			expect(first.stdout).toBe(`${clone}\n`)
-			expect(first.stderr).toContain(registered(`${at}/.repos/index`))
+			expect(first.stderr).toContain(registered(`${at}/.repos`))
 			expect(first.stderr).toContain(`Run \`ken index set ${KEY} desc="..."\``)
-			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+			expect(readFileSync(join(at, '.repos'), 'utf8')).toBe(`repo: ${KEY}\n`)
 			expect(readFileSync(join(clone, 'README.md'), 'utf8')).toBe('lib\n')
 			expect(config(clone, 'worktree.useRelativePaths')).toBe('true\n')
 			expect(config(clone, 'remote.origin.partialclonefilter')).toBe('blob:none\n')
-			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual(['lib'])
-			expect(ken(['get', `https://${KEY}.git`], { cwd: at })).toEqual({
+			expect(readdirSync(cloneOf(at, 'example.com/acme'))).toEqual(['lib'])
+			expect(ken(['get', `https://${KEY}.git`], inRoot(at))).toEqual({
 				status: 0,
 				stdout: first.stdout,
 				stderr: ''
@@ -1034,58 +1147,58 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('clones whole when the scope says clone.blobless=false', () => {
 			const at = fresh('clone.blobless=false\n')
-			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
+			expect(ken(['get', KEY], inRoot(at)).status).toBe(0)
 			expect(config(cloneOf(at), 'remote.origin.partialclonefilter')).toBe('')
 		})
 
 		it('refuses a clone.blobless it cannot read before making anything, so the rerun clones', () => {
 			const at = fresh('clone.blobless=flase\n')
-			const r = ken(['get', KEY], { cwd: at })
+			const r = ken(['get', KEY], inRoot(at))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain(`${at}/.ken sets clone.blobless to neither true nor false`)
-			expect(existsSync(join(at, '.repos'))).toBe(false)
+			expect(existsSync(`${at}.src`)).toBe(false)
 			write(join(at, '.ken'), 'clone.blobless=false\n')
-			expect(ken(['get', KEY], { cwd: at }).stdout).toBe(`${cloneOf(at)}\n`)
+			expect(ken(['get', KEY], inRoot(at)).stdout).toBe(`${cloneOf(at)}\n`)
 		})
 
 		it('uses a repo made with git init where the clone belongs, as it is', () => {
 			const at = fresh()
 			repo(cloneOf(at))
-			const r = ken(['get', KEY], { cwd: at })
+			const r = ken(['get', KEY], inRoot(at))
 			expect(r.stdout).toBe(`${cloneOf(at)}\n`)
-			expect(r.stderr).toContain(registered(`${at}/.repos/index`))
+			expect(r.stderr).toContain(registered(`${at}/.repos`))
 			expect(config(cloneOf(at), 'worktree.useRelativePaths')).toBe('true\n')
 			expect(config(cloneOf(at), 'remote.origin.url')).toBe('')
 		})
 
-		it("from inside a layer clones at the top and registers in the layer's index", () => {
+		it("from inside a layer clones into KEN_SRC and registers in the layer's index", () => {
 			const at = fresh('layer.team=example.com/acme/team\n')
 			const team = cloneOf(at, 'example.com/acme/team')
 			write(join(team, '.ken'), '')
-			const r = ken(['get', KEY], { cwd: team })
+			const r = ken(['get', KEY], { cwd: team, env: { KEN_SRC: `${at}.src` } })
 			expect(r.stdout).toBe(`${cloneOf(at)}\n`)
-			expect(r.stderr).toContain(registered(`${team}/.repos/index`))
-			expect(readFileSync(join(team, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
-			expect(existsSync(join(at, '.repos/index'))).toBe(false)
+			expect(r.stderr).toContain(registered(`${team}/.repos`))
+			expect(readFileSync(join(team, '.repos'), 'utf8')).toBe(`repo: ${KEY}\n`)
+			expect(existsSync(join(at, '.repos'))).toBe(false)
 		})
 
 		it("registers nothing when the scope's index or a reachable layer's lists the key", () => {
 			const listed = fresh()
 			const index = `# The index.\n\nrepo: ${KEY}\ndesc: Lib.\n`
-			write(join(listed, '.repos/index'), index)
-			expect(ken(['get', KEY], { cwd: listed }).stderr).toBe('')
-			expect(readFileSync(join(listed, '.repos/index'), 'utf8')).toBe(index)
+			write(join(listed, '.repos'), index)
+			expect(ken(['get', KEY], inRoot(listed)).stderr).toBe('')
+			expect(readFileSync(join(listed, '.repos'), 'utf8')).toBe(index)
 			// an offline layer is skipped, and a layer's own layer reached, through a cycle back
 			const at = fresh('layer.gone=example.com/acme/gone\nlayer.team=example.com/acme/team\n')
 			write(join(cloneOf(at, 'example.com/acme/team'), '.ken'), 'layer.hb=example.com/acme/hb\n')
 			write(join(cloneOf(at, 'example.com/acme/hb'), '.ken'), 'layer.team=example.com/acme/team\n')
-			write(join(cloneOf(at, 'example.com/acme/hb'), '.repos/index'), `repo: ${KEY}\n`)
-			expect(ken(['get', KEY], { cwd: at })).toEqual({
+			write(join(cloneOf(at, 'example.com/acme/hb'), '.repos'), `repo: ${KEY}\n`)
+			expect(ken(['get', KEY], inRoot(at))).toEqual({
 				status: 0,
 				stdout: `${cloneOf(at)}\n`,
 				stderr: ''
 			})
-			expect(existsSync(join(at, '.repos/index'))).toBe(false)
+			expect(existsSync(join(at, '.repos'))).toBe(false)
 		})
 
 		it('refuses a folder, a file, a link or a worktree in the way, and leaves it as it is', () => {
@@ -1109,7 +1222,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				const clone = cloneOf(at)
 				make(clone)
 				const before = shape(clone)
-				const r = ken(['get', KEY], { cwd: at })
+				const r = ken(['get', KEY], inRoot(at))
 				expect(r.status).toBe(1)
 				expect(r.stdout).toBe('')
 				expect(r.stderr).toContain(
@@ -1117,45 +1230,75 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				)
 				expect(r.stderr).toContain(`\`mv ${clone} ~/lib.aside\``)
 				expect(shape(clone)).toBe(before)
-				expect(existsSync(join(at, '.repos/index'))).toBe(false)
+				expect(existsSync(join(at, '.repos'))).toBe(false)
 			}
 			const plain = fresh()
 			mkdirSync(cloneOf(plain), { recursive: true })
-			expect(ken(['get', KEY], { cwd: plain }).stderr).toContain(
+			expect(ken(['get', KEY], inRoot(plain)).stderr).toContain(
 				`run \`git init ${cloneOf(plain)}\` then \`ken get ${KEY}\``
 			)
 		})
 
-		it('refuses .repos, or the owner folder, as a symlink, which leads out of the top', () => {
-			const at = fresh()
+		it('refuses the host or the owner folder as a symlink, which leads out of KEN_SRC', () => {
 			const away = join(dir, `away-${shell}-${n}`)
 			mkdirSync(away)
-			symlinkSync(away, join(at, '.repos'))
-			const r = ken(['get', KEY], { cwd: at })
+			for (const folder of ['example.com', 'example.com/acme']) {
+				const at = fresh()
+				const link = cloneOf(at, folder)
+				mkdirSync(join(link, '..'), { recursive: true })
+				symlinkSync(away, link)
+				const r = ken(['get', KEY], inRoot(at))
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(
+					`${link} is a symlink to ${away}, so a clone under it would be outside`
+				)
+				expect(r.stderr).toContain(`\`rm ${link} && mv ${away} ${link}\``)
+				expect(readdirSync(away)).toEqual([])
+			}
+		})
+
+		it('refuses a KEN_SRC inside a root before making anything', () => {
+			const at = fresh()
+			const r = ken(['get', KEY], { cwd: at, env: { KEN_SRC: join(at, 'src') } })
 			expect(r.status).toBe(1)
-			expect(r.stderr).toContain(`${at}/.repos is a symlink to ${away}`)
-			expect(r.stderr).toContain(`\`rm ${at}/.repos && mv ${away} ${at}/.repos\``)
-			expect(readdirSync(away)).toEqual([])
-			const owner = fresh()
-			mkdirSync(join(owner, '.repos/example.com'), { recursive: true })
-			symlinkSync(away, join(owner, '.repos/example.com/acme'))
-			expect(ken(['get', KEY], { cwd: owner }).stderr).toContain(
-				`${owner}/.repos/example.com/acme is a symlink to ${away}`
-			)
-			expect(readdirSync(away)).toEqual([])
+			expect(r.stderr).toContain(`${at}/src (KEN_SRC, default ~/src) is inside the ken root ${at}`)
+			expect(readdirSync(at)).toEqual(['.ken'])
+		})
+
+		it("makes KEN_SRC with the root's rules, and gives a fresh clone with AGENTS.md its CLAUDE.md", () => {
+			const at = fresh()
+			write(join(at, 'AGENTS.md'), 'rules\n')
+			const agents = cloneOf(at, 'example.com/acme/agents')
+			const r = ken(['get', 'example.com/acme/agents'], inRoot(at))
+			expect(r.status).toBe(0)
+			expect(readlinkSync(cloneOf(at, 'CLAUDE.md'))).toBe(join(at, 'AGENTS.md'))
+			expect(r.stderr).toContain(`Linked ${cloneOf(at, 'AGENTS.md')} -> ${at}/AGENTS.md`)
+			expect(readlinkSync(join(agents, 'CLAUDE.md'))).toBe('AGENTS.md')
+			expect(r.stderr).toContain(`ken: linked ${agents}/CLAUDE.md -> AGENTS.md, excluded from git`)
+			const status = (cwd: string) =>
+				spawnSync('git', ['-C', cwd, 'status', '--porcelain'], { encoding: 'utf8', env: env() })
+					.stdout
+			expect(status(agents)).toBe('')
+			// a worktree is fresh too; a clone already there is left as it is
+			const wt = ken(['get', 'example.com/acme/agents', '-b', 'feat'], inRoot(at))
+			expect(readlinkSync(join(`${agents}.feat`, 'CLAUDE.md'))).toBe('AGENTS.md')
+			expect(status(`${agents}.feat`)).toBe('')
+			rmSync(join(agents, 'CLAUDE.md'))
+			expect(ken(['get', 'example.com/acme/agents'], inRoot(at)).stderr).toBe('')
+			expect(wt.status).toBe(0)
 		})
 
 		it('a failed clone leaves no folder, says what git said and what to rerun', () => {
 			const at = fresh()
-			const r = ken(['get', 'example.com/acme/missing'], { cwd: at })
+			const r = ken(['get', 'example.com/acme/missing'], inRoot(at))
 			expect(r.status).toBe(1)
 			expect(r.stdout).toBe('')
 			expect(r.stderr).toContain('does not appear to be a git repository')
 			expect(r.stderr).toContain('A key alone clones https://example.com/acme/missing.git')
 			expect(r.stderr).toContain('run `ken get example.com/acme/missing` again')
 			expect(r.stderr).toContain('not pushed yet, or private to an account this machine lacks')
-			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual([])
-			expect(existsSync(join(at, '.repos/index'))).toBe(false)
+			expect(readdirSync(cloneOf(at, 'example.com/acme'))).toEqual([])
+			expect(existsSync(join(at, '.repos'))).toBe(false)
 		})
 
 		it('two gets at once: one clones, the other waits for it, and both print the path', async () => {
@@ -1163,8 +1306,8 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			const both = await Promise.all([kenAsync(['get', KEY], at), kenAsync(['get', KEY], at)])
 			for (const r of both) expect([r.status, r.stdout]).toEqual([0, `${cloneOf(at)}\n`])
 			expect(both.filter((r) => r.stderr.includes('ken: registered')).length).toBe(1)
-			expect(readdirSync(join(at, '.repos/example.com/acme'))).toEqual(['lib'])
-			expect(readFileSync(join(at, '.repos/index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+			expect(readdirSync(cloneOf(at, 'example.com/acme'))).toEqual(['lib'])
+			expect(readFileSync(join(at, '.repos'), 'utf8')).toBe(`repo: ${KEY}\n`)
 		})
 
 		it('two gets at once of a repo made with git init both set it up and print the path', async () => {
@@ -1177,13 +1320,13 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('refuses a git older than 2.48 before touching anything', () => {
 			const at = fresh()
-			const r = ken(['get', KEY], {
-				cwd: at,
-				env: { PATH: `${join(dir, 'old-git')}:${process.env.PATH}` }
-			})
+			const r = ken(
+				['get', KEY],
+				inRoot(at, { PATH: `${join(dir, 'old-git')}:${process.env.PATH}` })
+			)
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain('git version 2.47.1 is too old: ken needs git 2.48 or newer')
-			expect(existsSync(join(at, '.repos'))).toBe(false)
+			expect(existsSync(`${at}.src`)).toBe(false)
 		})
 	})
 
@@ -1194,8 +1337,8 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		const cloned = () => {
 			const at = join(dir, `get-b-${shell}-${n++}`)
 			write(join(at, '.ken'), '')
-			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
-			const clone = join(at, '.repos', KEY)
+			expect(ken(['get', KEY], inRoot(at)).status).toBe(0)
+			const clone = join(`${at}.src`, KEY)
 			return { at, clone, wt: (folder: string) => `${clone}.${folder}` }
 		}
 		const out = (cwd: string, ...args: string[]) =>
@@ -1204,47 +1347,45 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('a new branch gets its worktree beside the clone, linked relatively; again prints it', () => {
 			const { at, clone, wt } = cloned()
-			const r = ken(['get', KEY, '-b', 'feat/x'], { cwd: at })
+			const r = ken(['get', KEY, '-b', 'feat/x'], inRoot(at))
 			expect(r).toEqual({ status: 0, stdout: `${wt('feat-x')}\n`, stderr: '' })
 			expect(readFileSync(join(wt('feat-x'), '.git'), 'utf8')).toMatch(
 				/^gitdir: \.\.\/lib\/\.git\/worktrees\/[^/]+\n$/
 			)
 			expect(head(wt('feat-x'))).toBe('feat/x')
 			expect(out(wt('feat-x'), 'rev-parse', 'HEAD')).toBe(out(clone, 'rev-parse', 'HEAD'))
-			expect(ken(['get', KEY, '-b', 'feat/x'], { cwd: at })).toEqual(r)
+			expect(ken(['get', KEY, '-b', 'feat/x'], inRoot(at))).toEqual(r)
 		})
 
 		it('a root whose path holds a tab and a newline: again prints the same worktree', () => {
 			const at = join(dir, `get-b-${shell}-odd\t\nroot`)
 			write(join(at, '.ken'), '')
-			expect(ken(['get', KEY], { cwd: at }).status).toBe(0)
-			const first = ken(['get', KEY, '-b', 'feat'], { cwd: at })
-			expect(first.stdout).toBe(`${join(at, '.repos', KEY)}.feat\n`)
-			expect(ken(['get', KEY, '-b', 'feat'], { cwd: at })).toEqual(first)
+			expect(ken(['get', KEY], inRoot(at)).status).toBe(0)
+			const first = ken(['get', KEY, '-b', 'feat'], inRoot(at))
+			expect(first.stdout).toBe(`${join(`${at}.src`, KEY)}.feat\n`)
+			expect(ken(['get', KEY, '-b', 'feat'], inRoot(at))).toEqual(first)
 		})
 
 		it('the default branch prints the clone; an existing branch gets its worktree', () => {
 			const { at, clone, wt } = cloned()
-			expect(ken(['get', KEY, '-b', 'main'], { cwd: at }).stdout).toBe(`${clone}\n`)
+			expect(ken(['get', KEY, '-b', 'main'], inRoot(at)).stdout).toBe(`${clone}\n`)
 			git(clone, 'branch', 'old', 'v1')
-			expect(ken(['get', KEY, '-b', 'old'], { cwd: at }).stdout).toBe(`${wt('old')}\n`)
+			expect(ken(['get', KEY, '-b', 'old'], inRoot(at)).stdout).toBe(`${wt('old')}\n`)
 			expect(head(wt('old'))).toBe('old')
 			// a tag named main makes git shorten the default branch to heads/main, a branch of its own
 			git(clone, 'tag', 'main')
-			expect(ken(['get', KEY, '-b', 'heads/main'], { cwd: at }).stdout).toBe(
-				`${wt('heads-main')}\n`
-			)
-			expect(ken(['get', KEY, '-b', 'main'], { cwd: at }).stdout).toBe(`${clone}\n`)
+			expect(ken(['get', KEY, '-b', 'heads/main'], inRoot(at)).stdout).toBe(`${wt('heads-main')}\n`)
+			expect(ken(['get', KEY, '-b', 'main'], inRoot(at)).stdout).toBe(`${clone}\n`)
 		})
 
 		it('--from starts a new branch there, and is refused for one that exists', () => {
 			const { at, wt } = cloned()
-			expect(ken(['get', KEY, '-b', 'fix', '--from', 'v1'], { cwd: at }).stdout).toBe(
+			expect(ken(['get', KEY, '-b', 'fix', '--from', 'v1'], inRoot(at)).stdout).toBe(
 				`${wt('fix')}\n`
 			)
 			expect(existsSync(join(wt('fix'), 'README.md'))).toBe(false)
 			for (const branch of ['fix', 'main']) {
-				const r = ken(['get', KEY, '-b', branch, '--from', 'v1'], { cwd: at })
+				const r = ken(['get', KEY, '-b', branch, '--from', 'v1'], inRoot(at))
 				expect(r.status).toBe(1)
 				expect(r.stderr).toContain(`Run \`ken get ${KEY} -b ${branch}\` for its worktree`)
 			}
@@ -1252,8 +1393,8 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it("a branch named for a folder of another's is refused, never given that one's worktree", () => {
 			const { at, clone, wt } = cloned()
-			ken(['get', KEY, '-b', 'feat/x'], { cwd: at })
-			const r = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			ken(['get', KEY, '-b', 'feat/x'], inRoot(at))
+			const r = ken(['get', KEY, '-b', 'feat'], inRoot(at))
 			expect([r.status, r.stdout]).toEqual([1, ''])
 			expect(r.stderr).toContain('could not make the branch feat')
 			expect(readdirSync(join(clone, '..'))).toEqual(['lib', 'lib.feat-x'])
@@ -1263,16 +1404,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('a bad branch name is refused before the clone is touched', () => {
 			const at = join(dir, `get-b-${shell}-${n++}`)
 			write(join(at, '.ken'), '')
-			const r = ken(['get', KEY, '-b', 'a..b'], { cwd: at })
+			const r = ken(['get', KEY, '-b', 'a..b'], inRoot(at))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain('is not a branch name git accepts')
-			expect(existsSync(join(at, '.repos'))).toBe(false)
+			expect(existsSync(`${at}.src`)).toBe(false)
 		})
 
 		it('a folder differing only by case is refused, naming the branch its worktree holds', () => {
 			const { at, clone, wt } = cloned()
-			ken(['get', KEY, '-b', 'feat'], { cwd: at })
-			const r = ken(['get', KEY, '-b', 'Feat'], { cwd: at })
+			ken(['get', KEY, '-b', 'feat'], inRoot(at))
+			const r = ken(['get', KEY, '-b', 'Feat'], inRoot(at))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain(`but ${wt('feat')} differs only by case from it`)
 			expect(r.stderr).toContain(`a worktree of ${clone} holding the branch feat`)
@@ -1283,16 +1424,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		it('an unborn default branch without --from, or a detached clone, is refused', () => {
 			const at = join(dir, `get-b-${shell}-${n++}`)
 			write(join(at, '.ken'), '')
-			const clone = join(at, '.repos', KEY)
+			const clone = join(`${at}.src`, KEY)
 			mkdirSync(clone, { recursive: true })
 			git(clone, 'init', '-q', '-b', 'main')
-			const r = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			const r = ken(['get', KEY, '-b', 'feat'], inRoot(at))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain('has no commit yet, so there is nothing to start feat from')
 			expect(r.stderr).toContain(`\`ken get ${KEY} -b feat --from <ref>\``)
 			git(clone, 'commit', '-q', '--allow-empty', '-m', 'one')
 			git(clone, 'switch', '-q', '--detach')
-			const detached = ken(['get', KEY, '-b', 'feat'], { cwd: at })
+			const detached = ken(['get', KEY, '-b', 'feat'], inRoot(at))
 			expect(detached.stderr).toContain(`Run \`git -C ${clone} switch main\``)
 			expect(readdirSync(join(clone, '..'))).toEqual(['lib'])
 		})
@@ -1306,10 +1447,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				join(bin, 'git'),
 				`case " $* " in *" worktree add "*) : >"${wt('feat')}/mine" ;; esac\nexec ${real} "$@"`
 			)
-			const r = ken(['get', KEY, '-b', 'feat'], {
-				cwd: at,
-				env: { PATH: `${bin}:${process.env.PATH}` }
-			})
+			const r = ken(['get', KEY, '-b', 'feat'], inRoot(at, { PATH: `${bin}:${process.env.PATH}` }))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain(`could not make the worktree of feat at ${wt('feat')}`)
 			expect(r.stderr).toContain('Deleted the branch feat again.')
@@ -1326,10 +1464,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				join(bin, 'git'),
 				`${real} "$@" || exit\nif [ "$3 $#" = "branch 5" ]; then mkdir "${wt('feat')}"; fi`
 			)
-			const r = ken(['get', KEY, '-b', 'feat'], {
-				cwd: at,
-				env: { PATH: `${bin}:${process.env.PATH}` }
-			})
+			const r = ken(['get', KEY, '-b', 'feat'], inRoot(at, { PATH: `${bin}:${process.env.PATH}` }))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toContain(`${wt('feat')} was made just now, by another \`ken get\``)
 			git(clone, 'worktree', 'add', '-q', wt('feat'), 'feat')
@@ -1356,7 +1491,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 	describe('repos', () => {
 		const at = () => join(dir, `repos-${shell}`)
-		const own = () => join(at(), '.repos/example.com/acme')
+		const own = () => join(`${at()}.src`, 'example.com/acme')
 		// A root listing app, lib with no desc, and its layer team; team, cloned, lists lib too
 		// (the root's entry wins), tool, and docs, its own layer, which lists manual with no desc;
 		// the layer gone has no clone. On disk: app on main with a worktree where its branch
@@ -1369,23 +1504,23 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				'layer.team=example.com/acme/team\nlayer.gone=example.com/acme/gone\n'
 			)
 			write(
-				join(at(), '.repos/index'),
+				join(at(), '.repos'),
 				'repo: example.com/acme/app\ndesc: The app.\n\nrepo: example.com/acme/lib\n\nrepo: example.com/acme/team\ndesc: The team layer.\n'
 			)
 			repo(join(o, 'team'))
 			write(join(o, 'team/.ken'), 'layer.docs=example.com/acme/docs\n')
 			write(
-				join(o, 'team/.repos/index'),
+				join(o, 'team/.repos'),
 				'repo: example.com/acme/lib\ndesc: Lib, as the team says.\n\nrepo: example.com/acme/tool\ndesc: A tool.\n\nrepo: example.com/acme/docs\ndesc: The docs layer.\n'
 			)
 			repo(join(o, 'docs'))
 			write(join(o, 'docs/.ken'), '')
-			write(join(o, 'docs/.repos/index'), 'repo: example.com/acme/manual\n')
+			write(join(o, 'docs/.repos'), 'repo: example.com/acme/manual\n')
 			git(dir, 'clone', '-q', 'src-lib', join(o, 'app'))
 			git(dir, 'clone', '-q', 'src-lib', join(o, 'lib'))
 			git(join(o, 'lib'), 'switch', '-q', '-c', 'side')
 			repo(join(o, 'loose'))
-			repo(join(at(), '.repos/example.com/.dot/..tools'))
+			repo(join(`${at()}.src`, 'example.com/.dot/..tools'))
 			const app = join(o, 'app')
 			git(app, 'worktree', 'add', '-q', '-b', 'feat/ok', '../app.feat-ok')
 			git(app, 'worktree', 'add', '-q', '--detach', '../app.pinned')
@@ -1403,7 +1538,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('merges the indexes over the disk, a row per key with its worktrees and strays', () => {
 			const o = own()
-			const r = ken(['repos'], { cwd: at() })
+			const r = ken(['repos'], inRoot(at()))
 			expect(r.status).toBe(0)
 			expect(r.stdout).toBe(
 				[
@@ -1437,7 +1572,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 
 		it('--porcelain: a line per key, key, desc, listed by, cloned and branch split by tabs', () => {
-			const r = ken(['repos', '--porcelain'], { cwd: at() })
+			const r = ken(['repos', '--porcelain'], inRoot(at()))
 			expect(r.status).toBe(0)
 			expect(
 				r.stdout
@@ -1458,7 +1593,7 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 		})
 
 		it("inside a layer lists the layer's keys and its layers', with no clone of the disk", () => {
-			const r = ken(['repos'], { cwd: join(own(), 'team') })
+			const r = ken(['repos'], { cwd: join(own(), 'team'), env: { KEN_SRC: `${at()}.src` } })
 			expect(r).toEqual({
 				status: 0,
 				stdout: [
@@ -1479,16 +1614,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 
 		it('a root path with a tab and a newline, a worktree moved to a folder with a newline: rows whole, fixes that run', () => {
 			const odd = join(dir, `repos-${shell}-odd\t\nroot`)
-			const o = join(odd, '.repos/example.com/acme')
+			const o = join(`${odd}.src`, 'example.com/acme')
 			write(join(odd, '.ken'), 'layer.team=example.com/acme/team\n')
-			write(join(odd, '.repos/index'), 'repo: example.com/acme/app\ndesc: The app.\n')
+			write(join(odd, '.repos'), 'repo: example.com/acme/app\ndesc: The app.\n')
 			repo(join(o, 'team'))
 			write(join(o, 'team/.ken'), '')
-			write(join(o, 'team/.repos/index'), 'repo: example.com/acme/tool\n')
+			write(join(o, 'team/.repos'), 'repo: example.com/acme/tool\n')
 			git(dir, 'clone', '-q', 'src-lib', join(o, 'app'))
 			git(join(o, 'app'), 'worktree', 'add', '-q', '-b', 'feat/x', '../app.feat-x')
 			git(join(o, 'app'), 'worktree', 'move', '../app.feat-x', '../app.odd\nname')
-			const porcelain = ken(['repos', '--porcelain'], { cwd: odd })
+			const porcelain = ken(['repos', '--porcelain'], inRoot(odd))
 			expect(
 				porcelain.stdout
 					.replace(/\n$/, '')
@@ -1499,46 +1634,44 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 				['example.com/acme/team', '', '', 'true', 'main'],
 				['example.com/acme/tool', '', 'team', 'false', '']
 			])
-			const r = ken(['repos'], { cwd: odd })
+			const r = ken(['repos'], inRoot(odd))
 			expect(r.stdout).toContain(
 				`Run \`cd '${o}/team' && ken index set example.com/acme/tool desc="..."\`.`
 			)
 			const move = r.stdout.match(/Run `(git -C [^`]*)`/)?.[1] ?? ''
 			expect(move).toBe(`git -C '${o}/app' worktree move '${o}/app.odd\nname' '${o}/app.feat-x'`)
 			expect(spawnSync('sh', ['-c', move], { env: env() }).status).toBe(0)
-			expect(ken(['repos'], { cwd: odd }).stdout).not.toContain('worktree move')
+			expect(ken(['repos'], inRoot(odd)).stdout).not.toContain('worktree move')
 		})
 
 		it('a layer named root: the fix for a scope entry still writes the scope index', () => {
 			const at = join(dir, `repos-${shell}-named-root`)
 			write(join(at, '.ken'), 'layer.root=example.com/acme/team\n')
-			write(join(at, '.repos/index'), 'repo: example.com/acme/mine\n')
-			repo(join(at, '.repos/example.com/acme/team'))
-			write(join(at, '.repos/example.com/acme/team/.ken'), '')
-			write(
-				join(at, '.repos/example.com/acme/team/.repos/index'),
-				'repo: example.com/acme/theirs\n'
-			)
-			const r = ken(['repos'], { cwd: at })
+			const team = join(`${at}.src`, 'example.com/acme/team')
+			write(join(at, '.repos'), 'repo: example.com/acme/mine\n')
+			repo(team)
+			write(join(team, '.ken'), '')
+			write(join(team, '.repos'), 'repo: example.com/acme/theirs\n')
+			const r = ken(['repos'], inRoot(at))
 			expect(r.stdout).toContain('Run `ken index set example.com/acme/mine desc="..."`.')
 			expect(r.stdout).toContain(
-				`Run \`cd ${at}/.repos/example.com/acme/team && ken index set example.com/acme/theirs desc="..."\`.`
+				`Run \`cd ${team} && ken index set example.com/acme/theirs desc="..."\`.`
 			)
 		})
 
 		it('with no repo at all says so and what to run', () => {
 			const empty = join(dir, `repos-empty-${shell}`)
 			write(join(empty, '.ken'), '')
-			const r = ken(['repos'], { cwd: empty })
+			const r = ken(['repos'], inRoot(empty))
 			expect(r.status).toBe(0)
 			expect(r.stdout).toBe('')
 			expect(r.stderr).toBe(
-				`ken: no index of ${empty} or of its layers lists a repo, and ${empty}/.repos holds no clone, so there is nothing to list. Run \`ken get <key>\` to clone a repo and list it, or \`ken index set <key> desc="..."\` to list one uncloned.\n`
+				`ken: no index of ${empty} or of its layers lists a repo, and ${empty}.src holds no clone, so there is nothing to list. Run \`ken get <key>\` to clone a repo and list it, or \`ken index set <key> desc="..."\` to list one uncloned.\n`
 			)
 		})
 
 		it('refuses an argument it does not take', () => {
-			const r = ken(['repos', '-v'], { cwd: at() })
+			const r = ken(['repos', '-v'], inRoot(at()))
 			expect(r.status).toBe(1)
 			expect(r.stderr).toBe(
 				'ken: ken repos takes only --porcelain, not -v. Run `ken repos --help`.\n'
@@ -1560,13 +1693,16 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(all).toContain(`  the scope, ${root}/.bin: back, both, hello\n`)
 			expect(all).toContain(`  layer atlas, ${atlas}/.bin: team\n`)
 			expect(all).toContain(`  PATH, ${pathBin}: far\n`)
+			expect(all).toContain(`Here the scope is ${root} and the checkouts are in ${src}.`)
 		})
 
 		it('lists the builtins outside any root, saying why no external commands are listed', () => {
 			const r = ken([], { cwd: join(dir, 'outside') })
 			expect(r.status).toBe(0)
 			expect(r.stdout).toContain('  path root | code <key>')
-			expect(r.stdout).toContain('External commands: none listed, because the ken root')
+			expect(r.stdout).toContain(
+				`External commands: none listed, because ${dir}/outside is in no ken root`
+			)
 		})
 	})
 })

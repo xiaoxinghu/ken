@@ -183,12 +183,14 @@ src_files() {
 }
 
 # Lists /$2 in the info/exclude of the repo whose top is $1, once, on a line of its own, or with
-# $3 set takes it out; nothing when $1 is no repo's top.
+# $3 set takes it out; nothing when $1 is no repo's top. The file is shared by the repo's
+# worktrees, so a line another of them still needs, its link there, is kept.
 exclude() {
 	if [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" != "$1" ]; then return 0; fi
 	ex=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/info/exclude || return 0
 	if [ -n "${3-}" ]; then
-		if [ -f "$ex" ] && grep -qxF "/$2" "$ex"; then
+		if [ -f "$ex" ] && grep -qxF "/$2" "$ex" && git -C "$1" worktree list --porcelain -z | tr '\0' '\n' |
+			sed -n 's/^worktree //p' | while IFS= read -r wt; do if [ "$wt" != "$1" ] && [ -L "$wt/$2" ]; then exit 1; fi; done; then
 			grep -vxF "/$2" "$ex" >"$ex.tmp.$$" || :
 			mv -f "$ex.tmp.$$" "$ex"
 		fi
@@ -485,16 +487,14 @@ reachable() {
 # made, or repointed when it points elsewhere; anything else there is left, and said (decision 6).
 layer_link() {
 	at=$1/$2 to=$SRC/$3
-	if [ -L "$at" ] && [ "$(readlink "$at")" = "$to" ]; then
-		:
-	elif [ -L "$at" ]; then
+	if [ -L "$at" ] && [ "$(readlink "$at")" != "$to" ]; then
 		rm -f "$at"
 		ln -s "$to" "$at"
 		printf 'Repointed %s -> %s\n' "$at" "$to"
 	elif absent "$at"; then
 		ln -s "$to" "$at"
 		printf 'Linked %s -> %s\n' "$at" "$to"
-	else
+	elif [ ! -L "$at" ]; then
 		printf 'Left %s alone: it is not a link, so the layer %s has no section there. Move it aside, then run `ken init %s`.\n' \
 			"$at" "$2" "$(q "$1")"
 		return 0

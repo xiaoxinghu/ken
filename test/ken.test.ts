@@ -584,6 +584,28 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(last.stdout).toContain(`la is not a layer of ${at}, so there is nothing to remove.`)
 		}, 30_000)
 
+		it("remove in a worktree of the root keeps the exclude line the root's own link still needs", () => {
+			const { at } = fresh('layer-worktree')
+			git(at, 'init', '-q', '-b', 'main')
+			expect(ken(['layer', 'add', 'example.com/acme/lc'], inRoot(at)).status).toBe(0)
+			git(at, 'add', '.ken')
+			git(at, 'commit', '-q', '-m', 'root')
+			const wt = `${at}-wt`
+			git(at, 'worktree', 'add', '-q', wt)
+			expect(ken(['init'], { cwd: wt, env: { KEN_SRC: `${at}.src` } }).status).toBe(0)
+			expect(
+				ken(['layer', 'remove', 'lc'], { cwd: wt, env: { KEN_SRC: `${at}.src` } }).status
+			).toBe(0)
+			expect(existsSync(join(wt, 'lc'))).toBe(false)
+			const status = (cwd: string) =>
+				spawnSync('git', ['-C', cwd, 'status', '--porcelain'], { encoding: 'utf8', env: env() })
+					.stdout
+			expect(status(at)).not.toContain('lc')
+			// the last checkout to drop it takes the line out
+			expect(ken(['layer', 'remove', 'lc'], inRoot(at)).status).toBe(0)
+			expect(readFileSync(join(at, '.git/info/exclude'), 'utf8').split('\n')).not.toContain('/lc')
+		}, 20_000)
+
 		it('refuses a bad, reserved or taken name and a layer already added, before any write', () => {
 			const { at, code } = fresh('layer-refused')
 			expect(ken(['layer', 'add', 'example.com/acme/la'], inRoot(at)).status).toBe(0)

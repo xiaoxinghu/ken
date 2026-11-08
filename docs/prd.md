@@ -239,7 +239,8 @@ it; any other link stays. At the scope, link each direct layer's `.agents/skills
 has none, made again when a move left it dangling, and remove such links into a layer no
 longer direct; a skills folder that is a link is left alone, which it says. No link is
 tracked: each is listed in the `.git/info/exclude` of the repo it is in, when there is one,
-and a link removed takes its line out. A clone already there is left alone, no fetch. A
+and a link removed takes its line out, unless another worktree of that repo, sharing the file,
+still has the link. A clone already there is left alone, no fetch. A
 layer that cannot be cloned is offline on this machine: said on stderr with git's reason
 and the `ken init` to rerun, its link made all the same and dangling, its own layers unknown,
 exit 0. It says each layer cloned or already there and each link made, repointed or

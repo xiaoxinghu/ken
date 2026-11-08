@@ -89,7 +89,7 @@ AGENTS.md                      every harness; Claude Code only while no CLAUDE.m
 .pi/extensions/ken-hooks.ts    a shim: reads hooks.json, runs its SessionStart hooks on session_start
 ```
 
-The hook line is `${KEN_ROOT:-.}/.bin/ken status`: the kernel is always at `.bin/ken` (decision
+The hook line is `"${KEN_ROOT:-.}/.bin/ken" status`, quoted for a root path with a space: the kernel is always at `.bin/ken` (decision
 19), a harness runs a hook from the folder the session started in, the root unless a launcher
 started it in a checkout with `KEN_ROOT` set and the root's settings named (PRD decision 20),
 and the command resolves through

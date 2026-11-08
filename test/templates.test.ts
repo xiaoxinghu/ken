@@ -87,12 +87,13 @@ describe('the agents template', () => {
 		const settings = JSON.parse(readFileSync(join(at, '.claude/settings.json'), 'utf8'))
 		expect(settings).toEqual({ hooks: hooks.hooks })
 		// biome-ignore lint/suspicious/noTemplateCurlyInString: the hook line is shell, run by sh -c
-		expect(hooks.hooks.SessionStart[0].hooks[0].command).toBe('${KEN_ROOT:-.}/.bin/ken status')
+		expect(hooks.hooks.SessionStart[0].hooks[0].command).toBe('"${KEN_ROOT:-.}/.bin/ken" status')
 		expect(readlinkSync(join(at, '.codex/hooks.json'))).toBe('../.agents/hooks.json')
 	})
 
 	it("the hook runs the root's ken status from a checkout once KEN_ROOT is set, and from the root without", () => {
-		const root = install('agents', 'hooked')
+		// a root path with a space is one word in the hook
+		const root = install('agents', 'hooked root')
 		const hook = JSON.parse(readFileSync(join(at, '.agents/hooks.json'), 'utf8')).hooks
 			.SessionStart[0].hooks[0].command
 		const checkout = join(dir, 'src/example.com/acme/app')

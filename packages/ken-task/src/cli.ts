@@ -388,7 +388,7 @@ so the task stays claimed, and the \`ken get -b\` to rerun is printed.
 Examples:
   cd "$(ken task claim)"
   cd "$(ken task claim tasks/portal/fix-login)"   # branch portal/fix-login
-  ken task claim portal/fix-login                  # .repos/<repo>.portal-fix-login`
+  ken task claim portal/fix-login                  # $KEN_SRC/<key>.portal-fix-login`
 
 function claim(args: string[]): void {
 	if (args.length > 1) {

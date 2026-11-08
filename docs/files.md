@@ -4,10 +4,10 @@ The files `ken` reads and writes, and their grammar. Two files, two formats, bot
 per fact, chosen so a shell script reads and edits them with `awk` and `sed` and nothing
 else. This document is the spec; `docs/prd.md` says what the files mean.
 
-| File                  | Format    | Holds                                                                            |
-| --------------------- | --------- | -------------------------------------------------------------------------------- |
-| `<root>/.ken`         | key=value | the root's settings, and other tools' keys; its presence makes the folder a root |
-| `<root>/.repos/index` | stanzas   | one record per repo, cloned or not                                               |
+| File            | Format    | Holds                                                                            |
+| --------------- | --------- | -------------------------------------------------------------------------------- |
+| `<root>/.ken`   | key=value | the root's settings, and other tools' keys; its presence makes the folder a root |
+| `<root>/.repos` | stanzas   | the index: one record per repo, cloned or not                                    |
 
 ## Rules for both
 
@@ -45,14 +45,15 @@ task.folder=tasks
 
 Keys `ken` owns: `clone.blobless` (`true` or `false`, default `true`); `org.<name>`, a
 lowercase `<host>/<owner>`; `layer.<name>`, a lowercase `<host>/<owner>/<repo>`, `<name>` a
-folder name at the root. `root` is refused: the root is per machine. No other file is
+folder name at the root. `root` is refused: the root is per machine, as is the folder of the
+checkouts, `KEN_SRC`, which is no key either. No other file is
 configuration: a `.ken` is only ever at the top of a root, so finding one while walking up
 from a folder finds the root.
 
 ## Stanzas
 
 ```
-# .repos/index: what each repo is. Whether it exists is the remote's business.
+# .repos: what each repo is. Whether it exists is the remote's business.
 
 owner: github.com/acme
 desc: acme's GitHub org. Sales tribe repos are tagged sales.
@@ -73,7 +74,7 @@ doc: systems/join.md
 - A list is one line, its items separated by spaces, so an item has no space in it:
   `tags: sales join`. The fields `ken` knows as lists are `tags` and `depends_on`.
 - Unknown fields are kept and shown as written.
-- Read, with awk's paragraph mode: `awk -v RS= -F'\n' '$1=="repo: <key>"' .repos/index`
+- Read, with awk's paragraph mode: `awk -v RS= -F'\n' '$1=="repo: <key>"' .repos`
   prints a stanza. Set: rewrite that one stanza, replacing the field's line or appending
   it; a key with no stanza gets a new one at the end. Remove: drop the stanza and the blank
   line after it. A stanza with only its first line is an entry with no fields.

@@ -13,11 +13,13 @@ mkdirSync(bin)
 symlinkSync(join(import.meta.dirname, '../../../ken'), join(bin, 'ken'))
 symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-task'))
 
-/** How the tests run `ken`: the script at the repo root under sh, and the environment for the root `root`. */
+/** How the tests run `ken`: the script at the repo root under sh, and the environment for the
+ * root `root`, its checkouts in `<root>.src` beside it, never the user's ~/src. */
 export const ken = join(import.meta.dirname, '../../../ken')
 export const env = (root: string) => ({
 	...process.env,
 	KEN_ROOT: root,
+	KEN_SRC: `${root}.src`,
 	PATH: `${bin}:${dirname(process.execPath)}:${process.env.PATH}`
 })
 

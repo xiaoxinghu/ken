@@ -129,7 +129,7 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 			'-m',
 			'init'
 		)
-		mkdirSync(join(root, '.repos/example.com/acme/plain'), { recursive: true })
+		mkdirSync(join(`${root}.src`, 'example.com/acme/plain'), { recursive: true })
 		write(join(root, 'tasks/plain.md'), '---\nrepo: example.com/acme/plain\n---\n')
 		const r = kenTask(root, ['claim', 'tasks/plain.md'])
 		expect(r).toMatchObject({ status: 1, stdout: '' })
@@ -155,8 +155,8 @@ describe('ken task claim', { timeout: 60_000 }, () => {
 			'-m',
 			'init'
 		)
-		mkdirSync(join(root, '.repos/example.com/acme'), { recursive: true })
-		symlinkSync(elsewhere, join(root, '.repos/example.com/acme/linked'))
+		mkdirSync(join(`${root}.src`, 'example.com/acme'), { recursive: true })
+		symlinkSync(elsewhere, join(`${root}.src`, 'example.com/acme/linked'))
 		write(join(root, 'tasks/linked.md'), '---\nrepo: example.com/acme/linked\n---\n')
 		const r = kenTask(root, ['claim', 'tasks/linked.md'])
 		expect(r).toMatchObject({ status: 1, stdout: '' })

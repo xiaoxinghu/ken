@@ -2,7 +2,7 @@
 // docs/prd.md. Files are parsed as CommonMark, so a link, a code span and a label are what a
 // Markdown reader sees, never a guess at where one ends.
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
-import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { Nodes } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
@@ -95,10 +95,12 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	// The root and every layer reachable from it, each layer at its link, `<top>/<name>`, and the
 	// task folders, which hold tasks, not pages: each one's from its own .ken, compared by real
 	// path, so a link to a folder above one does not reach it either. An offline layer, its link
-	// dangling, has nothing to read; a layer reached twice is read once.
+	// dangling or not made yet, as in a fresh clone of the root, has nothing to read; a layer
+	// reached twice is read once.
 	const tops = [root]
 	const taskFolders = new Set<string>()
 	const offline = new Map<string, number>() // an offline layer's link -> links into it, not checked
+	const unlinked = new Set<string>() // the offline layers with no link at all
 	const seen = new Set([realpathSync(root)]) // folders walked, or to be walked as a top
 	for (const top of tops) {
 		const own = readKen(
@@ -112,6 +114,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 			const layer = join(top, name)
 			if (!statSync(layer, { throwIfNoEntry: false })?.isDirectory()) {
 				offline.set(layer, 0)
+				if (!lstatSync(layer, { throwIfNoEntry: false })) unlinked.add(layer)
 				continue
 			}
 			if (seen.has(realpathSync(layer))) continue
@@ -321,7 +324,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		)
 	}
 	for (const [layer, count] of offline) {
-		if (count) {
+		if (unlinked.has(layer)) {
+			problems.push(
+				`note: not checked: ${count} links into the layer ${relative(root, layer)}, which is not linked here yet, as in a fresh clone of the root. Run \`ken init ${quote(root)}\` to link it, cloning it if missing, then \`ken lint\` again.`
+			)
+		} else if (count) {
 			problems.push(
 				`note: not checked: ${count} links into the layer ${relative(root, layer)}, which has no clone here: it may not be pushed yet, or be private. Run \`ken init ${quote(root)}\` to clone it, then \`ken lint\` again.`
 			)

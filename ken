@@ -592,9 +592,7 @@ EOF
 	done
 	# at the scope: skill links into a layer no longer direct go first, so a new one can take their place
 	skilled=' '
-	for key in $walked; do
-		case $direct in *" $key "*) skilled="$skilled$key " ;; esac
-	done
+	for key in $walked; do case $direct in *" $key "*) skilled="$skilled$key " ;; esac; done
 	for at in "$SCOPE"/.agents/skills/*; do
 		if [ ! -L "$at" ] || linked_above "$at"; then continue; fi
 		to=$(readlink "$at")
@@ -613,7 +611,9 @@ EOF
 			if [ -L "$link" ] && [ "$(readlink "$link")" != "$at" ] && ! linked_above "$link" >/dev/null; then
 				case $(readlink "$link") in *"/$key/.agents/skills/${at##*/}") rm -f "$link" ;; esac
 			fi
-			if [ -e "$at" ] && link_in "$link" "$at"; then exclude "$SCOPE" ".agents/skills/${at##*/}"; fi
+			if [ -e "$at" ] && { link_in "$link" "$at" || [ "$(readlink "$link" 2>/dev/null)" = "$at" ]; }; then
+				exclude "$SCOPE" ".agents/skills/${at##*/}"
+			fi
 		done
 	done
 )

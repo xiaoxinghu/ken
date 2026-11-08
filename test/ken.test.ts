@@ -467,6 +467,18 @@ describe.each(SHELLS)('ken under %s', (shell) => {
 			expect(existsSync(join(la, '.git'))).toBe(true)
 		}, 20_000)
 
+		it('a root made a git repo after init gets the exclude lines of the links it has', () => {
+			const at = join(dir, `late-git-${shell}`)
+			write(join(at, '.ken'), 'layer.A=example.com/acme/la\n')
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			git(at, 'init', '-q')
+			expect(ken(['init', at], inRoot(at)).status).toBe(0)
+			expect(exclude(at).split('\n')).toEqual(
+				expect.arrayContaining(['/A', '/.agents/skills/sa', '/.agents/skills/review notes'])
+			)
+			expect(status(at)).not.toMatch(/^\?\? (A|\.agents)/m)
+		}, 20_000)
+
 		it('drops the skills of a direct layer gone offline', () => {
 			const at = join(dir, `dropped-${shell}`)
 			const la = join(`${at}.src`, 'example.com/acme/la')

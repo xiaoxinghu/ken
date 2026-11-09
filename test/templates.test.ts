@@ -222,7 +222,8 @@ describe('the agents template', () => {
 })
 
 // A Claude Code transcript, one JSON value per line, with every kind of entry a digest keeps or
-// drops: the secret sits only where a digest never looks.
+// drops: the secret sits only where a digest never looks. A reply is several entries, one per
+// content block, sharing message.id.
 const SECRET = 'sk-SECRET'
 const at = (s: number) => `2026-11-06T01:00:${String(s).padStart(2, '0')}.123Z`
 const user = (s: number, content: unknown, extra = {}) => ({
@@ -233,12 +234,13 @@ const user = (s: number, content: unknown, extra = {}) => ({
 	cwd: '/w',
 	...extra
 })
-const claude = (s: number, ...content: unknown[]) => ({
+const claude = (s: number, id: string, ...content: unknown[]) => ({
 	type: 'assistant',
-	message: { role: 'assistant', content },
+	message: { id, role: 'assistant', content },
 	timestamp: at(s),
 	sessionId: 'abc-123'
 })
+const bash = { command: `echo one\n${'x'.repeat(150)}`, description: 'd' }
 const CLAUDE_CODE = [
 	// the first entry may name no session
 	{ type: 'file-history-snapshot', messageId: 'm', snapshot: { trackedFileBackups: {} } },
@@ -255,16 +257,11 @@ const CLAUDE_CODE = [
 		`<system-reminder>${SECRET}</system-reminder>Why is the "sky" blue?\nAnswer with C:\\path in é<system-reminder>${SECRET}</system-reminder>`
 	),
 	user(2, '<local-command-caveat>harness text</local-command-caveat>', { isMeta: true }),
-	claude(3, { type: 'thinking', thinking: `thought ${SECRET}` }),
-	claude(4, { type: 'text', text: 'Looking.' }),
-	claude(5, {
-		type: 'tool_use',
-		id: 't1',
-		name: 'Bash',
-		input: { command: `echo one\n${'x'.repeat(150)}`, description: 'd' }
-	}),
-	claude(6, { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/w/a.md' } }),
-	claude(7, {
+	claude(3, 'm1', { type: 'thinking', thinking: `thought ${SECRET}` }),
+	claude(4, 'm1', { type: 'text', text: 'Looking.' }),
+	claude(5, 'm1', { type: 'tool_use', id: 't1', name: 'Bash', input: bash }),
+	claude(6, 'm1', { type: 'tool_use', id: 't2', name: 'Read', input: { file_path: '/w/a.md' } }),
+	claude(7, 'm1', {
 		type: 'tool_use',
 		id: 't3',
 		name: 'WebFetch',
@@ -273,7 +270,7 @@ const CLAUDE_CODE = [
 	user(8, [{ type: 'tool_result', tool_use_id: 't1', content: SECRET }], {
 		toolUseResult: { stdout: SECRET }
 	}),
-	claude(9, { type: 'text', text: 'Rayleigh scattering.' }),
+	claude(9, 'm2', { type: 'text', text: 'Rayleigh scattering.' }),
 	user(10, '<task-notification>done</task-notification>'),
 	{
 		type: 'system',
@@ -287,41 +284,68 @@ const CLAUDE_CODE = [
 		{ type: 'image', source: { data: SECRET } },
 		{ type: 'text', text: 'And this?' }
 	]),
-	claude(14, { type: 'text', text: 'A cat.' })
+	claude(14, 'm3', { type: 'text', text: 'A cat.' }),
+	// a failed response, with no time of its own
+	{
+		...claude(0, 'm4', { type: 'text', text: 'API Error: offline' }),
+		timestamp: undefined,
+		isApiErrorMessage: true,
+		error: 'server_error'
+	}
 ]
 	.map((e) => JSON.stringify(e))
 	.join('\n')
-const DIGEST = `---
-session: abc-123
-harness: claude-code
-started: 2026-11-06T01:00:00Z
-cwd: /w
----
-
-## you 2026-11-06T01:00:01Z
-
-Why is the "sky" blue?
+// The digest the ghost's mirror would write for it: the shape of
+// justfiles:packages/ghost/mirror.ts#MirroredEntry, a tool input cut as its digest() cuts it.
+const head = (input: unknown) => `${JSON.stringify(input).slice(0, 120)}…`
+const ENTRIES = [
+	{
+		kind: 'session',
+		session: 'abc-123',
+		harness: 'claude-code',
+		started: at(0),
+		cwd: '/w'
+	},
+	{ id: 1, at: at(1), kind: 'user', text: 'Why is the "sky" blue?\nAnswer with C:\\path in é' },
+	{
+		id: 2,
+		at: at(3),
+		kind: 'assistant',
+		text: 'Looking.',
+		toolCalls: [
+			{ id: 't1', name: 'Bash', input: head(bash) },
+			{ id: 't2', name: 'Read', input: '{"file_path":"/w/a.md"}' },
+			{ id: 't3', name: 'WebFetch', input: '{"url":"https://e.x","prompt":"p"}' }
+		]
+	},
+	{ id: 3, at: at(9), kind: 'assistant', text: 'Rayleigh scattering.', toolCalls: [] },
+	{ id: 4, at: at(11), kind: 'compaction', summary: '(compacted here)' },
+	{ id: 5, at: at(13), kind: 'user', text: 'And this?' },
+	{ id: 6, at: at(14), kind: 'assistant', text: 'A cat.', toolCalls: [] },
+	{
+		id: 7,
+		at: at(14),
+		kind: 'assistant',
+		text: 'API Error: offline',
+		toolCalls: [],
+		error: 'server_error'
+	}
+]
+const DIGEST = ENTRIES.map((e) => `${JSON.stringify(e)}\n`).join('')
+const SHOWN = `Session abc-123, claude-code, started 2026-11-06 01:00, 7 entries, all shown.
+2026-11-06
+#1 01:00 user: Why is the "sky" blue?
 Answer with C:\\path in é
-
-## claude
-
-Looking.
-
-- Bash echo one ${'x'.repeat(111)}…
-- Read /w/a.md
-- WebFetch https://e.x p
-
-Rayleigh scattering.
-
-(compacted here)
-
-## you 2026-11-06T01:00:13Z
-
-And this?
-
-## claude
-
-A cat.
+#2 01:00 assistant: Looking.
+#2 01:00 → Bash ${head(bash)}
+#2 01:00 → Read {"file_path":"/w/a.md"}
+#2 01:00 → WebFetch {"url":"https://e.x","prompt":"p"}
+#3 01:00 assistant: Rayleigh scattering.
+#4 01:00 compacted: (compacted here)
+#5 01:00 user: And this?
+#6 01:00 assistant: A cat.
+#7 01:00 assistant: API Error: offline
+#7 01:00 (failed: server_error)
 `
 
 describe('session digests', () => {
@@ -340,11 +364,12 @@ describe('session digests', () => {
 		symlinkSync(join(REPO, 'packages/ken-lint/src/cli.ts'), join(lintBin, 'ken-lint'))
 	})
 	const session = { KEN_SESSION: 'abc-123', KEN_SESSION_TRANSCRIPT: '' }
+	// times are local: UTC unless a test says otherwise
 	const run = (env: Record<string, string>, ...args: string[]) =>
-		sh(join(root, 'flow/deep'), env, '../../.bin/ken', ...args)
-	const digest = () => readFileSync(join(root, '.sessions/abc-123.md'), 'utf8')
+		sh(join(root, 'flow/deep'), { TZ: 'UTC', ...env }, '../../.bin/ken', ...args)
+	const digest = () => readFileSync(join(root, '.sessions/abc-123.jsonl'), 'utf8')
 
-	it('ken digest keeps prompts, replies and tool heads in order, and nothing else, the same twice', () => {
+	it("ken digest writes a header and the ghost's entries, a reply and its tool calls one, and nothing else, the same twice", () => {
 		for (const shell of ['sh', 'dash']) {
 			const r = spawnSync(shell, ['../../.bin/ken', 'digest', transcript], {
 				cwd: join(root, 'flow/deep'),
@@ -363,7 +388,7 @@ describe('session digests', () => {
 	it("ken digest <transcript> in another session writes the transcript's session, not that one", () => {
 		const other = run({ KEN_SESSION: 'other', KEN_SESSION_TRANSCRIPT: '' }, 'digest', transcript)
 		expect(other.status).toBe(0)
-		expect(readdirSync(join(root, '.sessions'))).not.toContain('other.md')
+		expect(readdirSync(join(root, '.sessions'))).not.toContain('other.jsonl')
 		expect(digest()).toBe(DIGEST)
 	})
 
@@ -398,16 +423,75 @@ describe('session digests', () => {
 		expect(readFileSync(join(root, 'log.md'), 'utf8')).toMatch(/ page p\.md: x s=gone\n$/)
 	})
 
-	it('ken session prints a digest from any folder and greps them all; a bad id is refused', () => {
-		expect(run({}, 'session', 'abc-123').stdout).toBe(DIGEST)
-		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe('abc-123:21:Rayleigh scattering.\n')
+	it('ken session prints the entries from any folder in local time; a bad id or range is refused', () => {
+		expect(run({}, 'session', 'abc-123').stdout).toBe(SHOWN)
+		const nz = run({ TZ: 'NZDT-13' }, 'session', 'abc-123').stdout
+		expect(nz).toContain('started 2026-11-06 14:00')
+		expect(nz).toContain('#1 14:00 user:')
+		const missing = run({}, 'session', 'nope')
+		expect(missing.status).toBe(1)
+		expect(missing.stderr).toContain('no digest nope.jsonl')
+		expect(run({}, 'session', '../log').status).toBe(2)
+		expect(run({}, 'session', 'abc-123', '1-2-3').status).toBe(2)
+		expect(run({}, 'session', 'abc-123', 'x').status).toBe(2)
+	})
+
+	it('ken session shows the last 20 entries with a day line where the day changes, or a range', () => {
+		const long = join(dir, 'long.jsonl')
+		// 25 prompts an hour apart from 12:00, so the session runs past midnight
+		const hour = (h: number) => new Date(Date.UTC(2026, 10, 6, 12 + h)).toISOString()
+		writeFileSync(
+			long,
+			Array.from({ length: 25 }, (_, h) =>
+				JSON.stringify({
+					type: 'user',
+					message: { role: 'user', content: `prompt ${h + 1}` },
+					timestamp: hour(h),
+					sessionId: 'long',
+					cwd: '/w'
+				})
+			).join('\n')
+		)
+		expect(run({}, 'digest', long).status).toBe(0)
+		const last = run({}, 'session', 'long').stdout.split('\n')
+		expect(last[0]).toBe(
+			'Session long, claude-code, started 2026-11-06 12:00, 25 entries, the last 20 shown: `ken session long <range>` prints others, 12, 12-30, or 1- for all.'
+		)
+		expect(last.slice(1, 3)).toEqual(['2026-11-06', '#6 17:00 user: prompt 6'])
+		expect(last.slice(8, 11)).toEqual([
+			'#12 23:00 user: prompt 12',
+			'2026-11-07',
+			'#13 00:00 user: prompt 13'
+		])
+		expect(last.at(-2)).toBe('#25 12:00 user: prompt 25')
+		const first = run({}, 'session', 'long', '1-5').stdout.split('\n')
+		expect(first[0]).toMatch(/, 25 entries, 1-5 shown: `ken session long 1-` prints all\.$/)
+		expect(first.slice(1, -1)).toEqual([
+			'2026-11-06',
+			...[1, 2, 3, 4, 5].map((n) => `#${n} ${11 + n}:00 user: prompt ${n}`)
+		])
+		expect(run({}, 'session', 'long', '1-').stdout.split('\n')).toHaveLength(25 + 2 + 2)
+		expect(run({}, 'session', 'long', '7').stdout).toContain('7-7 shown')
+		rmSync(join(root, '.sessions/long.jsonl'))
+	})
+
+	it('ken session grep names the session, entry and kind of each match; a digest from before is still read', () => {
+		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe(
+			'abc-123:3:assistant Rayleigh scattering.\n'
+		)
+		expect(run({}, 'session', 'grep', 'WebFetch').stdout).toMatch(
+			/^abc-123:2:assistant Looking\. Bash \{"command".*…\n$/
+		)
 		const none = run({}, 'session', 'grep', 'no such words')
 		expect([none.status, none.stdout]).toEqual([1, ''])
 		expect(run({}, 'session', 'grep', '[').status).toBe(2)
-		const missing = run({}, 'session', 'nope')
-		expect(missing.status).toBe(1)
-		expect(missing.stderr).toContain('no digest nope.md')
-		expect(run({}, 'session', '../log').status).toBe(2)
+		const old = '---\nsession: old\n---\n\n## you 2026-11-06T01:00:01Z\n\nRayleigh, before\n'
+		writeFileSync(join(root, '.sessions/old.md'), old)
+		expect(run({}, 'session', 'old').stdout).toBe(old)
+		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe(
+			'abc-123:3:assistant Rayleigh scattering.\nold:7:Rayleigh, before\n'
+		)
+		rmSync(join(root, '.sessions/old.md'))
 	})
 
 	it('ken lint passes with digests in .sessions/ and no README line for them', () => {
@@ -491,7 +575,7 @@ describe('session digests', () => {
 		)
 		expect(run({}, 'digest', pi).status).toBe(0)
 		expect(run({}, 'session', 'pi-1').stdout).toBe(
-			'---\nsession: pi-1\nharness: pi\nstarted: 2026-11-06T01:00:00Z\ncwd: /w\n---\n\n## you 2026-11-06T01:00:01Z\n\nfirst\n\n(branched here: the path below left another)\n\n## pi\n\n- bash ls\n'
+			'Session pi-1, pi, started 2026-11-06 01:00, 3 entries, all shown.\n2026-11-06\n#1 01:00 user: first\n#2 01:00 compacted: (branched here: the path below left another)\n#3 01:00 → bash {"command":"ls"}\n'
 		)
 		const codex = join(dir, 'codex.jsonl')
 		const item = (payload: unknown) =>
@@ -515,11 +599,17 @@ describe('session digests', () => {
 					content: [{ type: 'input_text', text: '<task>hi</task>' }]
 				}),
 				item({
+					type: 'message',
+					role: 'assistant',
+					content: [{ type: 'output_text', text: 'Looking.' }]
+				}),
+				item({
 					type: 'function_call',
+					call_id: 'c1',
 					name: 'exec_command',
 					arguments: JSON.stringify({ cmd: 'ls -a' })
 				}),
-				item({ type: 'function_call_output', output: SECRET }),
+				item({ type: 'function_call_output', call_id: 'c1', output: SECRET }),
 				item({
 					type: 'message',
 					role: 'assistant',
@@ -529,7 +619,7 @@ describe('session digests', () => {
 		)
 		expect(run({}, 'digest', codex).status).toBe(0)
 		expect(run({}, 'session', 'cx-1').stdout).toBe(
-			'---\nsession: cx-1\nharness: codex\nstarted: 2026-11-06T01:00:00Z\ncwd: /w\n---\n\n## you 2026-11-06T01:00:01Z\n\n<task>hi</task>\n\n## codex\n\n- exec_command ls -a\n\ndone\n'
+			'Session cx-1, codex, started 2026-11-06 01:00, 3 entries, all shown.\n2026-11-06\n#1 01:00 user: <task>hi</task>\n#2 01:00 assistant: Looking.\n#2 01:00 → exec_command {"cmd":"ls -a"}\n#3 01:00 assistant: done\n'
 		)
 	})
 })

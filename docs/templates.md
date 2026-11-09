@@ -36,7 +36,7 @@ harness files below, a hook and `.bin/ken-status`, the session-start script,
 base), `.bin/ken-digest` and `.bin/ken-session`, which keep and read the digest of the session
 behind a line (below), a `.gitattributes` with `log.md merge=union`, so two machines' appends merge without a
 conflict, and `.envrc`. It assumes nothing about what the root is for, not even software. Its
-`AGENTS.md` is twenty-one lines: where the CLI is, how to make a section and a page, when to
+`AGENTS.md` is twenty-two lines: where the CLI is, how to make a section and a page, when to
 `ken log`, how to reach a line's session, and nothing `ken help` already says; an agent grows the root from there, `ken help` and the messages. A layer starts
 the same way, any root is one, and under a root its harness files sit unused, the root's hooks
 being the ones that run (PRD decision 21), until it is cloned alone.
@@ -81,8 +81,8 @@ AGENTS.md                      every harness; Claude Code only while no CLAUDE.m
 .agents/hooks.json             one hooks object in Claude Code's schema; Codex reads it as it is
 .bin/ken-status                the script the session-start hook runs
 .bin/ken-log                   `ken log`, which appends to log.md, digesting the session first
-.bin/ken-digest                `ken digest`, the session's transcript to .sessions/<id>.md
-.bin/ken-session               `ken session`, which prints or greps the digests
+.bin/ken-digest                `ken digest`, the session's transcript to .sessions/<id>.jsonl
+.bin/ken-session               `ken session`, which prints entries of a digest or greps them all
 .gitattributes                 log.md merge=union
 .claude/settings.json          hooks, a copy of the object: a settings file holds other keys, such as permissions.deny
 .codex/hooks.json -> ../.agents/hooks.json
@@ -132,16 +132,33 @@ would carry one machine's session to another (PRD decision 5); two such sessions
 share it. pi's shim sends neither yet, so its
 hook removes the pointer, and a pi session gets no digest unless `ken digest <transcript>` is run
 by hand. `ken log` then runs
-`ken digest`, which rewrites `.sessions/<id>.md` from the transcript and is idempotent, so the
-digest is current at every line and lands in the same commit; a session that logs nothing gets
-none, and the tail after its last line is not kept. Claude Code's file keeps a rewound branch,
-so its digest does too, in file order; pi's is the path from the last entry back to the root,
-a `branch_summary` on it one line; a compaction is one line in each. The transcripts are JSON
-lines, and the script is `sh` around one `jq` program, the one dependency the template adds
-beyond the kernel's (PRD decision 18): macOS, the Linux distributions and the CI runners ship
-it, and without it `ken digest` says what to install and `ken log` logs the line anyway. A line
-that is not JSON, one still being written, is skipped. Size and retention are decided when they
-bite, as for `log.md`.
+`ken digest`, which rewrites `.sessions/<id>.jsonl` from the transcript and is idempotent, so
+the digest is current at every line and lands in the same commit; a session that logs nothing
+gets none, and the tail after its last line is not kept. Claude Code's file keeps a rewound
+branch, so its digest does too, in file order; pi's is the path from the last entry back to the
+root, a `branch_summary` on it a `compaction` entry; a compaction is one in each, its `summary`
+the harness's note and never the model's summary, since a digest is what happened.
+
+The digest is a log read by a program, so it is one JSON object per line: a header,
+`{"kind":"session","session":…,"harness":…,"started":…,"cwd":…}`, then entries, `id` their ordinal
+from 1, `at` the transcript's time or the one before it, and `kind`: `user` with `text`;
+`assistant` with `text`, `toolCalls` of `{id, name, input}`, `input` the call's arguments as JSON
+cut at 120 characters, and `error` for a failed response; `compaction` with `summary`. Claude Code
+writes a reply as one transcript entry per content block sharing `message.id`, merged into one;
+a Codex tool call joins the reply before it. The shape is the ghost's in
+github.com/justfiles/justfiles, `justfiles:packages/ghost/mirror.ts#MirroredEntry`, whose mirror
+took this content policy, and `ken session` renders it as the ghost's transcript tool shows it:
+a header line, then the last 20 entries, or a `<range>`, `12`, `12-30` or `1-`, as
+`#n HH:MM user: …`, `#n HH:MM assistant: …` and one `#n HH:MM → <name> <input>` per tool call, in
+local time with a day line where the day changes; `ken session grep` prints
+`<id>:<n>:<kind> <text>` per matching entry. One format for two tools; a shared library waits
+for a third writer. A `.sessions/<id>.md` from before is printed whole and grepped by line.
+
+The transcripts are JSON lines, and both scripts are `sh` around `jq`, the one dependency the
+template adds beyond the kernel's (PRD decision 18): macOS, the Linux distributions and the CI
+runners ship it; without it `ken digest` says what to install and `ken log` logs the line
+anyway, and `ken session` prints the raw lines. A line that is not JSON, one still being
+written, is skipped. Size and retention are decided when they bite, as for `log.md`.
 
 ## Environment
 

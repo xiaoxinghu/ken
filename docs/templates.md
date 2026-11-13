@@ -7,17 +7,20 @@ with no agent: `.ken`, an empty index and `.gitignore`, which is all a root need
 
 ## What `create-ken` does
 
-1. Copies its template into `<dir>`, default the current folder, never overwriting, saying
-   each file it made and each it left alone.
-2. Runs `ken init <dir>` through `@unclex/ken`, its dependency at the same version, and adds
-   `template.name=agents` to `.ken`, a key `ken` keeps.
+1. Runs `ken init <dir>`, default the current folder, through `@unclex/ken`, its dependency
+   at the same version, first, so a folder `ken init` refuses, such as one inside another
+   root, gets no file.
+2. Copies its template into `<dir>`, never overwriting, saying each file it made and each it
+   left alone; to `.gitignore`, which `ken init` owns too, it adds each line it lacks, as
+   `ken init` adds its own. It adds `template.name=agents` to `.ken`, a key `ken` keeps.
 3. Says what to do next: the install line when `ken` is not on `PATH`, `git init` when the
-   folder is not in git, the first commit.
+   folder is not in git, the first commit, and the trust prompts of Codex and pi.
 
 A rerun adds what is missing, so a root picks up a file a newer template added. A file that
 differs from the template is left alone and named, for its owner or an agent to compare:
 that is the update path, and since every file is constant, a root that never edited one has
-nothing to merge. The package's tests hold the template to the rules here.
+nothing to merge. Each differing file is named with the `diff` against the template's copy
+to run. The package's tests hold the template to the rules here.
 
 ## The files
 
@@ -30,8 +33,8 @@ CLAUDE.md -> AGENTS.md         made at run time: an npm package carries no link
 .codex/hooks.json -> ../.agents/hooks.json   made at run time, as CLAUDE.md is
 .pi/extensions/ken-hooks.ts    a shim: reads hooks.json, runs its SessionStart hooks on session_start
 .gitattributes                 log.md merge=union
-.gitignore                     .env, CLAUDE.local.md, node_modules; kept in the package under another
-                               name, since npm leaves a .gitignore out, and written as .gitignore
+.gitignore                     .env, .repos/, CLAUDE.local.md, node_modules; kept in the package as
+                               gitignore, since npm leaves a .gitignore out, its lines added
 .envrc                         the top of the direnv chain (Environment, below)
 ```
 

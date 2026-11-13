@@ -182,8 +182,8 @@ root is a section.
     does not know which harness runs it, beyond the one link `get` makes in a fresh
     checkout (6). It speaks git only: no remote checks, no `gh`. The harness files are
     `create-ken`'s (19); remote checks are extensions'.
-19. **A root starts from `create-ken`**, the `npm create ken <dir>` convention: it writes the
-    template's files, adding only what is missing, then runs `ken init`. `ken init` alone
+19. **A root starts from `create-ken`**, the `npm create ken <dir>` convention: it runs `ken
+    init`, then writes the template's files, adding only what is missing. `ken init` alone
     is a root for a person with no agent. A scaffolding package was rejected while a
     template carried the kernel, since copying it out of a package was `git clone`; with ken
     installed once the template is a few constant files and a rerun is its update path

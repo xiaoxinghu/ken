@@ -1,0 +1,14 @@
+{
+	"hooks": {
+		"SessionStart": [
+			{
+				"hooks": [
+					{
+						"type": "command",
+						"command": "if command -v ken >/dev/null 2>&1; then ken status; else echo 'This is a ken root, and ken is not installed: run npm install -g @unclex/ken, then start a new session.'; fi"
+					}
+				]
+			}
+		]
+	}
+}

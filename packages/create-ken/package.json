@@ -1,0 +1,30 @@
+{
+	"name": "create-ken",
+	"version": "0.0.0",
+	"description": "Make a folder a ken root for an agent harness, or add what a newer template has: `npm create ken <dir>`.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/xiaoxinghu/ken.git",
+		"directory": "packages/create-ken"
+	},
+	"homepage": "https://unclex.net",
+	"bin": {
+		"create-ken": "./src/cli.ts"
+	},
+	"files": [
+		"src",
+		"!src/**/*.test.ts",
+		"template"
+	],
+	"engines": {
+		"node": ">=24"
+	},
+	"publishConfig": {
+		"access": "public"
+	},
+	"dependencies": {
+		"@unclex/ken": "workspace:*"
+	}
+}

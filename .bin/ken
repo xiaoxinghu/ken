@@ -1,1 +1,1648 @@
-../../../ken
+#!/bin/sh
+# ken: the kernel of a ken root. One POSIX sh file; its only dependency is git.
+# The spec is docs/prd.md, "The kernel"; the files it reads are docs/files.md.
+#
+# Hazards, designed around everywhere below:
+# - An exit inside $(...) ends only the subshell, so a function that can die is called as
+#   x=$(f) || exit 1, or sets variables in this shell instead of printing. Under set -e the
+#   assignment x=$(cmd) exits, silently, when cmd fails: one that may is x=$(cmd) || x=''.
+# - A && B || C is not if-then-else: C runs when B fails too. Write if.
+# - sed -i, stat and readlink -f differ between macOS and GNU, so they are not used.
+# - Paths pass through git with -z.
+# - CDPATH makes cd go elsewhere and print, so it is unset.
+# - sh has no local: a function's variables are global, so each is named apart from its
+#   callers'.
+# shellcheck disable=SC2016 # backquotes in messages are commands to run, not expansions
+set -eu
+unset CDPATH
+
+nl='
+'
+tab=$(printf '\t')
+BUILTINS='init path which get repos index layer help'
+
+# --- prelude
+
+die() {
+	printf 'ken: %s\n' "$*" >&2
+	exit 1
+}
+
+# $1 as one shell word: as is when nothing in it is special to a shell, else single-quoted.
+q() {
+	case $1 in
+	'' | *[!A-Za-z0-9_./@%+=:,-]*) printf "'%s'" "$(printf '%s\n' "$1" | sed "s/'/'\\\\''/g")" ;;
+	*) printf '%s' "$1" ;;
+	esac
+}
+
+# The real path of the folder $1: symlinks resolved, and on a case-insensitive disk the
+# case as stored, so roots compare as real paths (PRD decision 15).
+real() { (cd -P -- "$1" && pwd -P); }
+
+# The real path of $1, which need not exist: walked a part at a time, each symlink followed
+# where it is met, to a file or to nothing too (40 at most, so a cycle ends), so a .. always
+# climbs a real folder; then the longest existing folder is made real, for the case stored on
+# a case-insensitive disk. Call as p=$(real_path "$1") || exit 1.
+real_path() {
+	case $1 in /*) todo=$1 ;; *) todo=$(pwd -P)/$1 ;; esac
+	head='' hops=0
+	while [ -n "$todo" ]; do
+		part=${todo%%/*}
+		case $todo in */*) todo=${todo#*/} ;; *) todo='' ;; esac
+		case $part in
+		'' | .) ;;
+		..) head=${head%/*} ;;
+		*)
+			if [ -L "$head/$part" ] && [ $hops -lt 40 ]; then
+				hops=$((hops + 1))
+				link=$(readlink "$head/$part")
+				case $link in /*) head='' ;; esac
+				todo=$link/$todo
+			else
+				head=$head/$part
+			fi
+			;;
+		esac
+	done
+	rest=''
+	while [ -n "$head" ] && [ ! -d "$head" ]; do rest=/${head##*/}$rest head=${head%/*}; done
+	head=$(real "${head:-/}") || return 1
+	head=${head%/}$rest
+	printf '%s\n' "${head:-/}"
+}
+
+lower() { printf '%s\n' "$1" | tr '[:upper:]' '[:lower:]'; }
+
+# $1 without the userinfo (user:token@) of any URL in it, so a message never shows a secret.
+redact() {
+	printf '%s\n' "$1" | sed -E \
+		-e 's#([A-Za-z][A-Za-z0-9+.-]*://)[^/[:space:]]*@#\1#g' \
+		-e 's#(^|[[:space:]])[^/:[:space:]]*@([^@:/[:space:]]+:)#\1\2#g'
+}
+
+# Whether nothing, not even a dangling link, is at $1.
+absent() { [ ! -e "$1" ] && [ ! -L "$1" ]; }
+
+dir_of() {
+	case $1 in
+	*/*) printf '%s\n' "${1%/*}" ;;
+	*) printf '.\n' ;;
+	esac
+}
+
+# --- the root
+
+# The root this file lives in as <root>/.bin/ken, through any symlinks to it, else nothing.
+script_root() {
+	self=$0
+	while [ -L "$self" ]; do
+		link=$(readlink "$self")
+		case $link in
+		/*) self=$link ;;
+		*) self=$(dir_of "$self")/$link ;;
+		esac
+	done
+	bin=$(real "$(dir_of "$self")")
+	case $bin in
+	*/.bin) if [ -f "${bin%/.bin}/.ken" ]; then printf '%s\n' "${bin%/.bin}"; fi ;;
+	esac
+}
+
+# Sets SCOPE, the root ken acts on, as a real path: KEN_ROOT, else the nearest .ken above the
+# current folder, else the root this ken lives in as <root>/.bin/ken (PRD decision 20).
+find_root() {
+	if [ -n "${KEN_ROOT-}" ]; then
+		dir=$KEN_ROOT
+	else
+		dir=$(pwd -P)
+		while [ -n "$dir" ] && [ ! -f "$dir/.ken" ]; do dir=${dir%/*}; done
+		if [ -z "$dir" ]; then dir=$(script_root); fi
+		if [ -z "$dir" ]; then
+			die "$(pwd -P) is in no ken root: no folder above it holds .ken, KEN_ROOT is unset, and this ken," \
+				"$0, is no root's .bin/ken, so there is no root to act on. cd into a root, or set KEN_ROOT" \
+				'to one, e.g. `export KEN_ROOT=~/ken`; `ken init <dir>` makes one.'
+		fi
+	fi
+	if [ ! -d "$dir" ]; then
+		if [ -e "$dir" ]; then why='is not a folder'; else why='does not exist'; fi
+		die "the ken root $dir (from KEN_ROOT) $why, and every ken command acts on a root." \
+			"Run \`ken init $(q "$dir")\` to make one there, or set KEN_ROOT to a root."
+	fi
+	SCOPE=$(real "$dir")
+}
+
+# Sets SRC, the real path of the folder of every checkout on this machine, KEN_SRC or ~/src, as
+# <host>/<owner>/<repo> (PRD decision 3), whether or not it exists. One inside a root is refused.
+src_dir() {
+	SRC=$(real_path "${KEN_SRC:-${HOME-}/src}") || exit 1
+	above=$SRC
+	while [ -n "$above" ]; do
+		if [ -f "$above/.ken" ]; then
+			die "the checkouts folder $SRC (KEN_SRC, default ~/src) is inside the ken root $above, so every" \
+				"clone would sit in a knowledge base, where a sync of the root carries the code. Set KEN_SRC" \
+				'to a folder outside every root, e.g. `export KEN_SRC=~/src`, then rerun.'
+		fi
+		above=${above%/*}
+	done
+}
+
+# Makes SRC, and gives it the scope's rules where nothing is there (PRD decision 5): AGENTS.md and
+# CLAUDE.md linked to the scope's AGENTS.md, which a harness in a checkout loads from above it, and
+# an .envrc exporting KEN_ROOT and sourcing the scope's, for direnv; each when the scope has the
+# file. Says what it made and, with $1 set, which were another root's, the first to make them.
+src_files() {
+	if ! mkdir -p -- "$SRC"; then
+		die "could not make $SRC (the reason is above), the folder of every checkout. Fix that, or set" \
+			'KEN_SRC to another folder, then rerun.'
+	fi
+	theirs=''
+	for own_file in AGENTS.md CLAUDE.md .envrc; do
+		if [ $own_file = .envrc ]; then
+			if [ ! -f "$SCOPE/.envrc" ]; then continue; fi
+			want="export KEN_ROOT=$(q "$SCOPE")${nl}source_env $(q "$SCOPE/.envrc")"
+			if absent "$SRC/.envrc"; then
+				printf '%s\n' "$want" >"$SRC/.envrc"
+				printf 'Wrote %s, which exports KEN_ROOT and sources the root'"'"'s .envrc. Run `direnv allow %s`.\n' \
+					"$SRC/.envrc" "$(q "$SRC")"
+			elif [ ! -f "$SRC/.envrc" ] || [ "$(cat "$SRC/.envrc")" != "$want" ]; then
+				theirs="$theirs $own_file"
+			fi
+		elif [ -f "$SCOPE/AGENTS.md" ]; then
+			if absent "$SRC/$own_file" && ln -s "$SCOPE/AGENTS.md" "$SRC/$own_file" 2>/dev/null; then
+				printf 'Linked %s -> %s\n' "$SRC/$own_file" "$SCOPE/AGENTS.md"
+			elif [ "$(readlink "$SRC/$own_file" 2>/dev/null)" != "$SCOPE/AGENTS.md" ]; then
+				theirs="$theirs $own_file"
+			fi
+		fi
+	done
+	if [ -n "$theirs" ] && [ -n "${1-}" ]; then
+		printf 'Left%s in %s as they are: another root made them, and a session in a checkout loads its rules.\n' \
+			"$theirs" "$SRC"
+	fi
+}
+
+# Lists /$2 in the info/exclude of the repo whose top is $1, once, on a line of its own, or with
+# $3 set takes it out; nothing when $1 is no repo's top. The file is shared by the repo's
+# worktrees, so a line another of them still needs, its link there, is kept.
+exclude() {
+	if [ "$(git -C "$1" rev-parse --show-toplevel 2>/dev/null)" != "$1" ]; then return 0; fi
+	ex=$(git -C "$1" rev-parse --path-format=absolute --git-common-dir)/info/exclude || return 0
+	if [ -n "${3-}" ]; then
+		if [ -f "$ex" ] && grep -qxF "/$2" "$ex" && git -C "$1" worktree list --porcelain -z | tr '\0' '\n' |
+			sed -n 's/^worktree //p' | while IFS= read -r wt; do if [ "$wt" != "$1" ] && [ -L "$wt/$2" ]; then exit 1; fi; done; then
+			grep -vxF "/$2" "$ex" >"$ex.tmp.$$" || :
+			mv -f "$ex.tmp.$$" "$ex"
+		fi
+	elif ! grep -qxF "/$2" "$ex" 2>/dev/null; then
+		mkdir -p "${ex%/*}"
+		if [ -s "$ex" ] && [ -n "$(tail -c 1 "$ex")" ]; then printf '\n' >>"$ex"; fi
+		printf '/%s\n' "$2" >>"$ex"
+	fi
+}
+
+# Links CLAUDE.md -> AGENTS.md in the fresh checkout $1 when it has AGENTS.md and no CLAUDE.md,
+# excluded from git: SRC's CLAUDE.md would hide its AGENTS.md from Claude Code (PRD decision 5).
+claude_link() {
+	if [ -f "$1/AGENTS.md" ] && absent "$1/CLAUDE.md" && ln -s AGENTS.md "$1/CLAUDE.md" 2>/dev/null; then
+		exclude "$1" CLAUDE.md
+		printf 'ken: %s %s\n' "linked $1/CLAUDE.md -> AGENTS.md, excluded from git, since $SRC/CLAUDE.md" \
+			'would hide its AGENTS.md from Claude Code.' >&2
+	fi
+}
+
+# --- keys and branches
+
+# Whether $1 is a repo key: <host>/<owner>/<repo>, lowercase, each part [a-z0-9._-], neither
+# . nor .. (PRD decision 2).
+is_key() {
+	case /$1/ in */./* | */../*) return 1 ;; esac
+	case $1 in
+	*[!a-z0-9._/-]* | */*/*/*) return 1 ;;
+	?*/?*/?*) return 0 ;;
+	*) return 1 ;;
+	esac
+}
+
+# Sets KEY and URL from a key or a git URL (https, ssh or scp-style [user@]host:path). A URL
+# is kept as given, for git, and loses its .git in the key; a key alone clones from
+# https://<key>.git.
+# shellcheck disable=SC2034 # URL is read by the commands that clone
+parse_key() {
+	KEY=$(lower "$1") URL=$1
+	case $KEY in
+	*"$nl"*) KEY= ;;
+	[a-z]*://*)
+		KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^[a-z][a-z0-9+.-]*://([^/]*@)?([^/:@]*)(:[0-9]*)?/#\2/#' -e 's#\.git$##')
+		;;
+	*:*) KEY=$(printf '%s\n' "$KEY" | sed -E -e 's#^([^/:]*@)?([^@:/]+):#\2/#' -e 's#\.git$##') ;;
+	*) URL=https://$KEY.git ;;
+	esac
+	if ! is_key "$KEY"; then
+		die "$(q "$(redact "$1")") is not a repo key or git URL, so it names no checkout folder." \
+			"A key is <host>/<owner>/<repo> with one slash between each part, e.g. github.com/acme/join-web;" \
+			"a URL is https://github.com/acme/join-web.git, ssh://git@github.com/acme/join-web.git" \
+			"or git@github.com:acme/join-web.git. GitLab subgroups (an owner with slashes) are not supported."
+	fi
+}
+
+# The folder of branch $1's worktree beside the clone, <key>.<folder>: / as -.
+# Call as f=$(branch_folder "$b") || exit 1.
+branch_folder() {
+	case $1 in
+	@ | *@\{*) checked= ;;
+	*) checked=$(git check-ref-format --branch "$1" 2>/dev/null) || checked= ;;
+	esac
+	if [ "$checked" != "$1" ] || [ -z "$1" ]; then
+		die "$(q "$(redact "$1")") is not a branch name git accepts (git check-ref-format --branch)," \
+			"so no worktree can hold it. A branch name has no empty part between slashes, no part that" \
+			"starts with . or ends in .lock, no .., @{, space, control character or any of ~^:?*[\\," \
+			"does not start with - or end with ., and is not HEAD or @. Pick one such as feat/login."
+	fi
+	printf '%s\n' "$1" | tr / -
+}
+
+# --- the index: the file .repos at the root, stanzas (docs/files.md, "Stanzas" and "Rules for both")
+
+# One pass over an index, line by line so every other line is kept byte for byte and an error
+# names its line; a stanza is a run of lines up to a blank one, comments inside it kept. It
+# validates the whole file, failing at the first line it cannot read, and in I_MODE:
+#   stanza  prints the stanza of repo I_KEY, its comments left out (nothing when none)
+#   field   prints the value of field I_FIELD of repo I_KEY
+#   list    prints "<key><tab>I_KEY<tab>I_FIELD<tab><desc>" for every repo, a tab in desc as a
+#           space: I_KEY labels the root that lists it and I_FIELD names it, for ken repos
+#   set     prints the file with I_LIST, <name>=<value> lines, set in I_KEY's stanza: a line
+#           replaced, or appended at the stanza's end, or a new stanza at the end of the file
+# Its input is passed through ENVIRON, as awk -v would expand the backslashes in a value.
+INDEX_AWK='
+function trim(s) {
+	sub(/^[ \t]+/, "", s)
+	sub(/[ \t]+$/, "", s)
+	return s
+}
+function fail(what) {
+	printf "ken: %s line %d, `%s`, %s, so ken cannot read the index. Fix that line, then rerun.\n", ENVIRON["I_FILE"], NR, $0, what | "cat 1>&2"
+	bad = 1
+	exit
+}
+function finish() {
+	if (mode == "list" && rk != "") print rk "\t" key "\t" ENVIRON["I_FIELD"] "\t" d
+	if (mode == "set" && here)
+		for (i = 1; i <= n; i++)
+			if (!(names[i] in done)) print names[i] ": " value[names[i]]
+	open = here = 0
+}
+BEGIN {
+	mode = ENVIRON["I_MODE"]
+	key = ENVIRON["I_KEY"]
+	w = mode == "set"
+	k = split(ENVIRON["I_LIST"], list, "\n")
+	for (i = 1; i <= k; i++) {
+		if (list[i] == "") continue
+		eq = index(list[i], "=")
+		f = substr(list[i], 1, eq - 1)
+		if (!(f in value)) names[++n] = f
+		value[f] = substr(list[i], eq + 1)
+	}
+}
+/^[ \t]*$/ {
+	if (open) finish()
+	blank = 1
+	if (w) print
+	next
+}
+{ blank = 0 }
+/^#/ {
+	if (w) print
+	next
+}
+{
+	c = index($0, ": ")
+	f = c ? substr($0, 1, c - 1) : ""
+	v = trim(substr($0, c + 2))
+	if (!open) {
+		ok = f == "repo" && v ~ /^[a-z0-9._-]+\/[a-z0-9._-]+\/[a-z0-9._-]+$/
+		ok = ok || f == "owner" && v ~ /^[a-z0-9._-]+\/[a-z0-9._-]+$/
+		if (!ok || ("/" v "/") ~ /\/\.\.?\//)
+			fail("opens a stanza, which takes `repo: <host>/<owner>/<repo>` or `owner: <host>/<owner>`, lowercase, as its first line")
+		if ((f, v) in first)
+			fail("repeats the key of the stanza at line " first[f, v] "; a key has one stanza per file, so merge the two")
+		first[f, v] = open = NR
+		here = mode != "list" && f == "repo" && v == key
+		rk = f == "repo" ? v : ""
+		d = ""
+		found = found || here
+		split("", has)
+	} else if (f !~ /^[A-Za-z0-9_-]+$/)
+		fail("is not a field line `<name>: <value>`, a name of letters, digits, _ and -, a colon and a space, or the stanza lacks the blank line that ends it")
+	else if (f in has)
+		fail("names " f " a second time in the stanza at line " open "; a field appears once per stanza, so delete one")
+	else if (f == "desc" && v == "")
+		fail("is an empty desc; a desc says what the repo is, so write one or delete the line")
+	has[f] = 1
+	if (mode == "list" && f == "desc") {
+		d = v
+		gsub(/\t/, " ", d)
+	}
+	if (!here) {
+		if (w) print
+	} else if (mode == "stanza") print
+	else if (mode == "field" && f == ENVIRON["I_FIELD"]) print v
+	else if (mode == "set" && (f in value)) {
+		print f ": " value[f]
+		done[f] = 1
+	} else if (w) print
+}
+END {
+	if (bad) exit 1
+	if (open) finish()
+	if (mode == "set" && !found) {
+		if (NR && !blank) print ""
+		print "repo: " key
+		for (i = 1; i <= n; i++) print names[i] ": " value[names[i]]
+	}
+}'
+
+# Runs the index pass in mode $1 over the index file $2 (missing reads as empty), for repo key
+# $3, with the field or list $4. A file it cannot read stops it: call as x=$(index_read ...) || exit 1.
+index_read() {
+	src=$2
+	if [ -e "$src" ] && [ ! -f "$src" ]; then
+		die "$src is not a file, so ken cannot read or write the index there." \
+			"Move it aside, e.g. \`mv $(q "$src") $(q "$src.old")\`, then rerun."
+	fi
+	if [ ! -f "$src" ]; then src=/dev/null; fi
+	I_MODE=$1 I_FILE=$2 I_KEY=${3-} I_FIELD=${4-} I_LIST=${4-} awk "$INDEX_AWK" "$src"
+}
+
+# Rewrites the index file $2 by the pass in mode $1, set: written beside it and
+# renamed over, so a reader never sees half of it, and nothing written when it cannot be read.
+# Writers take turns: the lock is $2.lock, a symlink to the holder's PID that ln -s makes in one
+# step, so each write reads the index as the last one left it. Only its holder removes it: a
+# lock whose holder is gone is refused, since removing it could race a writer taking it anew.
+index_write() {
+	mkdir -p "$(dir_of "$2")"
+	lock=$2.lock
+	# checked before each ln -s, which would make its link inside a folder in the way
+	while :; do
+		if [ ! -L "$lock" ] && ! absent "$lock"; then
+			die "$lock is in the way of the lock on $2, a symlink to its writer's PID, so no write" \
+				"could take turns there. Move it aside, e.g. \`mv $(q "$lock") $(q "$lock.old")\`, then rerun."
+		fi
+		if ln -s "$$" "$lock" 2>/dev/null; then break; fi
+		if absent "$lock"; then
+			if made=$(ln -s "$$" "$lock" 2>&1); then break; fi
+			if absent "$lock"; then die "could not take the lock $lock: $made. Fix that, then rerun."; fi
+		fi
+		holder=$(readlink "$lock" 2>/dev/null) || continue
+		if kill -0 "$holder" 2>/dev/null; then
+			sleep 1
+		elif [ "$(readlink "$lock" 2>/dev/null)" = "$holder" ]; then
+			die "$lock is the lock on $2, left by process $holder, which ended before releasing it," \
+				"so no write waiting on it would ever start. Check that no ken is running, then run" \
+				"\`rm $(q "$lock")\` and rerun."
+		fi
+	done
+	tmp=$2.tmp.$$
+	if ! (index_read "$@") >"$tmp"; then
+		rm -f "$tmp" "$lock"
+		exit 1
+	fi
+	mv -f "$tmp" "$2"
+	rm -f "$lock"
+}
+
+# --- layers: the layer.<name>=<key> lines of a root's .ken (docs/files.md)
+
+# Prints the layers root $1's .ken lists, "<name><tab><key>" in file order, a name repeated
+# read as its last line. A line it cannot read stops it: call as x=$(layer_lines "$r") || exit 1.
+layer_lines() {
+	found=''
+	if [ -f "$1/.ken" ]; then
+		while read -r n && read -r line; do
+			name=${line%%=*} key=${line#*=}
+			name=${name#layer.}
+			case $line in *=*) ;; *) key= ;; esac
+			case $name in '' | *[!A-Za-z0-9_.-]*) key= ;; esac
+			if ! is_key "$key"; then
+				die "$1/.ken line $n, $(q "$(redact "$line")"), is not a layer line ken can read," \
+					"so ken cannot tell which repo that layer is, nor where its commands and index are." \
+					"It expects layer.<name>=<host>/<owner>/<repo>, lowercase, such as" \
+					"layer.sales-atlas=github.com/acme/sales-atlas. Fix or delete that line."
+			fi
+			kept=''
+			while IFS=$tab read -r was its; do
+				if [ -n "$was" ] && [ "$was" != "$name" ]; then kept=$kept$nl$was$tab$its; fi
+			done <<EOF
+$found
+EOF
+			found=$kept$nl$name$tab$key
+		done <<EOF
+$(sed -n '/^layer\./{=;p;}' "$1/.ken")
+EOF
+	fi
+	if [ -n "$found" ]; then printf '%s\n' "${found#"$nl"}"; fi
+}
+
+# Rewrites the scope's .ken without the lines of layer $1, then with the line $2 when set, every
+# other line kept: written beside and renamed over (docs/files.md, "Rules for both").
+ken_write() {
+	tmp=$SCOPE/.ken.tmp.$$
+	if ! awk -v p="layer.$1=" 'index($0, p) != 1' "$SCOPE/.ken" >"$tmp" || ! printf '%s' "${2:+$2$nl}" >>"$tmp"; then
+		rm -f "$tmp"
+		die "could not write $SCOPE/.ken (the reason is above), so it is unchanged. Fix that, then rerun."
+	fi
+	mv -f "$tmp" "$SCOPE/.ken"
+}
+
+# Prints "<section><tab><key>" for each layer reachable from root $1 and cloned in SRC, in
+# walk order: each layer, then its own (PRD decision 22), a cycle visited once; its section is
+# the path of its link from $1, as atlas/handbook. An offline layer is left out with its
+# layers, said on stderr when $2 is set. src_dir has run. Call as x=$(reachable "$r") || exit 1.
+reachable() {
+	todo=$(layer_lines "$1") || exit 1
+	seen=' '
+	while [ -n "$todo" ]; do
+		line=${todo%%"$nl"*}
+		case $todo in *"$nl"*) todo=${todo#*"$nl"} ;; *) todo='' ;; esac
+		section=${line%%"$tab"*} key=${line#*"$tab"}
+		case $seen in *" $key "*) continue ;; esac
+		seen="$seen$key "
+		if [ -z "$line" ]; then continue; fi
+		if [ ! -d "$SRC/$key" ]; then
+			if [ -n "${2-}" ]; then
+				printf 'ken: %s %s\n' "the layer $section, $key, is offline: it has no clone at $SRC/$key, so its" \
+					"index and its layers' are left out. Run \`ken init $(q "$1")\` to clone it." >&2
+			fi
+			continue
+		fi
+		printf '%s\n' "$line"
+		mine=$(layer_lines "$SRC/$key") || exit 1
+		if [ -n "$mine" ]; then mine=$(printf '%s\n' "$mine" | sed "s|^|$section/|"); fi
+		todo=$mine$nl$todo
+	done
+}
+
+# Links the layer $2 of the root $1 to its clone, $1/$2 -> SRC/$3, absolute and excluded from git:
+# made, or repointed when it points elsewhere; anything else there is left, and said (decision 6).
+layer_link() {
+	at=$1/$2 to=$SRC/$3
+	if [ -L "$at" ] && [ "$(readlink "$at")" != "$to" ]; then
+		rm -f "$at"
+		ln -s "$to" "$at"
+		printf 'Repointed %s -> %s\n' "$at" "$to"
+	elif absent "$at"; then
+		ln -s "$to" "$at"
+		printf 'Linked %s -> %s\n' "$at" "$to"
+	elif [ ! -L "$at" ]; then
+		printf 'Left %s alone: it is not a link, so the layer %s has no section there. Move it aside, then run `ken init %s`.\n' \
+			"$at" "$2" "$(q "$1")"
+		return 0
+	fi
+	exclude "$1" "$2"
+}
+
+# Whether a folder of the three above $1, up to .agents, is a link, said on stdout:
+# reconcile neither makes nor removes anything under one, which would act elsewhere.
+linked_above() {
+	for above in "${1%/*}" "${1%/*/*}" "${1%/*/*/*}"; do
+		if [ -L "$above" ]; then
+			printf 'Left %s alone: %s is a link, so ken makes or removes nothing inside it.\n' "$1" "$above"
+			return 0
+		fi
+	done
+	return 1
+}
+
+# Links $1 to $2 when nothing is at $1 and no folder above it is a link, and says so.
+link_in() {
+	if linked_above "$1" || ! absent "$1" || ! mkdir -p "${1%/*}" || ! ln -s "$2" "$1"; then return 1; fi
+	printf 'Linked %s -> %s\n' "$1" "$2"
+}
+
+# Makes what is derived from .ken match it (PRD, "Reconcile", decisions 6, 21, 22): walks the
+# scope's layers, each followed by its own, a key visited once, cloning each missing one
+# unattended in SRC as get does; one that cannot be cloned is offline, said on stderr, and the
+# walk goes on. Then links the layers of the scope and of each layer cloned to their clones, and
+# at the scope each direct layer's skills where the scope has none, removing such links into a
+# layer no longer direct, every link excluded from git. SCOPE and SRC are set; it runs in a
+# subshell, so call as reconcile || exit 1.
+reconcile() (
+	GIT_TERMINAL_PROMPT=0 GIT_ASKPASS=
+	GIT_HTTP_LOW_SPEED_LIMIT=${GIT_HTTP_LOW_SPEED_LIMIT:-1000} GIT_HTTP_LOW_SPEED_TIME=${GIT_HTTP_LOW_SPEED_TIME:-30}
+	export GIT_TERMINAL_PROMPT GIT_ASKPASS GIT_HTTP_LOW_SPEED_LIMIT GIT_HTTP_LOW_SPEED_TIME
+	# ssh takes an option's first value, so ours go right after the ssh word of the user's command
+	ssh=${GIT_SSH_COMMAND:-$(git config --get core.sshCommand 2>/dev/null || :)}
+	if [ -n "$ssh" ] || [ -z "${GIT_SSH-}" ]; then
+		ssh_opts='-o BatchMode=yes -o ConnectTimeout=15 -o ServerAliveInterval=15 -o ServerAliveCountMax=4'
+		ssh=${ssh:-ssh}
+		GIT_SSH_COMMAND=$(printf '%s\n' "$ssh" |
+			sed -E "s#(^|[[:space:]])(\"([^\"]*/)?ssh\"|'([^']*/)?ssh'|([^[:space:]\"']*/)?ssh)([[:space:]]|\$)#\\1\\2 $ssh_opts\\6#")
+		if [ "$GIT_SSH_COMMAND" = "$ssh" ]; then GIT_SSH_COMMAND="$ssh $ssh_opts"; fi
+		export GIT_SSH_COMMAND
+	fi
+	todo=$(layer_lines "$SCOPE") || exit 1
+	direct=" $(printf '%s\n' "$todo" | cut -f2 | tr '\n' ' ')" seen=' ' walked=' '
+	while [ -n "$todo" ]; do
+		line=${todo%%"$nl"*}
+		case $todo in *"$nl"*) todo=${todo#*"$nl"} ;; *) todo='' ;; esac
+		name=${line%%"$tab"*} key=${line#*"$tab"}
+		if [ -z "$line" ]; then continue; fi
+		case $seen in *" $key "*) continue ;; esac
+		seen="$seen$key "
+		clone=$SRC/$key
+		# only a real clone counts as there; anything else is get's to refuse, naming the mv aside
+		if [ "$(real "$clone" 2>/dev/null)" = "$clone" ] &&
+			[ "$(git -C "$clone" rev-parse --absolute-git-dir 2>/dev/null)" = "$clone/.git" ]; then
+			printf 'Layer %s: %s is cloned already, at %s; left as it is, no fetch.\n' "$name" "$key" "$clone"
+		elif err=$( (KEN_ROOT=$SCOPE && cmd_get "$key") 2>&1 >/dev/null); then
+			printf 'Layer %s: cloned %s at %s.\n' "$name" "$key" "$clone"
+			if [ -n "$err" ]; then printf '%s\n' "$err" >&2; fi
+		else
+			why="it could not be cloned, so its pages, index, commands and skills are left out and its own"
+			why="$why layers are unknown; the rest is installed. Once it can be cloned, run"
+			printf 'ken: layer %s, %s, is offline on this machine: %s `ken init %s` again. %s\n' \
+				"$name" "$key" "$why" "$(q "$SCOPE")" "${err#ken: }" >&2
+			continue
+		fi
+		walked="$walked$key "
+		mine=$(layer_lines "$clone") || exit 1
+		if [ -n "$mine" ]; then todo=$(printf '%s\n' "$mine" | sed "s|^|$name/|")$nl$todo; fi
+	done
+	# each root's layers, its own lines: offline ones too, a link that dangles until a clone is made
+	for root in "$SCOPE" $walked; do
+		case $root in /*) ;; *) root=$SRC/$root ;; esac
+		lines=$(layer_lines "$root") || exit 1
+		names=' '
+		while IFS=$tab read -r name key; do
+			if [ -n "$name" ]; then layer_link "$root" "$name" "$key"; fi
+			names="$names$name "
+		done <<EOF
+$lines
+EOF
+		# a link to a clone in SRC is a layer's, untracked: one no longer listed goes, no other
+		for at in "$root"/* "$root"/.[!.]*; do
+			to=$(readlink "$at" 2>/dev/null) || continue
+			case $names in *" ${at##*/} "*) continue ;; esac
+			if [ "${to#"$SRC/"}" = "$to" ] || ! is_key "${to#"$SRC/"}"; then continue; fi
+			rm -f "$at"
+			exclude "$root" "${at##*/}" remove
+			printf 'Removed %s, the link to %s, a layer %s/.ken no longer lists.\n' "$at" "${to#"$SRC/"}" "$root"
+		done
+	done
+	# at the scope: skill links into a layer no longer direct go first, so a new one can take their place
+	skilled=' '
+	for key in $walked; do case $direct in *" $key "*) skilled="$skilled$key " ;; esac; done
+	for at in "$SCOPE"/.agents/skills/*; do
+		if [ ! -L "$at" ] || linked_above "$at"; then continue; fi
+		to=$(readlink "$at")
+		case $to in "$SRC/"*) ;; *) continue ;; esac
+		key=$(printf '%s\n' "${to#"$SRC/"}" | cut -d/ -f1-3)
+		case $skilled in *" $key "*) continue ;; esac
+		rm -f "$at"
+		exclude "$SCOPE" ".agents/skills/${at##*/}" remove
+		printf 'Removed %s, a link into %s, which is no longer a direct layer cloned here, whose skills alone are linked.\n' \
+			"$at" "$key"
+	done
+	for key in $skilled; do
+		for at in "$SRC/$key"/.agents/skills/*; do
+			link=$SCOPE/.agents/skills/${at##*/}
+			# one into this skill elsewhere, as after a move or a change of SRC, is made again
+			if [ -L "$link" ] && [ "$(readlink "$link")" != "$at" ] && ! linked_above "$link" >/dev/null; then
+				case $(readlink "$link") in *"/$key/.agents/skills/${at##*/}") rm -f "$link" ;; esac
+			fi
+			if [ -e "$at" ] && { link_in "$link" "$at" || [ "$(readlink "$link" 2>/dev/null)" = "$at" ]; }; then
+				exclude "$SCOPE" ".agents/skills/${at##*/}"
+			fi
+		done
+	done
+)
+
+# --- builtins: each one's help, then what it runs
+
+# Sets usage, summary, details and examples for the builtin $1; fails for any other name.
+about() {
+	details=
+	case $1 in
+	init)
+		usage='init [<dir>]'
+		summary='Make <dir>, default the current folder, a root: only the files ken owns, never overwriting.'
+		details='  .ken            settings, key=value lines; holding one is what makes a folder a root
+  .repos          the index: what each repo is, one stanza per repo, cloned or not
+  .bin/ken        a copy of this ken, so the kernel travels with the root
+  .gitignore      .env, added to one that lacks it
+No page, no AGENTS.md: those belong to a template. No git init. A <dir> inside a root, or
+holding $KEN_SRC, is refused. Then $KEN_SRC (default ~/src), the folder of every checkout, is
+made and given, where nothing is there, AGENTS.md and CLAUDE.md linked to the root'"'"'s
+AGENTS.md and an .envrc exporting KEN_ROOT and sourcing the root'"'"'s, each when the root has
+it, so a session in a checkout loads the root'"'"'s rules. Then the layers .ken lists, and theirs, are cloned there
+when missing and linked, <name> -> $KEN_SRC/<key>, excluded from git, in the root and in each
+layer; the skills of the direct ones are linked where the root has none.'
+		examples='ken init ~/ken
+git clone <root> ~/ken && ~/ken/.bin/ken init
+cd "$(ken path code github.com/acme/atlas)" && ken init'
+		;;
+	path)
+		usage='path root | code <key> [<branch>] | <key>:<path>[#<symbol>]'
+		summary='Print a path, whether or not it exists. Nobody pastes absolute paths.'
+		details='  root                     the scope: the nearest root, as a real path
+  code <key> [<branch>]    the clone, $KEN_SRC/<key> (default ~/src), or the worktree of
+                           <branch> beside it, <key>.<branch> with / as -. <key> is
+                           <host>/<owner>/<repo> or a git URL. One clone per key per
+                           machine, whichever root asks; no root is needed.
+  <key>:<path>[#<symbol>]  a code reference: <clone>/<path> when the repo is cloned, the
+                           symbol yours to find in the file. Not cloned: https://<key>.git,
+                           and stderr says to run `ken get <key>`; exit 0.'
+		examples='ken path root
+ken path code github.com/acme/join-web
+ken path code github.com/acme/join-web feat/login   # .../join-web.feat-login
+cd "$(ken path code git@github.com:acme/join-web.git PROJ-123)"
+ken path github.com/acme/join-web:src/join.ts#submit'
+		;;
+	which)
+		usage='which [<path>]'
+		summary='The reverse of `ken path code`: the key of the checkout a path is in, and its branch.'
+		details='  <path>   default the current folder, compared as a real path against $KEN_SRC
+           (default ~/src), so a path through a layer link resolves, and a layer is a
+           checkout. Prints `<key> <clone|worktree> <branch>`. A checkout is asked of
+           git, a worktree keyed by its clone; a path not checked out yet is answered
+           from its shape with no branch: <repo>.<x> beside a clone <repo> is its
+           worktree. A detached HEAD prints no branch. Outside a checkout folder,
+           $KEN_SRC/<host>/<owner>/<folder>, it exits 1 saying so and what to run.'
+		examples='ken which
+ken which "$(ken path code github.com/acme/join-web feat/login)"   # github.com/acme/join-web worktree feat/login
+ken which "$(ken path code github.com/acme/api)/src/x.ts"   # not cloned yet: github.com/acme/api clone'
+		;;
+	get)
+		usage='get <url|key> [-b <branch> [--from <ref>]]'
+		summary='Make a repo ready in $KEN_SRC and print its clone, or with -b a worktree, the only thing on stdout.'
+		details='  <url|key>        <host>/<owner>/<repo>, cloned from https://<key>.git, or a git URL.
+  -b <branch>      the worktree of <branch> beside the clone, $KEN_SRC/<key>.<branch>
+                   with / as -: a new branch from the default branch (what the clone has
+                   checked out) as it stands; an existing one checked out there, or where it
+                   already is. The default branch prints the clone. Nothing is copied or run.
+  --from <ref>     start a new branch from <ref>, a tag, commit or branch, instead.
+$KEN_SRC (default ~/src) is made when missing, as `ken init` makes it, and refused inside a
+root. Missing, the repo is cloned there: blobless, unless the scope'"'"'s .ken says
+clone.blobless=false; a failed clone leaves no folder. A clone already there is used as
+it is, no fetch; anything else there, or at the worktree'"'"'s folder (in any case), is
+refused untouched. A fresh clone or worktree with AGENTS.md and no CLAUDE.md gets
+CLAUDE.md -> AGENTS.md, excluded from git. Every time: the clone gets
+worktree.useRelativePaths and `git worktree repair`, and when no index of the scope or of
+its layers lists the key, an entry in the scope'"'"'s index, .repos. Needs git 2.48 or newer.'
+		examples='ken get github.com/acme/join-web
+ken get git@github.com:acme/join-web.git
+cd "$(ken get github.com/acme/join-web)"
+cd "$(ken get github.com/acme/join-web -b feat/login)"   # .../join-web.feat-login
+ken get github.com/acme/join-web -b fix/pay --from v1.2.0'
+		;;
+	repos)
+		usage='repos [--porcelain]'
+		summary="Every repo the scope's index and its layers' list, against the checkouts on disk, offline."
+		details='One row per key, sorted: <key>  listed by <root|layer>, cloned on <branch>|not cloned; then
+its desc, its worktrees, and each stray with the command that fixes it: no desc; a clone
+not on its default branch, origin/HEAD; a worktree whose folder does not match its branch.
+In a root outside $KEN_SRC, also each clone there no index lists. A key in more than one index takes the
+whole entry of the first: the scope'"'"'s, then each layer'"'"'s in .ken order, each followed by
+its own layers'"'"'. A layer with no clone here is left out, said on stderr. A clone with no
+remote-tracking branch, nothing fetched or pushed, is marked local only.
+  --porcelain   one line per key, tab-separated: key, desc, listed by, cloned (true or
+                false), branch; empty fields empty.'
+		examples='ken repos
+ken repos --porcelain | awk -F"\t" '"'"'$4 == "false" { print $1 }'"'"'   # listed, not cloned
+rg -lL github.com/acme/join-web "$(ken path root)"   # the pages that mention a repo'
+		;;
+	index)
+		usage='index set <key> <field>=<value>...'
+		summary="Write fields into the scope's index, the file .repos, creating the file and the entry."
+		details='A field name is letters, digits, _ and -; a value is the rest of the argument as written,
+not empty, a list its items separated by spaces: tags="sales join". Only that one stanza
+changes: every other line, comment and order is kept, and the file is written beside and
+renamed over. To remove a field or an entry, edit the file: a stanza is the lines from
+`repo: <key>` to the next blank line (docs/files.md). For a layer'"'"'s index, cd into the layer first.'
+		examples='ken index set github.com/acme/join-web desc="Front end for the join funnel." kind=frontend
+ken index set github.com/acme/join-web tags="sales join" depends_on=join-api
+ken index set github.com/acme/join-web doc=systems/join.md   # the page that says more'
+		;;
+	layer)
+		usage='layer add <url|key> [--as <name>] | remove <name>'
+		summary="Add another root as a layer of the scope, a section linked to its clone, or remove one."
+		details='  add <url|key> [--as <name>]  get it, append layer.<name>=<key> to .ken, and reconcile:
+                               <name> (default the repo name) linked to $KEN_SRC/<key>,
+                               excluded from git, its layers cloned and linked inside it, its
+                               skills linked here where none are. Refused before anything is
+                               written: a name that is reserved, taken by anything or by another
+                               layer, or a key that is a layer already. A rerun finishes an add
+                               that failed halfway.
+  remove <name>                delete its .ken line and its link, then reconcile. The clones
+                               stay: rm -rf "$(ken path code <key>)" deletes one.
+The line for a layer on the front page, README.md under ## Layers, is yours to write; ken
+lint checks it. To change a layer'"'"'s own layers, cd into it.'
+		examples='ken layer add github.com/acme/sales-atlas
+ken layer add git@github.com:acme/handbook.git --as handbook
+cd sales-atlas && ken layer add github.com/acme/runbooks
+ken layer remove handbook'
+		;;
+	help)
+		usage='help [<command>]'
+		summary='Print every command with examples, or one in full as `ken <command> --help` does.'
+		examples='ken help
+ken help path'
+		;;
+	*) return 1 ;;
+	esac
+}
+
+indent() { printf '%s\n' "$2" | sed "s/^/$1/"; }
+
+# What `ken help <name>` and `ken <name> --help` print; about has run.
+full_help() {
+	printf 'ken %s\n\n%s\n' "$usage" "$summary"
+	if [ -n "$details" ]; then printf '\n%s\n' "$details"; fi
+	printf '\nExamples:\n'
+	indent '  ' "$examples"
+}
+
+cmd_init() {
+	if [ $# -gt 1 ]; then
+		die "ken init takes one folder, got $# arguments. Quote a path with spaces;" \
+			'run e.g. `ken init ~/ken`.'
+	fi
+	case ${1-} in -*)
+		die "ken init does not take $(q "$1"): it takes one folder, default the current one." \
+			'Run `ken init --help`.'
+		;;
+	esac
+	# the real path of the folder, which may not exist yet
+	dir=$(real_path "${1:-.}") || exit 1
+	# no root inside another (PRD decision 4): the nearest .ken above would be its scope
+	up=${dir%/*}
+	while [ -n "$up" ] && [ ! -f "$up/.ken" ]; do up=${up%/*}; done
+	if [ -n "$up" ]; then
+		die "$dir is inside the root $up, so a root there would be a workspace hidden in $up's knowledge" \
+			"base. Make it a section of $up, with no .ken; share a root into $up with \`ken layer add <key>\`" \
+			"run there; or make a root outside $up, e.g. \`ken init ~/other\`."
+	fi
+	src_dir
+	case $SRC/ in "$dir"/*)
+		die "$dir holds $SRC, the folder of every checkout (KEN_SRC, default ~/src), so a root there would" \
+			"hold the code, which a sync of the root carries. Make the root beside it, e.g. \`ken init ~/ken\`," \
+			"or set KEN_SRC to a folder outside it."
+		;;
+	esac
+	if ! absent "$dir/.ken" && [ ! -f "$dir/.ken" ]; then
+		die "$dir/.ken is there but is not a file, and only a .ken file makes a folder a root, so" \
+			"ken would never find $dir as one. Move it aside, then run \`ken init $(q "$dir")\` again."
+	fi
+	if ! mkdir -p -- "$dir/.bin"; then
+		die "could not make $dir/.bin (the reason is above), so $dir cannot be a root." \
+			"Fix that or pick another folder, then run \`ken init $(q "$dir")\` again."
+	fi
+	dir=$(real "$dir") made=
+	if absent "$dir/.ken"; then
+		printf '%s\n' '# ken settings: <key>=<value> lines, the first segment of a key naming its tool.' \
+			'# The format is docs/files.md in github.com/xiaoxinghu/ken.' >"$dir/.ken"
+		made="$made .ken"
+	fi
+	if absent "$dir/.repos"; then
+		printf '%s\n' "# .repos: what each repo is. Whether it exists is the remote's business." >"$dir/.repos"
+		made="$made .repos"
+	fi
+	if absent "$dir/.bin/ken"; then
+		cp -- "$0" "$dir/.bin/ken"
+		chmod +x "$dir/.bin/ken"
+		made="$made .bin/ken"
+	fi
+	ignore=$dir/.gitignore
+	if [ ! -f "$ignore" ] || ! sed 's/[[:space:]]*$//' "$ignore" | grep -qxF .env; then
+		made="$made .gitignore"
+		# a last line without its newline gets one, so the rule is a line of its own
+		if [ -s "$ignore" ] && [ -n "$(tail -c 1 "$ignore")" ]; then printf '\n' >>"$ignore"; fi
+		printf '.env\n' >>"$ignore"
+	fi
+	if [ -n "$made" ]; then
+		printf '%s is a root. Made or added to:\n' "$dir"
+		for file in $made; do printf '  %s\n' "$file"; done
+		printf 'Track them with `git -C %s add%s`, after `git -C %s init` if it is not a repository.\n' \
+			"$(q "$dir")" "$made" "$(q "$dir")"
+	else
+		printf '%s is a root already with every file ken owns: nothing was created.\n' "$dir"
+	fi
+	SCOPE=$dir
+	src_files say
+	reconcile || exit 1
+	here=$(find_root 2>/dev/null && printf '%s\n' "$SCOPE") || here=
+	if [ "$here" != "$dir" ]; then
+		printf '%s\n' "ken run from here acts on ${here:-no root}, not $dir. Inside $dir it finds it by itself;" \
+			'anywhere else, as in a checkout, set KEN_ROOT:' "  export KEN_ROOT=$(q "$dir")"
+	fi
+}
+
+cmd_path() {
+	case ${1-} in
+	root)
+		if [ $# -ne 1 ]; then die 'ken path root takes no arguments. Run `ken path root`.'; fi
+		find_root
+		printf '%s\n' "$SCOPE"
+		;;
+	code)
+		if [ $# -lt 2 ] || [ $# -gt 3 ]; then
+			die "ken path code takes <key> [<branch>], got $(($# - 1)) arguments." \
+				'Run e.g. `ken path code github.com/acme/join-web feat/login`.'
+		fi
+		parse_key "$2"
+		folder=
+		if [ $# -eq 3 ]; then folder=.$(branch_folder "$3") || exit 1; fi
+		src_dir
+		printf '%s\n' "$SRC/$KEY$folder"
+		;;
+	*:*)
+		if [ $# -ne 1 ]; then
+			die "ken path takes one reference, got $(q "$(redact "$*")"). Quote a path with spaces." \
+				'Run `ken path --help` for the forms.'
+		fi
+		parse_key "${1%%:*}"
+		rest=${1#*:} rel=${rest%%#*} depth=0
+		set -f
+		IFS=/
+		for part in $rel; do
+			case $part in
+			..) depth=$((depth - 1)) ;;
+			'' | .) ;;
+			*) depth=$((depth + 1)) ;;
+			esac
+			if [ $depth -lt 0 ]; then break; fi
+		done
+		unset IFS
+		set +f
+		if [ $depth -lt 0 ]; then
+			die "$(q "$(redact "$1")") points outside its repo: the path after the colon is relative to" \
+				"the repo's root and cannot climb out of it. Write it as $KEY:<path>[#<symbol>]."
+		fi
+		src_dir
+		clone=$SRC/$KEY
+		if [ -d "$clone" ]; then
+			printf '%s\n' "$clone${rel:+/$rel}"
+		else
+			printf 'https://%s.git\n' "$KEY"
+			printf 'ken: %s is not cloned here, so %s has no local path; printed its URL instead. %s\n' \
+				"$KEY" "$(redact "${rel:-its root}")" \
+				"Run \`ken get $KEY\` to clone it, then \`ken path $(q "$(redact "$1")")\` again." >&2
+		fi
+		;;
+	*)
+		die "ken path does not take $(q "$(redact "${1-}")"): it takes root, code <key> [<branch>]," \
+			'or a code reference <key>:<path>[#<symbol>]. Run `ken path --help` for what each prints.'
+		;;
+	esac
+}
+
+cmd_which() {
+	if [ $# -gt 1 ]; then
+		die "ken which takes one path, got $#: quote a path with spaces." 'Run e.g. `ken which .`.'
+	fi
+	src_dir
+	at=$(real_path "${1:-.}") || exit 1
+	nowhere="$at is in $SRC, the folder of every checkout, but in no checkout, so it has no key: a"
+	nowhere="$nowhere checkout is a folder $SRC/<host>/<owner>/<repo>, or <repo>.<branch> beside it."
+	nowhere="$nowhere Run \`ken path code <key> [<branch>]\` for the folder of one."
+	case $at/ in
+	"$SRC"/*/*/*/) rest=${at#"$SRC"/} ;;
+	"$SRC"/*) die "$nowhere" ;;
+	*)
+		die "$at is outside $SRC, the folder of every checkout on this machine (KEN_SRC, default ~/src)," \
+			"so it is in no checkout and has no key. Run \`ken which\` on a path inside a checkout," \
+			"such as one \`ken path code <key>\` prints."
+		;;
+	esac
+	host=${rest%%/*} rest=${rest#*/}
+	owner=${rest%%/*} rest=${rest#*/}
+	folder=${rest%%/*}
+	dir=$SRC/$host/$owner/$folder
+	if [ -e "$dir" ] && [ ! -d "$dir" ]; then die "$nowhere"; fi
+	# its shape: <repo>.<x> beside a clone <repo>, a .git folder, is its worktree; the folder
+	# name of a worktree holds a branch, so only the clone's name is a key
+	repo=$folder kind=clone try=$folder
+	while [ "${try%.*}" != "$try" ]; do
+		try=${try%.*}
+		if [ -n "$try" ] && [ -d "${dir%/*}/$try/.git" ]; then
+			repo=$try kind=worktree
+			break
+		fi
+	done
+	if [ ! -e "$dir" ]; then
+		parse_key "$host/$owner/$repo"
+		printf '%s %s\n' "$KEY" "$kind"
+		return
+	fi
+	if [ ! -e "$dir/.git" ]; then
+		parse_key "$host/$owner/$repo"
+		get="ken get $KEY"
+		if [ $kind = worktree ]; then get="$get -b <branch>"; fi
+		die "$dir is where a checkout belongs, but it has no .git, so it is no checkout and has no" \
+			"branch. Look inside; if nothing there is needed, remove it and run \`$get\`."
+	fi
+	dirs=$(git -C "$dir" rev-parse --path-format=absolute --git-dir --git-common-dir) ||
+		die "git cannot read the checkout $dir (above), so ken cannot tell its key or branch." \
+			"Run \`git -C $(q "$dir") status\` to see what is wrong."
+	branch=$(git -C "$dir" branch --show-current) || exit 1
+	if [ "${dirs%%"$nl"*}" = "${dirs#*"$nl"}" ]; then
+		parse_key "$host/$owner/$folder"
+		printf '%s clone%s\n' "$KEY" "${branch:+ $branch}"
+		return
+	fi
+	# a worktree's key is its clone's, wherever the worktree's folder is
+	clone=$(real "${dirs#*"$nl"}") || exit 1
+	clone=${clone%/*}
+	key=${clone#"$SRC/"}
+	if [ "$key" != "$clone" ] && is_key "$key"; then
+		printf '%s worktree%s\n' "$key" "${branch:+ $branch}"
+		return
+	fi
+	die "$dir is a worktree of $clone, a clone outside $SRC/<host>/<owner>/<repo>, so it" \
+		"has no key, and a worktree in $SRC must belong to a clone there. Move it beside its clone:" \
+		"\`git -C $(q "$clone") worktree move $(q "$dir") $(q "${clone%/*}/$folder")\`."
+}
+
+# Sets worktree.useRelativePaths in the repo $1 when it is unset.
+relative_paths() {
+	git -C "$1" config --get worktree.useRelativePaths >/dev/null ||
+		git -C "$1" config worktree.useRelativePaths true
+}
+
+# The -b half of get: prints the worktree of $branch beside $clone, $clone$folder, made when
+# missing (PRD decision 2), or the clone for the default branch. cmd_get has run up to it.
+get_worktree() {
+	# the full ref, as --short turns main into heads/main when a tag is named main too
+	if ! def=$(git -C "$clone" symbolic-ref -q HEAD); then
+		name=$(git -C "$clone" symbolic-ref -q --short refs/remotes/origin/HEAD) || name=origin/main
+		die "$clone has a detached HEAD, so it names no default branch, and the clone holds the default" \
+			"branch for every worktree to start from. Run \`git -C $(q "$clone") switch ${name#origin/}\`" \
+			"(or the default branch's name), then \`$again\` again."
+	fi
+	def=${def#refs/heads/}
+	exists=
+	if [ "$branch" = "$def" ] || git -C "$clone" show-ref -q --verify "refs/heads/$branch"; then exists=1; fi
+	case $exists$opts in 1*' --from '*)
+		die "$branch exists in $clone already, so it is not made again from --from $(q "$from_ref")." \
+			"Run \`ken get $KEY -b $(q "$branch")\` for its worktree, or pick a new branch name."
+		;;
+	esac
+	if [ "$branch" = "$def" ]; then
+		printf '%s\n' "$clone"
+		return
+	fi
+	# the worktree holding a branch, asked of git one ref at a time, so a path is never split
+	# and only for a branch that exists: refs/heads/feat would match refs/heads/feat/x too
+	held=''
+	if [ -n "$exists" ]; then held=$(git -C "$clone" for-each-ref --format='%(worktreepath)' "refs/heads/$branch"); fi
+	if [ -n "$held" ] && [ -d "$held" ]; then
+		printf '%s\n' "$held"
+		return
+	elif [ -n "$held" ]; then
+		die "$branch is checked out in the worktree $held, whose folder is gone, and git checks a branch" \
+			"out in one worktree at a time. Run \`git -C $(q "$clone") worktree prune\`, then \`$again\` again."
+	fi
+	wt=$clone$folder
+	hit=$(for at in "${clone%/*}"/* "${clone%/*}"/.*; do printf '%s\n' "${at##*/}"; done |
+		grep -ixF -e "${wt##*/}" | head -n 1)
+	if [ -n "$hit" ]; then
+		hit=${clone%/*}/$hit
+		its=$(git -C "$hit" branch --show-current 2>/dev/null) || its=
+		if [ -n "$its" ] && [ "$(git -C "$clone" for-each-ref --format='%(worktreepath)' "refs/heads/$its")" != "$hit" ]; then its=; fi
+		what="$hit is in the way"
+		if [ "$hit" != "$wt" ]; then what="$hit differs only by case from it, one folder on a case-insensitive disk"; fi
+		if [ -n "$its" ]; then what="$what, a worktree of $clone holding the branch $its"; fi
+		die "the worktree of $branch belongs at $wt, but $what, so ken makes nothing. Pick another" \
+			"branch name, or move it aside, e.g. \`mv $(q "$hit") ~/${hit##*/}.aside\`, then \`$again\` again."
+	fi
+	made_branch=
+	if [ -z "$exists" ]; then
+		start=HEAD
+		case $opts in *' --from '*) start=$from_ref ;; esac
+		if ! base=$(git -C "$clone" rev-parse -q --verify --end-of-options "$start^{commit}"); then
+			if [ "$start" != HEAD ]; then
+				die "$(q "$from_ref") is no commit in $clone, so $branch cannot start from it. Run" \
+					"\`git -C $(q "$clone") fetch --tags\` if it is on the remote, then \`$again\` again."
+			fi
+			die "the default branch $def of $clone has no commit yet, so there is nothing to start $branch" \
+				"from. Commit to $def there first, or run \`ken get $KEY -b $(q "$branch") --from <ref>\`."
+		fi
+		# the lock: of two gets of one new branch, one makes it
+		if ! err=$(git -C "$clone" branch "$branch" "$base" 2>&1); then
+			if git -C "$clone" show-ref -q --verify "refs/heads/$branch"; then
+				die "$branch was made in $clone just now, by another \`ken get\`, so this one made nothing." \
+					"Run \`ken get $KEY -b $(q "$branch")\`, without --from, for its worktree."
+			fi
+			die "could not make the branch $branch in $clone. git said: $err${nl}Fix that, then run \`$again\` again."
+		fi
+		made_branch=1
+	fi
+	made_dir=
+	if err=$(mkdir -- "$wt" 2>&1); then made_dir=1; fi
+	if [ -z "$made_dir" ] || ! err=$(git -C "$clone" worktree add -q -- "$wt" "$branch" 2>&1); then
+		undone=
+		if [ -n "$made_dir" ]; then rmdir -- "$wt" 2>/dev/null || :; fi
+		if [ -n "$made_dir" ] && absent "$wt"; then undone=" Removed the folder $wt again."; fi
+		if [ -n "$made_dir" ] && ! absent "$wt"; then undone=" Left $wt, which is not empty: look inside."; fi
+		# a folder made there since the checks is another get's claim, about to check $branch out
+		if [ -z "$made_dir" ] && [ -d "$wt" ] && [ ! -L "$wt" ]; then
+			die "$wt was made just now, by another \`ken get\` adding the worktree of $branch, so this" \
+				"one stops and leaves $branch to it. Run \`ken get $KEY -b $(q "$branch")\` for its worktree."
+		elif [ -n "$made_branch" ] && git -C "$clone" branch -q -D "$branch" 2>/dev/null; then
+			undone="$undone Deleted the branch $branch again."
+		elif [ -n "$made_branch" ]; then
+			undone="$undone Left the branch $branch, which a worktree holds: \`git -C $(q "$clone") worktree list\`."
+		fi
+		die "could not make the worktree of $branch at $wt: $err${nl}So $branch has no worktree.$undone" \
+			"Fix that, then run \`$again\` again."
+	fi
+	claude_link "$wt"
+	# a worktree of a root is a root: reconciled, saying so on stderr, as stdout is the path alone
+	if [ -f "$wt/.ken" ]; then (KEN_ROOT=$wt && find_root && reconcile) >&2 || exit 1; fi
+	printf '%s\n' "$wt"
+}
+
+cmd_get() {
+	asked='' branch='' from_ref='' opts='' fresh=''
+	while [ $# -gt 0 ]; do
+		case $1 in
+		-b | --from)
+			if [ $# -lt 2 ]; then die "ken get $1 needs a value. Run e.g. \`ken get <key> -b feat/login\`."; fi
+			if [ "$1" = -b ]; then branch=$2; else from_ref=$2; fi
+			opts="$opts $1 $(q "$(redact "$2")")"
+			shift 2
+			;;
+		*)
+			if [ -n "$asked" ] || [ "${1#-}" != "$1" ]; then
+				die "ken get takes one repo key or git URL, then -b <branch> [--from <ref>], not" \
+					"$(q "$(redact "$1")") as well. Run e.g. \`ken get github.com/acme/join-web -b feat/login\`."
+			fi
+			asked=$1
+			shift
+			;;
+		esac
+	done
+	case $opts in
+	'' | *' -b '*) ;;
+	*) die "ken get --from names what a new branch starts from, so it needs -b <branch>. Run e.g. \`ken get <key> -b fix/x --from v1.2\`." ;;
+	esac
+	if [ -z "$asked" ]; then die 'ken get needs a repo key or git URL. Run e.g. `ken get github.com/acme/join-web`.'; fi
+	parse_key "$asked"
+	# a bad branch name is refused before anything is touched
+	folder=
+	case $opts in *' -b '*) folder=.$(branch_folder "$branch") || exit 1 ;; esac
+	again="ken get $KEY$opts"
+	version=$(git --version 2>/dev/null) ||
+		die "git is not on PATH, and ken get clones with it. Install git 2.48 or newer" \
+			"(e.g. \`brew install git\`), then run \`$again\` again."
+	major=${version#git version } minor=${version#git version *.}
+	major=${major%%[!0-9]*} minor=${minor%%[!0-9]*}
+	if [ "${major:-0}" -lt 2 ] || { [ "$major" -eq 2 ] && [ "${minor:-0}" -lt 48 ]; }; then
+		die "$version is too old: ken needs git 2.48 or newer, for worktree.useRelativePaths, which" \
+			"lets a whole <owner>/ folder move. Install it (e.g. \`brew install git\`), check" \
+			"\`git --version\`, then run \`$again\` again."
+	fi
+	find_root
+	src_dir
+	filter=--filter=blob:none
+	case $(sed -n '/^clone\.blobless=/{s/^[^=]*=[[:space:]]*//;s/[[:space:]]*$//;p;}' "$SCOPE/.ken" 2>/dev/null | tail -n 1) in
+	'' | true) ;;
+	false) filter= ;;
+	*) die "$SCOPE/.ken sets clone.blobless to neither true nor false, so ken cannot tell how to clone." \
+		"Fix that line to clone.blobless=false or true, then run \`$again\` again." ;;
+	esac
+	src_files >&2
+	clone=$SRC/$KEY parent=$SRC/${KEY%/*}
+	for at in "${parent%/*}" "$parent"; do
+		if [ -L "$at" ]; then
+			to=$(readlink "$at")
+			case $to in /*) ;; *) to=$(dir_of "$at")/$to ;; esac
+			die "$at is a symlink to $to, so a clone under it would be outside $SRC, where a checkout" \
+				"is found by its real path and loads the rules of $SRC/AGENTS.md from above it." \
+				"Put the folder in its place, \`rm $(q "$at") && mv $(q "$to") $(q "$at")\`, or start an" \
+				"empty one, \`rm $(q "$at")\`; then run \`$again\` again."
+		fi
+	done
+	# every get marks itself before the claim, so one that loses the mkdir waits while the
+	# winner lives: its clone is whole once the mark is gone
+	mark=$parent/.${KEY##*/}.ken-get.$$
+	if ! mkdir -p -- "$mark"; then
+		die "could not make $parent (the reason is above), so $KEY has no folder to be cloned into." \
+			"Fix that, then run \`$again\` again."
+	fi
+	trap 'rmdir "$mark" 2>/dev/null || :' EXIT
+	if made=$(mkdir -- "$clone" 2>&1); then
+		trap 'rm -rf "$clone"; exit 1' INT TERM HUP
+		fresh=1
+		if ! err=$(git clone -q ${filter:+"$filter"} -- "$URL" "$clone" 2>&1); then
+			rm -rf "$clone"
+			hint=
+			case $asked in *:*) ;; *)
+				hint="A key alone clones https://$KEY.git; for another remote pass its URL, e.g."
+				hint="$hint \`ken get git@${KEY%%/*}:${KEY#*/}.git\`. "
+				;;
+			esac
+			die "could not clone $(redact "$URL") into $clone, so it was removed again. git said:" \
+				"$(redact "$err")$nl${hint}Fix the cause, then run \`ken get $(q "$(redact "$asked")")$opts\` again. If" \
+				"the repo is not pushed yet, or private to an account this machine lacks, nothing here is wrong: go on without it."
+		fi
+		trap - INT TERM HUP
+	else
+		rmdir "$mark"
+		if absent "$clone"; then
+			die "could not make $clone: $made. Fix that, then run \`$again\` again."
+		fi
+		busy=1
+		while [ -n "$busy" ]; do
+			busy=
+			for at in "$parent/.${KEY##*/}.ken-get."*; do
+				pid=${at##*.}
+				case $pid in '' | *[!0-9]*) continue ;; esac
+				if kill -0 "$pid" 2>/dev/null; then busy=1; fi
+			done
+			if [ -n "$busy" ]; then sleep 1; fi
+		done
+	fi
+	what=
+	if [ -L "$clone" ]; then
+		what="a symlink to $(readlink "$clone")"
+	elif absent "$clone"; then
+		die "$clone is gone: another \`ken get $KEY\` was cloning into it and failed, saying why in" \
+			"its own output. Run \`$again\` again to clone it here."
+	elif [ ! -d "$clone" ]; then
+		what='a file'
+	elif absent "$clone/.git"; then
+		what='a folder with no .git'
+	elif [ -L "$clone/.git" ] || [ ! -d "$clone/.git" ]; then
+		what='a checkout whose .git is not a folder: a worktree, or a repo kept elsewhere'
+	elif [ "$(git -C "$clone" rev-parse --absolute-git-dir 2>/dev/null)" != "$clone/.git" ]; then
+		what='a folder whose .git git does not take as its repo'
+	fi
+	if [ -n "$what" ]; then
+		init=
+		if [ "$what" = 'a folder with no .git' ]; then
+			init=" To make this folder the repo instead, run \`git init $(q "$clone")\` then \`$again\`."
+		fi
+		die "$clone is where the clone of $KEY belongs, but it is $what, so ken neither uses nor" \
+			"replaces it. Move it aside, e.g. \`mv $(q "$clone") ~/${KEY##*/}.aside\`, then run" \
+			"\`$again\` again.$init"
+	fi
+	# another get of an existing repo may hold git's config lock, setting the same: wait, recheck
+	if ! relative_paths "$clone" 2>/dev/null && ! { sleep 1 && relative_paths "$clone"; }; then
+		die "could not set worktree.useRelativePaths in $clone (the reason is above), which lets" \
+			"its <owner>/ folder move. Run \`git -C $(q "$clone") config worktree.useRelativePaths true\`," \
+			"then \`$again\` again."
+	fi
+	git -C "$clone" worktree repair >&2
+	if [ -n "$fresh" ]; then claude_link "$clone"; fi
+	file=$SCOPE/.repos
+	listed=$(index_read stanza "$file" "$KEY") || exit 1
+	if [ -z "$listed" ]; then
+		layers=$(reachable "$SCOPE") || exit 1
+		for layer in $(printf '%s\n' "$layers" | cut -f 2); do
+			listed=$(index_read stanza "$SRC/$layer/.repos" "$KEY") || exit 1
+			if [ -n "$listed" ]; then break; fi
+		done
+	fi
+	if [ -z "$listed" ]; then
+		# a root's front page opens with what it is for (docs/templates.md), so that line is its desc
+		desc=''
+		if [ -f "$clone/.ken" ] && [ -f "$clone/README.md" ]; then
+			desc=$(awk '/^[^#[:space:]<!\[|`-]/ { sub(/[[:space:]]+$/, ""); print; exit }' "$clone/README.md") || desc=''
+		fi
+		if [ -n "$desc" ]; then
+			index_write set "$file" "$KEY" "desc=$desc$nl"
+			printf 'ken: %s %s\n' "registered $KEY in $file with the first line of its front page as desc:" \
+				"\"$desc\". Change it with \`ken index set $KEY desc=\"...\"\`." >&2
+		else
+			index_write set "$file" "$KEY" ''
+			printf 'ken: %s %s\n' "registered $KEY in $file with no desc, and a desc is what lets an agent" \
+				"choose a repo before cloning it. Run \`ken index set $KEY desc=\"...\"\` with what it is, in a line." >&2
+		fi
+	fi
+	if [ -z "$folder" ]; then
+		printf '%s\n' "$clone"
+		return
+	fi
+	get_worktree
+}
+
+cmd_repos() {
+	porcelain=
+	for arg; do
+		if [ "$arg" != --porcelain ]; then
+			die "ken repos takes only --porcelain, not $(q "$(redact "$arg")"). Run \`ken repos --help\`."
+		fi
+		porcelain=1
+	done
+	find_root
+	src_dir
+	layers=$(reachable "$SCOPE" say) || exit 1
+	# the merged index, "<key><tab><listed by><tab><. or the layer's key><tab><desc>", no path
+	# in it to hold a tab or a newline, and the source apart from the label, as a layer may be
+	# named root; then, in a root outside SRC, not a layer's clone, each clone, a folder whose .git
+	# is one; the first line of a key wins
+	all=$(index_read list "$SCOPE/.repos" root .) || exit 1
+	while IFS=$tab read -r section layer; do
+		if [ -z "$layer" ]; then continue; fi
+		mine=$(index_read list "$SRC/$layer/.repos" "$section" "$layer") || exit 1
+		all=$all$nl$mine
+	done <<EOF
+$layers
+EOF
+	disk=1
+	case $SCOPE/ in "$SRC"/*) disk= ;; esac
+	if [ -n "$disk" ]; then
+		# every name at each level, hidden ones too: a key part may start with a dot
+		for host in "$SRC"/* "$SRC"/.[!.]* "$SRC"/..?*; do
+			for owner in "$host"/* "$host"/.[!.]* "$host"/..?*; do
+				for at in "$owner"/*/.git "$owner"/.[!.]*/.git "$owner"/..?*/.git; do
+					key=${at%/.git}
+					key=${key#"$SRC/"}
+					if [ -d "$at" ] && is_key "$key"; then all=$all$nl$key; fi
+				done
+			done
+		done
+	fi
+	all=$(printf '%s\n' "$all" | awk -F "$tab" 'NF && !seen[$1]++' | LC_ALL=C sort -t "$tab" -k 1,1)
+	if [ -z "$all" ]; then
+		if [ -n "$disk" ]; then disk=", and $SRC holds no clone"; fi
+		printf 'ken: %s %s\n' "no index of $SCOPE or of its layers lists a repo$disk, so there is nothing to list." \
+			"Run \`ken get <key>\` to clone a repo and list it, or \`ken index set <key> desc=\"...\"\` to list one uncloned." >&2
+		return
+	fi
+	# each key a row, of fields that only trail empty, since read joins tabs as it joins spaces
+	while IFS=$tab read -r key by from desc; do
+		clone=$SRC/$key cloned=false on='' only='' trees='' strays=''
+		if [ -z "$by" ]; then
+			strays="$strays$nl  stray: no index lists it, so nothing says what it is and only this disk knows it."
+			strays="$strays Run \`ken index set $key desc=\"...\"\`."
+		elif [ -z "$desc" ]; then
+			cd=
+			if [ "$from" != . ]; then cd="cd $(q "$SRC/$from") && "; fi
+			strays="$strays$nl  stray: no desc, and a desc is what lets an agent choose a repo before cloning it."
+			strays="$strays Run \`${cd}ken index set $key desc=\"...\"\`."
+		fi
+		if [ -d "$clone/.git" ]; then
+			cloned=true
+			# one record per worktree, the clone first, a line per attribute; a newline in a path as
+			# \001, shown as ? and given back for the path the commands name
+			list=$(git -C "$clone" worktree list --porcelain -z | tr '\n\000' '\001\n')
+			first=1 path='' branch='' gone=''
+			while IFS= read -r line; do
+				case $line in
+				'worktree '*) path=${line#worktree } ;;
+				'branch refs/heads/'*) branch=${line#branch refs/heads/} ;;
+				prunable*) gone=1 ;;
+				'')
+					if [ -n "$first" ]; then
+						first='' on=$branch
+					elif [ -n "$path" ] && [ -z "$gone" ]; then
+						shown=$(printf '%s\n' "$path" | tr '\001' '?')
+						path=$(printf '%s\n' "$path" | tr '\001' '\n')
+						trees="$trees$nl  worktree ${branch:-(detached)}  $shown"
+						at=$(real "$path" 2>/dev/null) || at=$path
+						want=$clone.$(printf '%s\n' "$branch" | tr / -)
+						if [ -n "$branch" ] && [ "$at" != "$want" ]; then
+							strays="$strays$nl  stray: the worktree of $branch is at $shown, not $want, where \`ken get -b\`"
+							strays="$strays and \`ken path code\` look for it. Run \`git -C $(q "$clone") worktree move $(q "$at") $(q "$want")\`."
+						fi
+					fi
+					path='' branch='' gone=''
+					;;
+				esac
+			done <<EOF
+$list
+
+EOF
+			# the full ref, as --short turns origin/main into remotes/origin/main beside a tag origin/main
+			def=$(git -C "$clone" symbolic-ref -q refs/remotes/origin/HEAD) || def=''
+			def=${def#refs/remotes/origin/}
+			# no remote-tracking branch: nothing fetched or pushed, so no other machine can clone it yet
+			if [ -z "$(git -C "$clone" for-each-ref --count=1 refs/remotes/)" ]; then only=', local only'; fi
+			if [ -n "$def" ] && [ "$on" != "$def" ]; then
+				was='a detached HEAD' fix="git -C $(q "$clone") switch $(q "$def")"
+				if [ -n "$on" ]; then was="the branch $on" fix="$fix\`, then \`ken get $key -b $(q "$on")"; fi
+				strays="$strays$nl  stray: the clone has $was checked out, not its default branch $def, which"
+				strays="$strays every \`ken get -b\` starts from. Run \`$fix\`."
+			fi
+		fi
+		if [ -n "$porcelain" ]; then
+			printf '%s\t%s\t%s\t%s\t%s\n' "$key" "$desc" "$by" "$cloned" "$on"
+			continue
+		fi
+		state='not cloned'
+		if [ $cloned = true ]; then state="cloned on ${on:-a detached HEAD}$only"; fi
+		printf '%s  listed by %s, %s\n' "$key" "${by:-no index}" "$state"
+		if [ -n "$desc" ]; then printf '  %s\n' "$desc"; fi
+		trees=$trees$strays
+		if [ -n "$trees" ]; then printf '%s\n' "${trees#"$nl"}"; fi
+	done <<EOF
+$all
+EOF
+}
+
+cmd_index() {
+	if [ "${1-}" != set ]; then
+		die "ken index takes set, then a repo key, got $(q "$(redact "${1-}")")." \
+			'Run e.g. `ken index set github.com/acme/join-web desc="Front end for the join funnel."`,' \
+			'or `ken index --help` for the form. To remove a field or an entry, edit .repos.'
+	fi
+	if [ $# -lt 2 ]; then die 'ken index set needs a repo key. Run `ken index --help` for the form.'; fi
+	parse_key "$2"
+	shift 2
+	find_root
+	file=$SCOPE/.repos
+	if [ $# -eq 0 ]; then
+		die "ken index set $KEY needs at least one <field>=<value> to write." \
+			"Run e.g. \`ken index set $KEY desc=\"What it is, in a line.\"\`."
+	fi
+	list='' set=''
+	for arg; do
+		field=${arg%%=*} value=${arg#*=}
+		case $arg in *=*) ;; *) field='' ;; esac
+		case $field in '' | *[!A-Za-z0-9_-]* | repo)
+			die "$(q "$(redact "$arg")") is not a <field>=<value> ken index set can write: a field" \
+				"name is letters, digits, _ and -, and repo is the entry's key line, not a field." \
+				"Run e.g. \`ken index set $KEY kind=frontend\`."
+			;;
+		esac
+		case $value in *"$nl"*)
+			die "the value of $field has a newline, and an index value is one line." \
+				"Write longer text in a page, then run \`ken index set $KEY doc=<path>\`."
+			;;
+		esac
+		case $value in *[![:space:]]*) ;; *)
+			die "the value of $field is empty, and an empty field says nothing. Run" \
+				"\`ken index set $KEY $field=<value>\` with a value, or delete its line from $file to remove it."
+			;;
+		esac
+		list=$list$field=$value$nl
+		case ", $set, " in *", $field, "*) ;; *) set="${set:+$set, }$field" ;; esac
+	done
+	entry=$(index_read stanza "$file" "$KEY") || exit 1
+	index_write set "$file" "$KEY" "$list"
+	if [ -n "$entry" ]; then entry='the entry'; else entry='a new entry'; fi
+	printf 'Set %s in %s for %s, in %s.\n' "$set" "$entry" "$KEY" "$file"
+}
+
+cmd_layer() {
+	sub=${1-}
+	if [ $# -gt 0 ]; then shift; fi
+	case $sub in
+	add) layer_add "$@" ;;
+	remove) layer_remove "$@" ;;
+	*)
+		die "ken layer takes add or remove, got $(q "$(redact "$sub")"). Run e.g." \
+			'`ken layer add github.com/acme/sales-atlas`, or `ken layer --help` for the forms.'
+		;;
+	esac
+}
+
+# Every refusal comes before anything is written; then each step checks before it acts, so a
+# rerun finishes an add that failed halfway: the link made but no .ken line yet.
+layer_add() {
+	asked='' name=''
+	while [ $# -gt 0 ]; do
+		if [ "$1" = --as ] && [ $# -ge 2 ]; then
+			name=$2
+			shift 2
+			continue
+		fi
+		if [ -n "$asked" ] || [ "${1#-}" != "$1" ]; then
+			die "ken layer add takes one repo key or git URL, then --as <name>, not $(q "$(redact "$1")")." \
+				'Run e.g. `ken layer add github.com/acme/sales-atlas --as atlas`.'
+		fi
+		asked=$1
+		shift
+	done
+	if [ -z "$asked" ]; then die 'ken layer add needs a repo key or git URL. Run e.g. `ken layer add github.com/acme/sales-atlas`.'; fi
+	parse_key "$asked"
+	name=${name:-${KEY##*/}} again="ken layer add $(q "$(redact "$asked")")"
+	find_root
+	src_dir
+	other="Run \`$again --as <other-name>\`"
+	case $name in . | .. | *[!A-Za-z0-9_.-]*)
+		die "$(q "$name") is not a layer name, which is a folder at $SCOPE and the key layer.<name> in" \
+			"its .ken, so letters, digits, ., _ and -, neither . nor ..; $other."
+		;;
+	esac
+	reserved=' .repos .bin .ken .agents .claude .codex .pi .envrc agents.md claude.md log.md readme.md '
+	case $reserved in *" $(lower "$name") "*)
+		die "$name is a reserved name at a root, in any case, the kernel's, a harness's or the front" \
+			"page's, so it cannot be a layer's section. $other."
+		;;
+	esac
+	layers=$(layer_lines "$SCOPE") || exit 1
+	while IFS=$tab read -r was its; do
+		if [ "$its" = "$KEY" ]; then
+			die "$KEY is a layer of $SCOPE already, as $was, and one clone is one section. Run" \
+				"\`ken init $(q "$SCOPE")\` to finish installing it, or \`ken layer remove $was\` first to rename it."
+		elif [ "$was" = "$name" ]; then
+			die "$name is the layer of $its in $SCOPE/.ken already, and a name is one section." \
+				"$other, or \`ken layer remove $name\` first."
+		fi
+	done <<EOF
+$layers
+EOF
+	at=$SCOPE/$name
+	if ! absent "$at" && [ "$(readlink "$at" 2>/dev/null)" != "$SRC/$KEY" ]; then
+		die "$at is there already, so $name cannot be the layer's section, a link ken makes over" \
+			"nothing. $other."
+	fi
+	(cmd_get "$asked" >/dev/null) ||
+		die "so $name is not added, and nothing but what get said was written. Fix that, then run \`$again\` again."
+	ken_write "$name" "layer.$name=$KEY"
+	printf 'Added layer.%s=%s to %s/.ken.\n' "$name" "$KEY" "$SCOPE"
+	reconcile || exit 1
+	track=.ken
+	if [ -f "$SCOPE/.repos" ]; then track="$track .repos"; fi
+	printf 'Track the change with `git -C %s add -- %s`; the link is excluded from git.\n' "$(q "$SCOPE")" "$track"
+	printf '%s\n' "Add a line for $name under ## Layers in $SCOPE/README.md, what it is and who keeps" \
+		'it: the front page lists every layer, ken edits no page, and `ken lint` checks it.'
+}
+
+layer_remove() {
+	if [ $# -ne 1 ]; then die "ken layer remove takes one layer name, got $#. Run e.g. \`ken layer remove sales-atlas\`."; fi
+	find_root
+	src_dir
+	layers=$(layer_lines "$SCOPE") || exit 1
+	key=''
+	while IFS=$tab read -r was its; do
+		if [ -n "$was" ] && [ "$was" = "$1" ]; then key=$its; fi
+	done <<EOF
+$layers
+EOF
+	if [ -z "$key" ]; then
+		names=$(printf '%s\n' "$layers" | cut -f1 | paste -s -d ' ' -)
+		printf '%s is not a layer of %s, so there is nothing to remove. Its layers: %s.\n' \
+			"$(q "$1")" "$SCOPE" "${names:-none}"
+		return
+	fi
+	ken_write "$1" ''
+	printf 'Removed layer.%s=%s from %s/.ken.\n' "$1" "$key" "$SCOPE"
+	at=$SCOPE/$1
+	if [ "$(readlink "$at" 2>/dev/null)" = "$SRC/$key" ]; then
+		rm -f "$at"
+		exclude "$SCOPE" "$1" remove
+		printf 'Removed the link %s.\n' "$at"
+	elif ! absent "$at"; then
+		printf 'Left %s alone: it is not the link to %s ken made.\n' "$at" "$SRC/$key"
+	fi
+	reconcile || exit 1
+	printf 'Track the change with `git -C %s add -- .ken`.\n' "$(q "$SCOPE")"
+	printf '%s\n' "The clone of $key stays at $SRC/$key, with its worktrees and any work in them." \
+		"When no root on this machine uses it, delete it with \`rm -rf \"\$(ken path code $key)\"\`."
+}
+
+cmd_help() {
+	if [ $# -gt 1 ]; then die 'ken help takes one command. Run e.g. `ken help path`.'; fi
+	if [ $# -eq 1 ]; then
+		if about "$1"; then
+			full_help
+			return
+		fi
+		shown=$(q "$(redact "$1")")
+		die "$shown is not a builtin, so ken help has no page for it. If it is an external" \
+			"command, run \`ken $shown --help\`; run \`ken help\` for every command."
+	fi
+	cat <<'EOF'
+ken: the kernel of a ken root, a workspace that is a knowledge base. Every checkout on this
+machine is at $KEN_SRC/<host>/<owner>/<repo>, default ~/src, each branch beside it at
+<repo>.<branch>.
+
+Usage: ken <command> [<args>]
+
+Commands:
+EOF
+	for name in $BUILTINS; do
+		about "$name"
+		printf '  %s\n' "$usage"
+		indent '      ' "$summary$nl$examples"
+	done
+	cat <<'EOF'
+  <name> [<args>]
+      Run the first executable ken-<name> in the scope's .bin/, each direct layer's .bin/
+      in .ken order, then PATH, with KEN_ROOT set to the scope and this ken's folder first
+      on PATH, so the script can run `ken` back. A builtin always wins.
+
+EOF
+	if err=$({ find_root && src_dir && places; } 2>&1); then
+		find_root
+		src_dir
+		places
+		externals
+		printf '\nHere the scope is %s and the checkouts are in %s.\n' "$SCOPE" "$SRC"
+	else
+		printf 'External commands: none listed, because %s\n' "${err#ken: }"
+	fi
+	cat <<'EOF'
+The scope is KEN_ROOT, else the nearest folder holding .ken above the current one, else the
+root this ken lives in (<root>/.bin/ken, through a symlink on PATH); with none, every
+command but path code, path <ref> and which stops, saying so.
+Run `ken <command> --help` for its forms.
+EOF
+}
+
+# --- external commands (PRD decision 10)
+
+# Sets PLACES: where ken-<name> is looked for, in order, one "<folder><tab><from>" per line:
+# the scope's .bin/, each direct layer's in .ken order, then PATH. SCOPE and SRC are set.
+places() {
+	PLACES="$SCOPE/.bin${tab}the scope"
+	layers=$(layer_lines "$SCOPE") || exit 1
+	while IFS=$tab read -r layer key; do
+		if [ -n "$layer" ]; then PLACES=$PLACES$nl$SRC/$key/.bin${tab}layer\ $layer; fi
+	done <<EOF
+$layers
+EOF
+	set -f
+	IFS=:
+	# an empty PATH entry is the current folder, as in any shell; the : added keeps a last one
+	search=$PATH:
+	for entry in $search; do PLACES=$PLACES$nl${entry:-.}${tab}PATH; done
+	unset IFS
+	set +f
+}
+
+# Prints the external commands `ken <name>` runs, by where each was found. places has run.
+externals() {
+	seen=" $BUILTINS " found=
+	while IFS=$tab read -r dir from; do
+		names=
+		for file in "$dir"/ken-*; do
+			name=${file##*/ken-}
+			if [ -n "$name" ] && [ -f "$file" ] && [ -x "$file" ]; then
+				case $seen in
+				*" $name "*) ;;
+				*) seen="$seen$name " names="$names, $name" ;;
+				esac
+			fi
+		done
+		if [ -n "$names" ]; then found="$found$nl  $from, $dir: ${names#, }"; fi
+	done <<EOF
+$PLACES
+EOF
+	if [ -n "$found" ]; then
+		printf 'External commands, run as `ken <name>`, by where their ken-<name> was found:%s\n' "$found"
+	else
+		printf 'External commands: none found. Add one as an executable ken-<name> in %s.\n' "$SCOPE/.bin"
+	fi
+}
+
+# Runs the first executable ken-$1 found with the rest of the arguments, by exec, so signals and
+# the exit code are its own, with KEN_ROOT the real scope.
+dispatch() {
+	name=$1
+	shift
+	find_root
+	src_dir
+	places
+	run='' plain='' looked=''
+	while IFS=$tab read -r dir from; do
+		looked="$looked$nl  $dir  ($from)"
+		file=$dir/ken-$name
+		case $name in '' | */*) continue ;; esac
+		if [ -f "$file" ] && [ -x "$file" ]; then
+			run=$file
+			break
+		fi
+		if [ -f "$file" ] && [ -z "$plain" ]; then plain=$file; fi
+	done <<EOF
+$PLACES
+EOF
+	if [ -n "$run" ]; then
+		# the folder this ken runs from goes first on PATH, so the script runs `ken` back
+		# whether or not one is installed: a root's hook reaches its own .bin/ken
+		KEN_ROOT=$SCOPE PATH=$(real "$(dir_of "$0")"):$PATH
+		export KEN_ROOT PATH
+		exec "$run" "$@"
+	fi
+	shown=$(q "$(redact "$name")")
+	if [ -n "$plain" ]; then
+		die "$plain would run as \`ken $shown\`, but it is not executable." \
+			"Run \`chmod +x $(q "$plain")\`, then \`ken $shown\` again."
+	fi
+	die "$shown is not a ken command, and no executable ken-<name> by that name was found." \
+		"Looked in, in order:$looked${nl}Run \`ken help\` for the builtins and the external commands" \
+		"found, or add an executable ken-<name> in $SCOPE/.bin."
+}
+
+# --- main
+
+command=${1-help}
+if [ $# -gt 0 ]; then shift; fi
+case $command in -h | --help) command=help ;; esac
+if about "$command"; then
+	for arg; do
+		case $arg in -h | --help)
+			full_help
+			exit 0
+			;;
+		esac
+	done
+	"cmd_$command" "$@"
+else
+	dispatch "$command" "$@"
+fi

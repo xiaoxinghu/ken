@@ -1,6 +1,7 @@
 // The core's commands as a user runs them: cli.ts in a child process, against temp folders.
 import { spawnSync } from 'node:child_process'
 import {
+	chmodSync,
 	existsSync,
 	mkdirSync,
 	mkdtempSync,
@@ -202,6 +203,19 @@ describe('path root', () => {
 		expect(unreadable.stderr).toContain(".ken line 2, 'not a setting', is not a line ken can read")
 	})
 
+	it.skipIf(process.getuid?.() === 0)(
+		'stops on a .ken it cannot read, saying how to fix it',
+		() => {
+			const root = rootWith(KEN)
+			chmodSync(join(root, '.ken'), 0)
+			for (const args of [['path', 'root'], ['init']]) {
+				const r = ken(args, root)
+				expect(r.status).toBe(1)
+				expect(r.stderr).toMatch(new RegExp(`^ken: could not read ${root}/\\.ken: .*chmod u\\+r`))
+			}
+		}
+	)
+
 	it('refuses any other form of path', () => {
 		const r = ken(['path', 'code', 'github.com/acme/api'], rootWith(KEN))
 		expect(r.status).toBe(1)
@@ -243,6 +257,13 @@ describe('help, version and the rest', () => {
 		expect(ken(['version'], fresh()).stdout).toBe(
 			`@unclex/ken-core ${VERSION}, reads ken.format 1 and older\n`
 		)
+	})
+
+	it('refuses a name every object has, as any command it does not know', () => {
+		for (const name of ['constructor', 'toString', '__proto__']) {
+			expect(ken([name], fresh()).stderr).toContain(`${name} is not a ken command:`)
+			expect(ken(['help', name], fresh()).stderr).toContain(`${name} is not a ken command, so`)
+		}
 	})
 
 	it('stops on a command it does not know', () => {

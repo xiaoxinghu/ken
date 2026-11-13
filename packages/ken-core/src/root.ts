@@ -72,7 +72,15 @@ export const findRoot = () => {
 /** Stop unless the `.ken` of `root` declares a format this ken reads. */
 export const checkFormat = (root: string) => {
 	const file = join(root, '.ken')
-	const text = readFileSync(file, 'utf8')
+	let text = ''
+	try {
+		text = readFileSync(file, 'utf8')
+	} catch (e) {
+		die(
+			`could not read ${file}: ${(e as Error).message}, so ken cannot tell the format of ${root}.`,
+			`Make it readable, e.g. \`chmod u+r ${q(file)}\`, then rerun.`
+		)
+	}
 	const format = parseSettings(text, file).get('ken.format')
 	if (format === undefined)
 		die(

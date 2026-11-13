@@ -1,66 +1,65 @@
 # Templates and harness files
 
-A template is a root to start from, with the kernel it was made with at `.bin/ken`
-([PRD](prd.md), decision 19). There is no scaffolding tool: anything that needs to know a
-rule is a kernel primitive, and the rest is `git clone`.
+A root for an agent harness starts from `create-ken`, run as `npm create ken <dir>`
+([PRD](prd.md), decision 19). The core knows no harness, so the files that make a root work
+with one are this package's, not `ken init`'s. `ken init` alone is the default for a person
+with no agent: `.ken`, an empty index and `.gitignore`, which is all a root needs to be one.
 
-A template is a folder of this repo, `templates/<name>/`, so it is edited, tested and
-reviewed with the kernel it copies, and also a branch, `template/<name>`, holding that
-folder alone with its history: the workflow `.github/workflows/templates.yml` splits it
-off with `git subtree split` on every push to `main`, replaces the folder's `.bin/ken` link
-to the repo's kernel by a copy of it, force-pushes the branch, and deletes a branch whose
-folder is gone. The branches are generated: never commit to one. `test/templates.test.ts`
-holds each template to the rules below and installs it the way the workflow publishes it.
-There is one, `agents`.
+## What `create-ken` does
 
-Starting from it is one clone and the kernel it brings, nothing installed first (`jq`, for
-the session digests below, is the one tool it uses beyond `sh` and git, and it works without):
+1. Copies its template into `<dir>`, default the current folder, never overwriting, saying
+   each file it made and each it left alone.
+2. Runs `ken init <dir>` through `@unclex/ken`, its dependency at the same version, and adds
+   `template.name=agents` to `.ken`, a key `ken` keeps.
+3. Says what to do next: the install line when `ken` is not on `PATH`, `git init` when the
+   folder is not in git, the first commit.
+
+A rerun adds what is missing, so a root picks up a file a newer template added. A file that
+differs from the template is left alone and named, for its owner or an agent to compare:
+that is the update path, and since every file is constant, a root that never edited one has
+nothing to merge. The package's tests hold the template to the rules here.
+
+## The files
 
 ```
-git clone -b template/agents --single-branch https://github.com/xiaoxinghu/ken ~/ken
-~/ken/.bin/ken init
-git -C ~/ken remote remove origin
+README.md                      the front page, with `## Sections`
+AGENTS.md                      < 40 lines, every harness; Claude Code only while no CLAUDE.md is above it
+CLAUDE.md -> AGENTS.md         made at run time: an npm package carries no link
+.agents/hooks.json             the session-start hook, in Claude Code's schema; Codex reads it as it is
+.claude/settings.json          the same hook: a settings file holds other keys, such as permissions.deny
+.codex/hooks.json -> ../.agents/hooks.json   made at run time, as CLAUDE.md is
+.pi/extensions/ken-hooks.ts    a shim: reads hooks.json, runs its SessionStart hooks on session_start
+.gitattributes                 log.md merge=union
+.gitignore                     .env, CLAUDE.local.md, node_modules; kept in the package under another
+                               name, since npm leaves a .gitignore out, and written as .gitignore
+.envrc                         the top of the direnv chain (Environment, below)
 ```
 
-then the first commit. `init` fills in what the template left out and overwrites nothing, so
-a root made from an older template picks up a newer one by diffing against a fresh clone of
-the branch, the agent being the merge tool. Starting from nothing is `ken init ~/ken`: `.ken`,
-an empty index and a `.bin/`, which is all a layer needs to be one; `init` writes no page and
-no `AGENTS.md`. A template's `.ken` carries `template.name`, a key `ken` keeps.
-
-`ken init` is the default for everyone: a root, or a layer, needs nothing more, and a person
-with no agent needs no template. `agents` is the opt-in for a knowledge base kept with an
-agent harness: `ken init` plus `README.md`, `AGENTS.md` and `CLAUDE.md -> AGENTS.md`, the
-harness files below, a hook and `.bin/ken-status`, the session-start script,
-`.bin/ken-log`, which appends a line to the root's `log.md` ([PRD](prd.md), the knowledge
-base), `.bin/ken-digest` and `.bin/ken-session`, which keep and read the digest of the session
-behind a line (below), a `.gitattributes` with `log.md merge=union`, so two machines' appends merge without a
-conflict, and `.envrc`. It assumes nothing about what the root is for, not even software. Its
-`AGENTS.md` is twenty-two lines: where the CLI is, how to make a section and a page, when to
-`ken log`, how to reach a line's session, and nothing `ken help` already says; an agent grows the root from there, `ken help` and the messages. A layer starts
-the same way, any root is one, and under a root its harness files sit unused, the root's hooks
-being the ones that run (PRD decision 21), until it is cloned alone.
+It assumes nothing about what the root is for, not even software. No `.bin/`: the commands
+it relies on, `ken status`, `ken log`, `ken digest`, `ken session`, are the standard ones,
+bundled with ken ([PRD](prd.md), decision 11), and a root's `.bin/` is for what the root
+writes itself. Its `AGENTS.md` says where the CLI is, how to make a section and a page,
+when to `ken log`, how to reach a line's session, and nothing `ken help` already says; an
+agent grows the root from there, `ken help` and the messages.
 
 ## Where the CLI is
 
-A fresh root has nothing visible but `README.md` and `AGENTS.md`, and `ken` is on no PATH
-but the one the person who installed it set up. So the agent learns where the CLI is from
-the one file every harness reads: the first paragraph of the template's `AGENTS.md` names
-`.bin/ken`, says to run it as that when `ken` is not a command, and points at `ken help`.
-That alone works in every harness, with no hook and no trust prompt.
+`ken` is installed once per machine, on `PATH`. A fresh root shows nothing but `README.md`
+and `AGENTS.md`, so the agent learns about the CLI from the one file every harness reads:
+the first paragraph of the template's `AGENTS.md` says this is a ken root, the CLI is `ken`,
+`ken help` lists the commands, and, when `ken` is not a command, the line that installs it,
+`npm install -g @unclex/ken`. That alone works in every harness, with no hook and no trust
+prompt.
 
-The `agents` template goes further where a harness has a way. Its session-start hook runs
-`.bin/ken status`, whose stdout every harness puts before the model: the repos and layers,
-the settings, the ready tasks, the last 10 lines of `log.md` with the time now, and the
-sentence that names the CLI. In Claude Code the hook
-also appends an `export KEN_ROOT=<root> PATH=<root>/.bin:$PATH` line to the file
-`CLAUDE_ENV_FILE` names, which Claude Code sources before each shell command, so `ken` is the
-root's kernel for the rest of the session, acting on the root even from a checkout, which has
-no `.ken` above it (PRD decision 20). The script itself calls `ken` by name: dispatch puts the running kernel's
-folder first on `PATH` for every `ken-<name>` it runs (decision 10), so a root's hook works
-on a machine where nothing was installed. Codex and pi get the context and the `AGENTS.md`
-sentence; neither has a documented way to extend the shell's PATH from the project, and an
-agent told `.bin/ken` needs none.
+The template goes further where a harness has a way. Its session-start hook runs `ken
+status`, whose stdout every harness puts before the model: the repos, the settings, the
+ready tasks, the last 10 lines of `log.md` with the time now, and the sentence that names
+the CLI. In Claude Code, `ken status` also appends to the file `CLAUDE_ENV_FILE` names,
+which Claude Code sources before each shell command, an `export PATH=<root>/.bin:$PATH`, so
+the root's own tools run by name, and the session's two variables (Session digests, below).
+It exports no `KEN_ROOT`: a checkout is under the root, so `ken` finds it from anywhere in
+a session (PRD, decision 9). Codex and pi get the context and the `AGENTS.md` sentence;
+neither has a documented way to extend the shell's `PATH` from the project.
 
 ## Harness files
 
@@ -70,54 +69,42 @@ Two of the four surfaces a harness reads have a standard every harness checked h
 Skills specification. Hooks have a de facto one: Codex reads Claude Code's hooks schema and
 stdin/stdout contract unchanged, Cursor and Copilot read `.claude/settings.json` hooks
 directly, and pi has no hook file, only TypeScript extensions. Deny rules and `PATH` have
-nothing shared. So the `agents` template keeps one source for each shared surface and one
-thin adapter per harness, each pointing at the shared file:
+nothing shared. So the template keeps one source for each shared surface and one thin
+adapter per harness, each pointing at the shared file. A root's skills go in
+`.agents/skills/<name>/`, which Codex and pi read, with `.claude/skills ->
+../.agents/skills` made with the first one for Claude Code (to verify: Claude Code documents
+a link per skill, not of the folder).
+
+**The hook is one constant line**, the same in every root and every harness:
 
 ```
-AGENTS.md                      every harness; Claude Code only while no CLAUDE.md is above it, so the link stays
-.agents/skills/<name>/         Codex and pi read it; a direct layer's skills are linked here by ken (PRD decision 21)
-.claude/skills -> ../.agents/skills   one link, made with the first skill, so Claude Code sees every skill a layer
-                               brings (to verify: Claude Code documents a link per skill, not of the folder)
-.agents/hooks.json             one hooks object in Claude Code's schema; Codex reads it as it is
-.bin/ken-status                the script the session-start hook runs
-.bin/ken-log                   `ken log`, which appends to log.md, digesting the session first
-.bin/ken-digest                `ken digest`, the session's transcript to .sessions/<id>.jsonl
-.bin/ken-session               `ken session`, which prints entries of a digest or greps them all
-.gitattributes                 log.md merge=union
-.claude/settings.json          hooks, a copy of the object: a settings file holds other keys, such as permissions.deny
-.codex/hooks.json -> ../.agents/hooks.json
-.pi/extensions/ken-hooks.ts    a shim: reads hooks.json, runs its SessionStart hooks on session_start
+if command -v ken >/dev/null 2>&1; then ken status; else echo 'This is a ken root, and ken is not installed: run npm install -g @unclex/ken, then start a new session.'; fi
 ```
 
-The hook line is `"${KEN_ROOT:-.}/.bin/ken" status`, quoted for a root path with a space: the kernel is always at `.bin/ken` (decision
-19), a harness runs a hook from the folder the session started in, the root unless a launcher
-started it in a checkout with `KEN_ROOT` set and the root's settings named (PRD decision 20),
-and the command resolves through
-decision 10, so the script behind `status` can move from the root's `.bin/` to a layer's or
-to a package on `PATH` and update by `git pull` or an upgrade, while the hook files never
-change; Codex and pi pin hooks by hash, so a hook file that never changes is never
-re-trusted. The adapters change rarely; when they do, a diff against the template branch
-carries the change into an existing root. Codex and pi load a project's hooks, skills and
-extensions only after a trust prompt, which the first-run message says; Codex then asks again
-for the hooks. pi has no way to put a `session_start` handler's output before the model, so
-the shim sends the `SessionStart` output with the first prompt. A deny rule is Claude Code's
-alone. Hooks and skills reach scripts as `ken <name>`.
+A hook runs from the folder the session started in, and `ken` finds the root from there,
+from a checkout under `.repos/` too. When `ken` is missing the line prints the install line
+as the session's context and exits 0, since a session-start command that fails can stop a
+harness from starting a session at all. What `status` does is the installed ken's, so it
+changes with an upgrade and the hook files never do; Codex and pi pin hooks by hash, so a
+hook that never changes is never re-trusted. Codex and pi load a project's hooks, skills
+and extensions only after a trust prompt, which the first-run message says; Codex then asks
+again for the hooks. pi has no way to put a `session_start` handler's output before the
+model, so the shim sends the `SessionStart` output with the first prompt. A deny rule is
+Claude Code's alone. Hooks and skills reach commands as `ken <name>`.
 
-A layer contributes commands and skills, never hooks or deny rules (PRD decision 21): the
-root's one hook line calls `ken status`, and what a layer wants run at session start is
-a command that script calls.
-
-**Sessions start at the root**: that is where the hooks, skills and deny rules live, and the
-only layout a harness that walks down from the git root understands. A session in a checkout
-loads the root's rules through `$KEN_SRC/AGENTS.md` and `CLAUDE.md`, which `ken init` links
-there (PRD decision 5); its hooks and deny rules come from a launcher, such as `ken flow`,
-that starts it with `KEN_ROOT` set, `claude --settings <root>/.claude/settings.json` or `pi -e
-<root>/.pi/extensions/ken-hooks.ts`, since a harness reads those from the folder a session
-starts in. Two documented traps: Claude Code reads `AGENTS.md` natively only while no
-`CLAUDE.md` exists in the working directory or above it, so `$KEN_SRC/CLAUDE.md` hides a
-clone's `AGENTS.md` unless the clone has `CLAUDE.md -> AGENTS.md`, which `ken get` gives a
-fresh one, or the user sets `instructionFiles` to
-`claude-md-and-agents-md` in their user settings, under the builtin plugin's options
+**Sessions start at the root**, or in a checkout under it. At the root are the hooks, skills
+and deny rules, and it is the only layout a harness that walks down from the git root
+understands. A session in a checkout loads the root's `AGENTS.md` by the path, the root
+being above it (PRD, decision 6), in Claude Code and pi; Codex reads `AGENTS.md` only from
+the checkout's own git root down, so there the root's rules come from the user-level
+`~/.codex/AGENTS.md` or not at all. Its hooks and deny rules come from a launcher that starts
+it with the root's settings named, `claude --settings <root>/.claude/settings.json` or `pi
+-e <root>/.pi/extensions/ken-hooks.ts`, since a harness reads those only from the folder a
+session starts in. Two documented traps: Claude Code reads `AGENTS.md` natively only while
+no `CLAUDE.md` exists in the working directory or above it, so the root's `CLAUDE.md` hides
+a checkout's `AGENTS.md` unless the checkout has `CLAUDE.md -> AGENTS.md`, which `ken get`
+gives a fresh one, or the user sets `instructionFiles` to `claude-md-and-agents-md` in
+their user settings, under the builtin plugin's options
 (`pluginConfigs."cc-plugin-agents-md@builtin".options`; project settings ignore it); and
 auto-memory is keyed on the git repo, so every session at the root shares one memory.
 
@@ -128,49 +115,48 @@ Codex. `ken status` exports them as `KEN_SESSION` and `KEN_SESSION_TRANSCRIPT` t
 `CLAUDE_ENV_FILE`; with no env file, as in Codex, it writes them to a pointer,
 `~/.local/state/ken/<root as a path with / as ->`, which `ken log` reads when the environment
 has none. The pointer is machine-local state, so it is out of the root, where a file sync
-would carry one machine's session to another (PRD decision 5); two such sessions of one root
-share it. pi's shim sends neither yet, so its
-hook removes the pointer, and a pi session gets no digest unless `ken digest <transcript>` is run
-by hand. `ken log` then runs
-`ken digest`, which rewrites `.sessions/<id>.jsonl` from the transcript and is idempotent, so
-the digest is current at every line and lands in the same commit; a session that logs nothing
-gets none, and the tail after its last line is not kept. Claude Code's file keeps a rewound
-branch, so its digest does too, in file order; pi's is the path from the last entry back to the
-root, a `branch_summary` on it a `compaction` entry; a compaction is one in each, its `summary`
-the harness's note and never the model's summary, since a digest is what happened.
+would carry one machine's session to another (PRD, decision 8); two such sessions of one
+root share it. pi's shim sends neither yet, so its hook removes the pointer, and a pi
+session gets no digest unless `ken digest <transcript>` is run by hand. `ken log` then runs
+`ken digest`, which rewrites `.sessions/<id>.jsonl` from the transcript and is idempotent,
+so the digest is current at every line and lands in the same commit; a session that logs
+nothing gets none, and the tail after its last line is not kept. Claude Code's file keeps a
+rewound branch, so its digest does too, in file order; pi's is the path from the last entry
+back to the root, a `branch_summary` on it a `compaction` entry; a compaction is one in
+each, its `summary` the harness's note and never the model's summary, since a digest is what
+happened.
 
 The digest is a log read by a program, so it is one JSON object per line: a header,
-`{"kind":"session","session":…,"harness":…,"started":…,"cwd":…}`, then entries, `id` their ordinal
-from 1, `at` the transcript's time or the one before it, and `kind`: `user` with `text`;
-`assistant` with `text`, `toolCalls` of `{id, name, input}`, `input` the call's arguments as JSON
-cut at 120 characters, and `error` for a failed response; `compaction` with `summary`. Claude Code
-writes a reply as one transcript entry per content block sharing `message.id`, merged into one;
-a Codex tool call joins the reply before it. The shape is the ghost's in
-github.com/justfiles/justfiles, `justfiles:packages/ghost/mirror.ts#MirroredEntry`, whose mirror
-took this content policy, and `ken session` renders it as the ghost's transcript tool shows it:
-a header line, then the last 20 entries, or a `<range>`, `12`, `12-30` or `1-`, as
-`#n HH:MM user: …`, `#n HH:MM assistant: …` and one `#n HH:MM → <name> <input>` per tool call, in
-local time with a day line where the day changes; `ken session grep` prints
-`<id>:<n>:<kind> <text>` per matching entry. One format for two tools; a shared library waits
-for a third writer. A `.sessions/<id>.md` from before is printed whole and grepped by line.
+`{"kind":"session","session":…,"harness":…,"started":…,"cwd":…}`, then entries, `id` their
+ordinal from 1, `at` the transcript's time or the one before it, and `kind`: `user` with
+`text`; `assistant` with `text`, `toolCalls` of `{id, name, input}`, `input` the call's
+arguments as JSON cut at 120 characters, and `error` for a failed response; `compaction`
+with `summary`. Claude Code writes a reply as one transcript entry per content block sharing
+`message.id`, merged into one; a Codex tool call joins the reply before it. The shape is the
+ghost's in github.com/justfiles/justfiles, `justfiles:packages/ghost/mirror.ts#MirroredEntry`,
+whose mirror took this content policy, and `ken session` renders it as the ghost's
+transcript tool shows it: a header line, then the last 20 entries, or a `<range>`, `12`,
+`12-30` or `1-`, as `#n HH:MM user: …`, `#n HH:MM assistant: …` and one `#n HH:MM → <name>
+<input>` per tool call, in local time with a day line where the day changes; `ken session
+grep` prints `<id>:<n>:<kind> <text>` per matching entry. One format for two tools; a shared
+library waits for a third writer. A `.sessions/<id>.md` from before is printed whole and
+grepped by line.
 
-The transcripts are JSON lines, and both scripts are `sh` around `jq`, the one dependency the
-template adds beyond the kernel's (PRD decision 18): macOS, the Linux distributions and the CI
-runners ship it; without it `ken digest` says what to install and `ken log` logs the line
-anyway, and `ken session` prints the raw lines. A line that is not JSON, one still being
-written, is skipped. Size and retention are decided when they bite, as for `log.md`.
+The transcripts are JSON lines, read with `JSON.parse`, so nothing beyond ken is needed. A
+line that is not JSON, one still being written, is skipped. Size and retention are decided
+when they bite, as for `log.md`.
 
 ## Environment
 
-Environment is direnv's job, in the person's terminal. The root `.envrc` is the top of a
-chain: `ken init` writes `$KEN_SRC/.envrc`, which exports `KEN_ROOT` and runs `source_env` on
-the root's, so a checkout without an `.envrc` of its own gets the root's environment and knows
-its root, and one with its own reaches both with `source_up_if_exists`. A layer's clone has
-its own `.envrc`, a root's, so direnv stops there. `direnv allow ~/src` once, or a
-`[whitelist] prefix = ["~/src"]` in `direnv.toml`, removes per-worktree `direnv allow`. The
-root `.envrc` points socket-creating tools at `$TMPDIR` (`OVERMIND_SOCKET`, `PGHOST`, ssh
-`ControlPath`), because a Unix socket path is limited to 104 bytes on macOS and the longest
-worktree path is near 80. An agent harness reads env at startup, its shell runs no
-direnv and keeps no `export` between commands, so setup commands and skills run
-`direnv exec . <cmd>` when a repo needs its own environment; what every command of a
-session needs, such as `PATH`, goes through the hook and `CLAUDE_ENV_FILE` above.
+Environment is direnv's job, in the person's terminal. The root `.envrc` is the top of the
+chain: direnv loads the nearest `.envrc` above the current folder, so a checkout under
+`.repos/` without one of its own gets the root's, and one with its own reaches the root's
+with `source_up_if_exists`. `direnv allow` once at the root, and a `[whitelist] prefix` of
+the root's `.repos` in `direnv.toml` removes the per-worktree `direnv allow` for checkouts
+with their own. The root `.envrc` points socket-creating tools at `$TMPDIR`
+(`OVERMIND_SOCKET`, `PGHOST`, ssh `ControlPath`), because a Unix socket path is limited to
+104 bytes on macOS and the longest worktree path is near 90. An agent harness reads env at
+startup, its shell runs no direnv and keeps no `export` between commands, so setup commands
+and skills run `direnv exec . <cmd>` when a repo needs its own environment; what every
+command of a session needs, such as `PATH`, goes through the hook and `CLAUDE_ENV_FILE`
+above.

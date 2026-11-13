@@ -40,6 +40,58 @@ const read = (file: string) => {
 		return undefined
 	}
 }
+/** POSIX bracket classes, which jq's regular expressions read and JavaScript's do not. */
+const POSIX: Record<string, string> = {
+	alnum: 'a-zA-Z0-9',
+	alpha: 'a-zA-Z',
+	blank: ' \\t',
+	cntrl: '\\x00-\\x1f\\x7f',
+	digit: '0-9',
+	graph: '\\x21-\\x7e',
+	lower: 'a-z',
+	print: '\\x20-\\x7e',
+	punct: '!-\\/:-@\\[-`{-~',
+	space: '\\s',
+	upper: 'A-Z',
+	word: '\\w',
+	xdigit: '0-9A-Fa-f'
+}
+/** A pattern as jq read it, Oniguruma's syntax, where JavaScript's differs: flags at its start,
+ * `(?i)` for any case and `(?m)` for a dot that matches a newline, and POSIX classes inside a
+ * bracket, `[[:upper:]]`, and a `]` first in one. Throws when JavaScript reads no such pattern. */
+const regex = (pattern: string) => {
+	const lead = pattern.match(/^\(\?([im]+)\)/)
+	const flags = [...new Set(lead?.[1] ?? '')].map((f) => (f === 'm' ? 's' : f)).join('')
+	let source = ''
+	let inClass = false
+	let opened = 0
+	const rest = pattern.slice(lead?.[0].length ?? 0)
+	for (let i = 0; i < rest.length; i++) {
+		const posix = inClass && rest.slice(i).match(/^\[:(\w+):\]/)
+		if (posix && POSIX[posix[1] ?? '']) {
+			source += POSIX[posix[1] ?? '']
+			i += posix[0].length - 1
+			continue
+		}
+		const c = rest[i]
+		if (c === '\\') {
+			source += rest.slice(i, i + 2)
+			i++
+			continue
+		}
+		// a ] first in a bracket is literal, where JavaScript reads [] as empty
+		const first = inClass && /^\[\^?$/.test(source.slice(opened))
+		if (c === '[' && !inClass) {
+			inClass = true
+			opened = source.length
+		} else if (c === ']' && first) {
+			source += '\\]'
+			continue
+		} else if (c === ']' && inClass) inClass = false
+		source += c
+	}
+	return new RegExp(source, flags)
+}
 const entries = (text: string) => objects(text).filter((e) => typeof e.id === 'number')
 
 const [first = '', second = ''] = args
@@ -62,7 +114,7 @@ if (first === 'grep') {
 		)
 	let pattern = /$^/
 	try {
-		pattern = new RegExp(second)
+		pattern = regex(second)
 	} catch {
 		stop(
 			`ken session grep: '${second}' is no pattern ken reads, a regular expression; quote what is meant literally.`,

@@ -439,6 +439,19 @@ describe('session digests', { timeout: 30_000 }, () => {
 		const none = run({}, 'session', 'grep', 'no such words')
 		expect([none.status, none.stdout]).toEqual([1, ''])
 		expect(run({}, 'session', 'grep', '[').status).toBe(2)
+		// the patterns jq read: its flags at the start, POSIX classes in a bracket
+		for (const p of [
+			'(?i)RAYLEIGH',
+			'[[:upper:]]ayleigh',
+			'(?im)rayleigh.scat',
+			'^[^[:digit:]]ayl',
+			'[]R]ayleigh',
+			'R[^]]yleigh'
+		])
+			expect(run({}, 'session', 'grep', p).stdout).toBe(
+				'abc-123:3:assistant Rayleigh scattering.\n'
+			)
+		expect(run({}, 'session', 'grep', '[[:digit:]]ayleigh').status).toBe(1)
 		expect(run({}, 'session', 'grep').status).toBe(2)
 		const old = '---\nsession: old\n---\n\n## you 2026-11-06T01:00:01Z\n\nRayleigh, before\n'
 		writeFileSync(join(root, '.sessions/old.md'), old)

@@ -452,6 +452,11 @@ describe('session digests', { timeout: 30_000 }, () => {
 				'abc-123:3:assistant Rayleigh scattering.\n'
 			)
 		expect(run({}, 'session', 'grep', '[[:digit:]]ayleigh').status).toBe(1)
+		// ^ and $ anchor at what an entry says, whole, as in jq, not at each line of it
+		expect(run({}, 'session', 'grep', '^Read ').status).toBe(1)
+		expect(run({}, 'session', 'grep', '^Looking\\. Bash').status).toBe(1)
+		expect(run({}, 'session', 'grep', '^Looking\\.\n').stdout).toMatch(/^abc-123:2:assistant /)
+		expect(run({}, 'session', 'grep', '"prompt":"p"}$').stdout).toMatch(/^abc-123:2:assistant /)
 		expect(run({}, 'session', 'grep').status).toBe(2)
 		const old = '---\nsession: old\n---\n\n## you 2026-11-06T01:00:01Z\n\nRayleigh, before\n'
 		writeFileSync(join(root, '.sessions/old.md'), old)

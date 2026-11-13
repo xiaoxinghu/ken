@@ -82,6 +82,21 @@ describe('create-ken', { timeout: 30_000 }, () => {
 		expect(r.stdout).toContain(`git -C '${root}' commit -m 'A ken root'`)
 	})
 
+	it("names the install line when the only ken is npm create's temporary one, in node_modules/.bin", () => {
+		const npx = join(dir, '_npx/abc/node_modules/.bin')
+		mkdirSync(npx, { recursive: true })
+		writeFileSync(join(npx, 'ken'), '#!/bin/sh\n', { mode: 0o755 })
+		const root = join(dir, `root ${++n}`)
+		const r = run(process.execPath, CLI, [root], dir, `${npx}:${BASE}`)
+		expect(r.status).toBe(0)
+		expect(r.stdout).toContain('npm install -g @unclex/ken')
+		const installed = join(dir, 'prefix/bin')
+		mkdirSync(installed, { recursive: true })
+		writeFileSync(join(installed, 'ken'), '#!/bin/sh\n', { mode: 0o755 })
+		const again = run(process.execPath, CLI, [root], dir, `${npx}:${installed}:${BASE}`)
+		expect(again.stdout).not.toContain('npm install -g')
+	})
+
 	it('rerun, creates nothing and changes nothing', () => {
 		const root = fresh()
 		const before = readdirSync(root, { recursive: true }).sort()

@@ -122,7 +122,13 @@ try {
 			list(differs)
 	const ok = (cmd: string, ...cmdArgs: string[]) => spawnSync(cmd, cmdArgs).status === 0
 	const next: string[] = []
-	if (!ok('sh', '-c', 'command -v ken'))
+	// npm create puts its temporary install's node_modules/.bin on PATH, and the ken there, this
+	// package's dependency, is gone after the run: only a ken outside one is installed
+	const path = (process.env.PATH ?? '')
+		.split(':')
+		.filter((dir) => !dir.includes('/node_modules/.bin'))
+		.join(':')
+	if (spawnSync('sh', ['-c', 'command -v ken'], { env: { ...process.env, PATH: path } }).status)
 		next.push(`${INSTALL}   # ken is not on PATH, and the hooks and AGENTS.md call it`)
 	const git = ok('git', '-C', root, 'rev-parse', '--is-inside-work-tree')
 	if (!git) next.push(`git -C ${q(root)} init`)

@@ -73,7 +73,8 @@ export const parseIndex = (text: string, file: string) => {
 			stanza = { kind, key: value, fields: new Map() }
 			stanzas.push(stanza)
 		} else if (!m) bad('a field, <name>: <value>, the name letters, digits, _ and -')
-		else if (name === 'repo' || name === 'owner' || stanza.fields.has(name))
+		// owner: is a field of a repo stanza too; only the stanza's own first name is reserved
+		else if (name === stanza.kind || stanza.fields.has(name))
 			bad(`${name}: once per stanza, and the stanza has it already`)
 		else if (name === 'desc' && value === '') bad('desc: with a value, never empty')
 		else stanza.fields.set(name, value)
@@ -86,9 +87,14 @@ export const parseIndex = (text: string, file: string) => {
  * The caller has checked each name and value, one line each. */
 export const setFields = (text: string, key: string, fields: [string, string][]) => {
 	const lines = splitLines(text)
+	// the first line of a stanza, never a field such as a repo: inside an owner stanza
+	let inStanza = false
 	let start = lines.findIndex((line) => {
+		if (line.startsWith('#')) return false
+		const first = !inStanza
+		inStanza = line.trim() !== ''
 		const m = FIELD.exec(line)
-		return m?.[1] === 'repo' && m[2]?.trim() === key
+		return first && m?.[1] === 'repo' && m[2]?.trim() === key
 	})
 	if (start < 0) {
 		if (lines.length && lines.at(-1)?.trim() !== '') lines.push('')

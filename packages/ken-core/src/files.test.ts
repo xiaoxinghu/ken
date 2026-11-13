@@ -110,6 +110,18 @@ describe('.repos.index', () => {
 		)
 	})
 
+	it('reads owner: as a field of a repo stanza, which a write keeps readable', () => {
+		const text = setFields('repo: a/b/c\nowner: platform\n', 'a/b/c', [['owner', 'payments']])
+		expect(text).toBe('repo: a/b/c\nowner: payments\n')
+		expect(parseIndex(text, '.repos.index')[0]?.fields).toEqual(new Map([['owner', 'payments']]))
+	})
+
+	it('finds a stanza by its first line only, never by a field of another', () => {
+		expect(setFields('owner: a/b\nrepo: a/b/c\n', 'a/b/c', [['desc', 'C.']])).toBe(
+			'owner: a/b\nrepo: a/b/c\n\nrepo: a/b/c\ndesc: C.\n'
+		)
+	})
+
 	it('adds a stanza at the end for a new key, after a blank line', () => {
 		expect(setFields('# index', 'a/b/c', [['desc', 'C.']])).toBe(
 			'# index\n\nrepo: a/b/c\ndesc: C.\n'

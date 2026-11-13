@@ -116,28 +116,37 @@ export const dispatch = (name: string, args: string[], bundled: Bundled, core: s
 
 const listed = (names: string[]) => (names.length ? names.join(', ') : 'none')
 
-/** The names of the ken-<name> that run in `dir`; none when ken may not list it. */
-const commandsIn = (dir: string) => {
+/** The names of the ken-<name> files in `dir` that run, or with `all` that are files; none when
+ * ken may not list it. */
+const commandsIn = (dir: string, all: boolean) => {
 	try {
 		return readdirSync(dir)
-			.filter((f) => /^ken-[A-Za-z0-9][A-Za-z0-9-]*$/.test(f) && runnable(join(dir, f)))
+			.filter(
+				(f) => /^ken-[A-Za-z0-9][A-Za-z0-9-]*$/.test(f) && (all ? isFile : runnable)(join(dir, f))
+			)
 			.map((f) => f.slice(4))
 	} catch {
 		return []
 	}
 }
 
-/** The extensions `ken help` lists: by where each was found, one shadowed saying by what. */
+/** The extensions `ken help` lists: by where each was found, one shadowed saying by what. A
+ * ken-<name> in the root's .bin/ that is not executable is listed, as dispatch stops at it. */
 export const extensions = (root: string | undefined, bundled: Bundled, core: string[]) => {
 	const first = new Map(core.map((name) => [name, 'the core command, which always wins']))
 	const groups: string[] = []
-	for (const place of placesOf(root)) {
-		const names = place.dir ? commandsIn(place.dir) : Object.keys(bundled)
+	const places = placesOf(root)
+	for (const place of places) {
+		const top = root !== undefined && place === places[0]
+		const names = place.dir ? commandsIn(place.dir, top) : Object.keys(bundled)
 		const lines = names.sort().map((name) => {
 			const by = first.get(name)
 			if (by) return `    ${name}, shadowed by ${by}`
-			first.set(name, place.dir ? join(place.dir, `ken-${name}`) : 'the bundled one')
-			return `    ${name}`
+			const file = place.dir && join(place.dir, `ken-${name}`)
+			first.set(name, file || 'the bundled one')
+			return file && top && !runnable(file)
+				? `    ${name}, not executable: run \`chmod +x ${q(file)}\``
+				: `    ${name}`
 		})
 		if (lines.length)
 			groups.push(

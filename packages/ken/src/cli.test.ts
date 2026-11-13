@@ -134,7 +134,7 @@ Add an executable ken-nope to ${root}/.bin, or run \`ken help\` for every comman
 		expect(ken(['a/b'], root).stderr).toContain("a/b is not a ken command: a command's name is")
 	})
 
-	it("names a ken-<name> in the root's .bin/ that is not executable, with the chmod", () => {
+	it("names a ken-<name> in the root's .bin/ that is not executable, with the chmod, in help too", () => {
 		const root = newRoot()
 		const file = script(join(root, '.bin'), 'plain', 'echo never', true)
 		const r = ken(['plain'], root)
@@ -142,6 +142,12 @@ Add an executable ken-nope to ${root}/.bin, or run \`ken help\` for every comman
 		expect(r.stderr).toBe(
 			`ken: ${file} would run as \`ken plain\`, but it is not executable. Run \`chmod +x ${file}\`, then \`ken plain\` again.\n`
 		)
+
+		const fixture = script(join(root, '.bin'), 'fixture', 'echo never', true)
+		expect(ken(['fixture'], root).stderr).toContain(`ken: ${fixture} would run as`)
+		const help = ken(['help'], root).stdout
+		expect(help).toContain(`\n    plain, not executable: run \`chmod +x ${file}\`\n`)
+		expect(help).toContain(`\n  bundled\n    fixture, shadowed by ${fixture}\n`)
 	})
 
 	it('says it is this package, in version', () => {

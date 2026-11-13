@@ -14,8 +14,10 @@ names, \`ken session <id> <range>\` the entries in a range, 12, 12-30 or 1- for 
 digest when its line is not enough, through ken session, never whole. To search every digest,
 grep the files: .sessions/<id>.jsonl at the root, JSON lines, a header and then one entry per
 line, its text JSON-escaped, a newline as \\n; a digest from before is .sessions/<id>.md.
+With jq, a search prints \`<id> <n>\` per matching entry, and \`ken session <id> <n>\` reads it.
   ken session 1a096823-97d3-4055-b82d-f29760687aa0 12-30
-  grep -il 'rayleigh' "$(ken path root)"/.sessions/*.jsonl`
+  grep -il 'rayleigh' "$(ken path root)"/.sessions/*.jsonl
+  jq -r 'select(.id and (tostring | test("rayleigh"; "i"))) | "\\(input_filename | split("/")[-1] | rtrimstr(".jsonl")) \\(.id)"' "$(ken path root)"/.sessions/*.jsonl`
 
 const args = process.argv.slice(2)
 if (wantsHelp(args)) {

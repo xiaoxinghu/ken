@@ -139,7 +139,9 @@ transcript tool shows it: a header line, then the last 20 entries, or a `<range>
 `12-30` or `1-`, as `#n HH:MM user: …`, `#n HH:MM assistant: …` and one `#n HH:MM → <name>
 <input>` per tool call, in local time with a day line where the day changes. A search of
 every digest is grep's, over the files, `grep -il <pattern> .sessions/*.jsonl`: one entry per
-line, its text JSON-escaped, so ken holds no search of its own. One format for two tools; a
+line, its text JSON-escaped, so ken holds no search of its own; with jq, a search can
+print `<id> <n>` per matching entry, for `ken session <id> <n>` to read, and `ken session
+--help` shows how. One format for two tools; a
 shared library waits for a third writer. A `.sessions/<id>.md` from before is printed whole.
 
 The transcripts are JSON lines, read with `JSON.parse`, so nothing beyond ken is needed. A

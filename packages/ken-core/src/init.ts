@@ -38,13 +38,21 @@ export const init = (args: string[]) => {
 			`new root, hidden in ${up}'s knowledge base. Make it a section of ${up}, a folder with a`,
 			`README.md and no .ken; or make a root beside ${up}, e.g. \`ken init ${beside}\`.`
 		)
+	// each file ken owns, when something is in its place, must be a file ken can read and keep
+	for (const [name, why] of [
+		['.ken', `only a .ken file makes a folder a root, so ken would never find ${dir} as one`],
+		['.repos.index', 'the index must be a file for ken to read and write it'],
+		['.gitignore', 'git reads its rules only from a file']
+	] as const) {
+		const path = join(dir, name)
+		if (lstatSync(path, { throwIfNoEntry: false }) && !isFile(path))
+			die(
+				`${path} is there but is not a file, and ${why}.`,
+				`Move it aside, then run \`ken init ${q(dir)}\` again.`
+			)
+	}
 	const ken = join(dir, '.ken')
 	const there = lstatSync(ken, { throwIfNoEntry: false })
-	if (there && !isFile(ken))
-		die(
-			`${ken} is there but is not a file, and only a .ken file makes a folder a root, so ken`,
-			`would never find ${dir} as one. Move it aside, then run \`ken init ${q(dir)}\` again.`
-		)
 	// a root from before the rewrite, or for a newer ken, is left alone, saying why
 	if (there) checkFormat(dir)
 

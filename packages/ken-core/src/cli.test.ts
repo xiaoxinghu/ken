@@ -103,16 +103,18 @@ describe('init', () => {
 		expect(readdirSync(checkout)).toEqual([])
 	})
 
-	it('refuses a .ken that is a folder or a dangling link, which marks no root', () => {
-		const folder = fresh()
-		mkdirSync(join(folder, '.ken'))
-		const dangling = fresh()
-		symlinkSync('nowhere', join(dangling, '.ken'))
-		for (const at of [folder, dangling]) {
-			const r = ken(['init', at], dir)
-			expect(r.status).toBe(1)
-			expect(r.stderr).toContain(`${at}/.ken is there but is not a file`)
-			expect(existsSync(join(at, '.repos.index'))).toBe(false)
+	it('refuses a file it owns that is a folder or a dangling link, before making anything', () => {
+		for (const name of ['.ken', '.repos.index', '.gitignore']) {
+			const folder = fresh()
+			mkdirSync(join(folder, name))
+			const dangling = fresh()
+			symlinkSync('nowhere', join(dangling, name))
+			for (const at of [folder, dangling]) {
+				const r = ken(['init', at], dir)
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`${at}/${name} is there but is not a file`)
+				expect(readdirSync(at)).toEqual([name])
+			}
 		}
 	})
 

@@ -36,7 +36,7 @@ export const setSetting = (text: string, key: string, value: string) => {
 export type Stanza = { kind: 'repo' | 'owner'; key: string; fields: Map<string, string> }
 
 const FIELD = /^([A-Za-z0-9_-]+):(?:[ \t](.*))?$/
-const KEY = {
+export const KEY = {
 	repo: /^[a-z0-9._-]+\/[a-z0-9._-]+\/[a-z0-9._-]+$/,
 	owner: /^[a-z0-9._-]+\/[a-z0-9._-]+$/
 }

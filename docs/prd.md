@@ -245,8 +245,8 @@ runs outside a root too, without the root's `.bin/`.
   Refused, before anything is made, when the root is in git and its git does not ignore
   `.repos/`, naming the `.gitignore` line; and for the root's own key (9). Clone to
   `.repos/<key>` if missing: blobless unless `.ken` says `clone.blobless=false`, a key alone
-  from `https://<key>.git`, a failed clone leaving no folder. A host or owner folder that is
-  a link is refused, since a clone under it would be outside the root. The `mkdir` of the
+  from `https://<key>.git`, a failed clone leaving no folder. `.repos`, a host or an owner
+  folder that is a link is refused, since a clone under it would be outside the root. The `mkdir` of the
   clone's folder is the claim: of two gets at once one clones, and the other waits for it
   and uses its clone. A clone already there, a folder whose own `.git` git takes as its
   repo, is used as is, no fetch; anything else there is refused untouched, naming the `mv`

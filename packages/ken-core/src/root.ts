@@ -103,3 +103,8 @@ export const checkFormat = (root: string) => {
 			'then rerun; `ken version` says which ken runs.'
 		)
 }
+
+/** The root as `findRoot` finds it, or undefined when there is none to find: KEN_ROOT unset and
+ * no `.ken` at or above the current folder. */
+export const rootIfAny = () =>
+	process.env.KEN_ROOT || nearest(realpathSync.native(process.cwd())) ? findRoot() : undefined

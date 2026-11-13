@@ -285,6 +285,7 @@ runs outside a root too, without the root's `.bin/`.
   unknown fields are kept. Says what it set and where.
 - **`help [<command>]`, `<command> --help`.** Every core command with examples, then the
   extensions found, grouped by where each was found, one that shadows another saying so.
+  `help <name>` of an extension runs `ken <name> --help`.
 - **`version`.** The version of the package ken runs from, and the newest format it reads.
 - **`ken <name> ...`.** Decision 12: the first `ken-<name>` in the lookup order, run with
   `KEN_ROOT` the real root, its arguments, stdio and exit status its own. Not found, ken

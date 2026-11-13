@@ -464,6 +464,10 @@ describe('session digests', { timeout: 30_000 }, () => {
 		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe(
 			'abc-123:3:assistant Rayleigh scattering.\nold:7:Rayleigh, before\n'
 		)
+		// searched by grep, as before: a basic regular expression, where + ( ) ? are literal
+		writeFileSync(join(root, '.sessions/old.md'), 'a+b (x)? here\naaab\n')
+		expect(run({}, 'session', 'grep', 'a+b (x)?').stdout).toBe('old:1:a+b (x)? here\n')
+		expect(run({}, 'session', 'grep', 'a\\{3\\}b').stdout).toBe('old:2:aaab\n')
 		rmSync(join(root, '.sessions/old.md'))
 	})
 

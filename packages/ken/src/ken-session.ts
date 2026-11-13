@@ -5,6 +5,7 @@
 // searches every digest, one `<id>:<n>:<kind> <text>` per entry that matches. A digest from
 // before, .sessions/<id>.md, is printed whole and grepped by line. The folder is hidden, so a
 // grep of the root skips it.
+import { spawnSync } from 'node:child_process'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { cut, type Obj, objects, rootOf, strftime, wantsHelp } from './shared.ts'
@@ -112,9 +113,11 @@ if (first === 'grep') {
 			1,
 			false
 		)
+	const jsonl = files.filter((f) => f.endsWith('.jsonl'))
+	const md = files.filter((f) => f.endsWith('.md'))
 	let pattern = /$^/
 	try {
-		pattern = regex(second)
+		if (jsonl.length) pattern = regex(second)
 	} catch {
 		stop(
 			`ken session grep: '${second}' is no pattern ken reads, a regular expression; quote what is meant literally.`,
@@ -132,19 +135,24 @@ if (first === 'grep') {
 					? e.summary
 					: (e.handoff ?? '')
 	const found: string[] = []
-	for (const f of files.filter((f) => f.endsWith('.jsonl')))
+	for (const f of jsonl)
 		for (const e of entries(read(join(dir, f)) ?? '')) {
 			const text = String(said(e))
 			if (pattern.test(text))
 				found.push(`${f.slice(0, -'.jsonl'.length)}:${e.id}:${e.kind} ${collapse(text)}`)
 		}
-	for (const f of files.filter((f) => f.endsWith('.md')))
-		(read(join(dir, f)) ?? '')
-			.replace(/\n$/, '')
-			.split('\n')
-			.forEach((line, i) => {
-				if (pattern.test(line)) found.push(`${f.slice(0, -'.md'.length)}:${i + 1}:${line}`)
-			})
+	// A digest from before is searched as it always was, by grep, its pattern a basic regular
+	// expression; /dev/null makes grep name the file however many there are.
+	if (md.length) {
+		const r = spawnSync('grep', ['-n', '-e', second, '--', ...md, '/dev/null'], {
+			cwd: dir,
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'inherit']
+		})
+		if (r.status !== 0 && r.status !== 1) process.exit(2)
+		for (const line of r.stdout.split('\n').filter(Boolean))
+			found.push(line.replace(/^([^:]*)\.md:/, '$1:'))
+	}
 	if (!found.length) process.exit(1)
 	process.stdout.write(`${found.join('\n')}\n`)
 	process.exit(0)

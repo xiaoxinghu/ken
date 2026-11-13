@@ -158,9 +158,10 @@ export const get = (args: string[]) => {
 		}
 		checkClone(clone, key, again)
 		// another get of an existing repo may hold git's config lock, setting the same: wait, retry
+		// true in the clone's own config, whatever a global one says
 		const relative = () =>
-			git(clone, 'config', '--get', 'worktree.useRelativePaths').ok ||
-			git(clone, 'config', 'worktree.useRelativePaths', 'true').ok
+			git(clone, 'config', '--local', '--type=bool', '--get', 'worktree.useRelativePaths').out ===
+				'true' || git(clone, 'config', '--local', 'worktree.useRelativePaths', 'true').ok
 		if (!relative() && !(sleep(1000) && relative()))
 			die(
 				`could not set worktree.useRelativePaths in ${clone}, which lets its <owner>/ folder and`,
@@ -260,7 +261,8 @@ const register = (root: string, key: string, clone: string) => {
 		const desc =
 			isFile(join(clone, '.ken')) && isFile(readme)
 				? readFileSync(readme, 'utf8')
-						.split('\n')
+						// every line break the index's reader stops on, so the desc is one line
+						.split(/\r\n|[\n\r\u2028\u2029]/)
 						.find((line) => /^[^#\s<![|`-]/.test(line))
 						?.trimEnd()
 				: undefined

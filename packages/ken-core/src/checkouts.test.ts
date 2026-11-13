@@ -116,7 +116,7 @@ beforeAll(() => {
 	remote('agents', { 'AGENTS.md': 'agents\n' })
 	remote('team', {
 		'.ken': 'ken.format=1\n',
-		'README.md': '# team\n\n<!-- a comment -->\nThe team knowledge base.  \n\nMore.\n'
+		'README.md': '# team\r\n\r\n<!-- a comment -->\r\nThe team knowledge base.\u2028More.  \r\n'
 	})
 	write(join(dir, 'old-git/git'), '#!/bin/sh\necho "git version 2.47.1"\n', 0o755)
 })
@@ -343,6 +343,8 @@ describe('index set', () => {
 			['set', W, 'desc='],
 			['set', W, 'desc= '],
 			['set', W, 'doc=a\nb'],
+			['set', W, 'doc=a\rb'],
+			['set', W, 'doc=a\u2028b'],
 			['set', W, 'a.b=c'],
 			['set', W, 'kind'],
 			['set', W, 'repo=x.io/a/b'],
@@ -420,9 +422,11 @@ describe('get', () => {
 		)
 	})
 
-	it('uses a repo made with git init where the clone belongs, as it is', () => {
+	it('uses a repo made with git init where the clone belongs, as it is, relative paths on', () => {
 		const at = fresh()
 		repo(cloneOf(at))
+		// relative paths are set in the clone even where they were turned off
+		git(cloneOf(at), 'config', 'worktree.useRelativePaths', 'false')
 		const r = ken(['get', KEY], at)
 		expect(r.stdout).toBe(`${cloneOf(at)}\n`)
 		expect(r.stderr).toContain(registered(at))
@@ -565,7 +569,13 @@ describe('get', () => {
 
 	it('a moved root keeps its checkouts: get prints them at the new path, and git works there', () => {
 		const at = fresh()
-		ken(['get', KEY, '-b', 'feat/x'], at)
+		// relative paths even where the global config turns them off
+		const off = join(dir, 'gitconfig-off')
+		write(
+			off,
+			`${readFileSync(join(dir, 'gitconfig'), 'utf8')}[worktree]\n\tuseRelativePaths = false\n`
+		)
+		expect(ken(['get', KEY, '-b', 'feat/x'], at, { GIT_CONFIG_GLOBAL: off }).status).toBe(0)
 		const moved = `${at}-moved`
 		renameSync(at, moved)
 		const wt = `${cloneOf(moved)}.feat-x`

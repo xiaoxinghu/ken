@@ -8,6 +8,9 @@ import { alive, sleep } from './git.ts'
 import { parseKey, redact } from './keys.ts'
 import { findRoot } from './root.ts'
 
+/** Whether `value` holds no line break, of any kind the index's reader would stop on. */
+export const oneLine = (value: string) => !/[\n\r\u2028\u2029]/.test(value)
+
 /** The text of the index `file`, empty when there is none. */
 const readText = (file: string) => {
 	const stat = lstatSync(file, { throwIfNoEntry: false })
@@ -110,9 +113,9 @@ export const indexSet = (args: string[]) => {
 				"letters, digits, _ and -, and repo is the entry's key line, not a field.",
 				`Run e.g. \`ken index set ${key} kind=frontend\`.`
 			)
-		if (value.includes('\n'))
+		if (!oneLine(value))
 			die(
-				`the value of ${name} has a newline, and an index value is one line. Write longer text`,
+				`the value of ${name} has a line break, and an index value is one line. Write longer text`,
 				`in a page, then run \`ken index set ${key} doc=<path>\`.`
 			)
 		if (value.trim() === '')

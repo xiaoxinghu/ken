@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { day, env, ken, kenTask, newRoot, write } from './testing.ts'
+import { day, env, harness, KERNELS, kenTask, newRoot, write } from './testing.ts'
 
 const canonical = (heading: string, ...fields: string[]) =>
 	['---', 'status: todo', `created: ${day(0)}`, ...fields, '---', '', `# ${heading}`, ''].join('\n')
@@ -110,9 +110,23 @@ describe('ken task add', () => {
 		expect(r.stderr).toContain('is not a repo key')
 	})
 
+	it('of two adds of one path at once, exactly one wins', async () => {
+		const root = newRoot()
+		const run = () =>
+			new Promise<number | null>((done) =>
+				spawn('ken', ['task', 'add', 'race'], { cwd: root, env: env(root) }).on('close', done)
+			)
+		const codes = await Promise.all([run(), run(), run(), run()])
+		expect(codes.sort()).toEqual([0, 1, 1, 1])
+	})
+})
+
+describe.each(KERNELS)('ken task add, in a clone, under the %s kernel', (kernel) => {
+	const { clonePath, kenTask, newRoot } = harness(kernel)
+
 	it("writes the repo of the clone it runs in, saying so, and -r's over it", () => {
 		const root = newRoot()
-		const clone = join(`${root}.src`, 'github.com/acme/portal')
+		const clone = clonePath(root, 'github.com/acme/portal')
 		mkdirSync(clone, { recursive: true })
 		execFileSync('git', ['init', '-q', clone])
 		const r = kenTask(root, ['add', 'fix-login'], clone)
@@ -125,15 +139,5 @@ describe('ken task add', () => {
 		expect(readFileSync(join(root, 'tasks/other.md'), 'utf8')).toBe(
 			canonical('other', 'repo: github.com/acme/api')
 		)
-	})
-
-	it('of two adds of one path at once, exactly one wins', async () => {
-		const root = newRoot()
-		const run = () =>
-			new Promise<number | null>((done) =>
-				spawn('sh', [ken, 'task', 'add', 'race'], { cwd: root, env: env(root) }).on('close', done)
-			)
-		const codes = await Promise.all([run(), run(), run(), run()])
-		expect(codes.sort()).toEqual([0, 1, 1, 1])
 	})
 })

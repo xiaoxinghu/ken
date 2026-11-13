@@ -3,8 +3,12 @@
 import { readFileSync } from 'node:fs'
 import { die, KenError, q } from './die.ts'
 import { type Bundled, dispatch, extensions } from './dispatch.ts'
+import { get } from './get.ts'
 import { init } from './init.ts'
-import { FORMAT, findRoot, locateRoot } from './root.ts'
+import { path, which } from './layout.ts'
+import { indexSet } from './registry.ts'
+import { repos } from './repos.ts'
+import { FORMAT, locateRoot } from './root.ts'
 
 const VERSION: string = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8')
@@ -43,21 +47,88 @@ cd ~/ken && ken init   # a rerun, or a clone of a root: nothing is created`,
 		run: init
 	},
 	path: {
-		usage: 'path root',
-		summary: 'Print the root ken acts on, a real path.',
-		details: `The root is KEN_ROOT when set, else the nearest folder holding .ken at or above the
-current one. Outside one, ken stops, saying so.`,
+		usage: 'path root | code <key> [<branch>] | <key>:<path>[#<symbol>]',
+		summary: 'Print a path, whether or not it exists. Nobody pastes absolute paths.',
+		details: `  root                     the root ken acts on, a real path: KEN_ROOT when set, else
+                           the nearest folder holding .ken at or above the current one
+  code <key> [<branch>]    the clone, <root>/.repos/<key>, or the worktree of <branch>
+                           beside it, <key>.<branch> with / as -. <key> is
+                           <host>/<owner>/<repo> or a git URL.
+  <key>:<path>[#<symbol>]  a code reference: <clone>/<path> when the repo is cloned, the
+                           symbol yours to find in the file. Not cloned: https://<key>.git,
+                           and stderr says to run \`ken get <key>\`; exit 0.`,
 		examples: `ken path root
-cd "$(ken path root)"
-KEN_ROOT=~/work ken path root`,
-		run: (args) => {
-			if (args.length !== 1 || args[0] !== 'root')
-				die(
-					`ken path takes root, got ${args.length ? args.map(q).join(' ') : 'nothing'}.`,
-					'Run `ken path root`.'
-				)
-			return `${findRoot()}\n`
-		}
+ken path code github.com/acme/join-web
+ken path code github.com/acme/join-web feat/login   # .../join-web.feat-login
+cd "$(ken path code git@github.com:acme/join-web.git PROJ-123)"
+ken path github.com/acme/join-web:src/join.ts#submit`,
+		run: path
+	},
+	which: {
+		usage: 'which [<path>]',
+		summary:
+			'The reverse of `ken path code`: the key of the checkout a path is in, and its branch.',
+		details: `  <path>   default the current folder, compared as a real path against <root>/.repos.
+           Prints \`<key> <clone|worktree> [<branch>]\`. A checkout is asked of git, a
+           worktree keyed by its clone; a path not checked out yet is answered from its
+           shape with no branch: <repo>.<x> beside a clone <repo> is its worktree. A
+           detached HEAD prints no branch. Outside a checkout folder,
+           <root>/.repos/<host>/<owner>/<folder>, it exits 1 saying so and what to run.`,
+		examples: `ken which
+ken which "$(ken path code github.com/acme/join-web feat/login)"   # github.com/acme/join-web worktree feat/login
+ken which "$(ken path code github.com/acme/api)/src/x.ts"   # not cloned yet: github.com/acme/api clone`,
+		run: which
+	},
+	get: {
+		usage: 'get <url|key> [-b <branch> [--from <ref>]]',
+		summary:
+			'Make a repo ready in <root>/.repos and print its clone, or with -b a worktree, the only thing on stdout.',
+		details: `  <url|key>        <host>/<owner>/<repo>, cloned from https://<key>.git, or a git URL.
+  -b <branch>      the worktree of <branch> beside the clone, <root>/.repos/<key>.<branch>
+                   with / as -: a new branch from the default branch (what the clone has
+                   checked out) as it stands; an existing one checked out there, or where it
+                   already is. The default branch prints the clone. Nothing is copied or run.
+  --from <ref>     start a new branch from <ref>, a tag, commit or branch, instead.
+Missing, the repo is cloned: blobless, unless .ken says clone.blobless=false; a failed clone
+leaves no folder. A clone already there is used as it is, no fetch; anything else there, or
+at the worktree's folder (in any case), is refused untouched. A fresh clone or worktree with
+AGENTS.md and no CLAUDE.md gets CLAUDE.md -> AGENTS.md, excluded from git. Every time: the
+clone gets worktree.useRelativePaths and \`git worktree repair\`, and when .repos.index does
+not list the key, an entry. Refused when the root is in git and .repos/ is not in its
+.gitignore, and for the root's own repo. Needs git 2.48 or newer.`,
+		examples: `ken get github.com/acme/join-web
+ken get git@github.com:acme/join-web.git
+cd "$(ken get github.com/acme/join-web)"
+cd "$(ken get github.com/acme/join-web -b feat/login)"   # .../join-web.feat-login
+ken get github.com/acme/join-web -b fix/pay --from v1.2.0`,
+		run: get
+	},
+	repos: {
+		usage: 'repos [--porcelain]',
+		summary: 'Every repo .repos.index lists, against the checkouts in <root>/.repos, offline.',
+		details: `One row per key, sorted: <key>  listed|not listed, cloned on <branch>|not cloned; then its
+desc, its worktrees, and each stray with the command that fixes it: no desc; a clone no entry
+lists; a clone not on its default branch, origin/HEAD; a worktree whose folder does not match
+its branch. A clone with no remote-tracking branch, nothing fetched or pushed, is local only.
+  --porcelain   one line per key, tab-separated: key, desc, listed (true or false),
+                cloned (true or false), branch; empty fields empty.`,
+		examples: `ken repos
+ken repos --porcelain | awk -F"\t" '$3 == "true" && $4 == "false" { print $1 }'   # listed, not cloned
+rg -l github.com/acme/join-web "$(ken path root)"   # the pages that mention a repo`,
+		run: repos
+	},
+	index: {
+		usage: 'index set <key> <field>=<value>...',
+		summary: 'Write fields into the index, .repos.index, creating the file and the entry.',
+		details: `A field name is letters, digits, _ and -, not repo; a value is the rest of the argument as
+written, one line, not empty, a list its items separated by spaces: tags="sales join". Only
+that one stanza changes: every other line, comment and order is kept, and the file is written
+beside and renamed over. To remove a field or an entry, edit the file: a stanza is the lines
+from \`repo: <key>\` to the next blank line (docs/files.md).`,
+		examples: `ken index set github.com/acme/join-web desc="Front end for the join funnel." kind=frontend
+ken index set github.com/acme/join-web tags="sales join" depends_on=join-api
+ken index set github.com/acme/join-web doc=systems/join.md   # the page that says more`,
+		run: indexSet
 	},
 	help: {
 		usage: 'help [<command>]',

@@ -229,10 +229,13 @@ describe('path root', () => {
 		)
 	})
 
-	it('refuses any other form of path', () => {
-		const r = ken(['path', 'code', 'github.com/acme/api'], rootWith(KEN))
+	it('refuses any other form of path, and arguments after root', () => {
+		const r = ken(['path', 'nope'], rootWith(KEN))
 		expect(r.status).toBe(1)
-		expect(r.stderr).toContain('ken path takes root, got code github.com/acme/api')
+		expect(r.stderr).toContain('ken path does not take nope: it takes root, code <key> [<branch>]')
+		expect(ken(['path', 'root', 'x'], rootWith(KEN)).stderr).toContain(
+			'ken path root takes no arguments'
+		)
 	})
 })
 
@@ -244,7 +247,11 @@ describe('help, version and the rest', () => {
 		for (const line of [
 			'  init [<dir>]',
 			'      ken init ~/ken',
-			'  path root',
+			'  path root | code <key> [<branch>] | <key>:<path>[#<symbol>]',
+			'  which [<path>]',
+			'  get <url|key> [-b <branch> [--from <ref>]]',
+			'  repos [--porcelain]',
+			'  index set <key> <field>=<value>...',
 			'  help [<command>]',
 			'  version'
 		])
@@ -284,17 +291,17 @@ describe('help, version and the rest', () => {
 
 	it('runs a command it does not have as an extension, saying where it looked when none', () => {
 		const root = rootWith(KEN)
-		const r = ken(['repos'], root)
+		const r = ken(['nope'], root)
 		expect(r.status).toBe(1)
 		expect(r.stderr).toContain(
-			'ken: repos is not a ken command, and no executable ken-repos was found. Looked in, in order:\n  the core commands: init, path, help, version\n'
+			'ken: nope is not a ken command, and no executable ken-nope was found. Looked in, in order:\n  the core commands: init, path, which, get, repos, index, help, version\n'
 		)
 		expect(r.stderr).toContain('\n  the bundled commands: none\n')
 		mkdirSync(join(root, '.bin'))
-		writeFileSync(join(root, '.bin/ken-repos'), '#!/bin/sh\necho "repos of $KEN_ROOT"\n', {
+		writeFileSync(join(root, '.bin/ken-nope'), '#!/bin/sh\necho "nope of $KEN_ROOT"\n', {
 			mode: 0o755
 		})
-		expect(ken(['repos'], root).stdout).toBe(`repos of ${root}\n`)
+		expect(ken(['nope'], root).stdout).toBe(`nope of ${root}\n`)
 	})
 })
 

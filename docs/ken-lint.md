@@ -1,7 +1,7 @@
 # ken-lint — PRD
 
 The knowledge-base lint of a ken root. Its own package, `@unclex/ken-lint`, installed beside
-`ken` and reached as `ken lint` through `PATH` ([PRD](prd.md), decision 10). It is a package
+`ken` and reached as `ken lint` through `PATH` ([PRD](prd.md), decision 12). It is a package
 and not a `.bin/` script because it parses Markdown as CommonMark
 (`mdast-util-from-markdown`), so a link, a code span and a link's label are what a Markdown
 reader sees, never a guess at where one ends. It reads `.ken` for the layers and the task

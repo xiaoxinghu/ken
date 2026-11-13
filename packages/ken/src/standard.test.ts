@@ -82,7 +82,7 @@ describe('ken log', { timeout: 30_000 }, () => {
 })
 
 describe('ken status', { timeout: 30_000 }, () => {
-	it('names the CLI, lists the repos and settings, exits 0, and with no stdin writes no pointer', () => {
+	it('names the CLI, lists the repos, settings and ready tasks, exits 0, and with no stdin writes no pointer', () => {
 		const root = newRoot()
 		const r = ken(['status'], { cwd: join(root, 'sub/deep') })
 		expect(r.status).toBe(0)
@@ -93,8 +93,8 @@ describe('ken status', { timeout: 30_000 }, () => {
 		)
 		expect(r.stdout).toContain('\n\nSettings, .ken:\n  # ken settings')
 		expect(r.stdout).toContain('\n  ken.format=1\n')
-		// no ken-task anywhere, so no ready tasks; no log.md, so no recent lines
-		expect(r.stdout).not.toContain('task')
+		// the bundled ken task: the ready tasks, none; no log.md, so no recent lines
+		expect(r.stdout).toMatch(/\n  ken\.format=1\n\nNo task in .*\/tasks is ready\./)
 		expect(r.stdout).not.toContain('log.md')
 		expect(existsSync(join(dir, '.local/state/ken', root.replaceAll('/', '-')))).toBe(false)
 	})

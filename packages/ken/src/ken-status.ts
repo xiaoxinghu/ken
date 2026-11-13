@@ -81,12 +81,9 @@ try {
 } catch (e) {
 	say(`  ${(e as Error).message}`)
 }
-// The ready tasks, when a `ken task` is there: bundled, in the root's .bin/ or on PATH.
-const ready = ken('task', 'ready')
-if (!ready.startsWith('ken: task is not a ken command')) {
-	say()
-	out.push(ready)
-}
+// The ready tasks: `ken task` is bundled, or the root's .bin/ replaces it.
+say()
+out.push(ken('task', 'ready'))
 // The last entries of the timeline the agents write with `ken log`, never the whole file. A
 // union merge can leave lines out of order; sorting puts back those that share an offset.
 let log = ''

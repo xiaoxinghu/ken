@@ -89,13 +89,17 @@ describe('dispatch', () => {
 		expect(ken(['lint'], root, { path }).stdout).toBe('ken lint: no errors in 0 pages.\n')
 		let help = ken(['help'], root, { path }).stdout
 		expect(help).toContain(`  the root's .bin/, ${root}/.bin\n    path, shadowed by the core`)
-		expect(help).toContain('\n  bundled\n    digest\n    lint\n    log\n    session\n    status\n    task\n')
+		expect(help).toContain(
+			'\n  bundled\n    digest\n    lint\n    log\n    session\n    status\n    task\n'
+		)
 		expect(help).toContain(`\n  PATH, ${path}\n    lint, shadowed by the bundled one\n    onpath\n`)
 
 		script(join(root, '.bin'), 'lint', 'echo lint from .bin')
 		expect(ken(['lint'], root, { path }).stdout).toBe('lint from .bin\n')
 		help = ken(['help'], root, { path }).stdout
-		expect(help).toContain(`\n  bundled\n    digest\n    lint, shadowed by ${root}/.bin/ken-lint\n    log\n`)
+		expect(help).toContain(
+			`\n  bundled\n    digest\n    lint, shadowed by ${root}/.bin/ken-lint\n    log\n`
+		)
 	})
 
 	it('outside any root, runs a bundled or PATH command with KEN_ROOT unset, skipping .bin/', () => {

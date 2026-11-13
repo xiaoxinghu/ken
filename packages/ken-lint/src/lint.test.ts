@@ -4,7 +4,6 @@ import {
 	mkdirSync,
 	mkdtempSync,
 	realpathSync,
-	rmSync,
 	symlinkSync,
 	writeFileSync
 } from 'node:fs'
@@ -14,8 +13,7 @@ import { beforeEach, describe, expect, it } from 'vitest'
 
 let dir: string
 let root: string
-let src: string // KEN_SRC, where the clones are
-let LAYER: string // the atlas layer's clone, linked at the root as atlas
+let clone: string // the clone of example.com/acme/web, in the root's .repos/
 let env: NodeJS.ProcessEnv
 
 const run = (command: string, cwd = root) =>
@@ -39,24 +37,24 @@ const commit = (cwd: string, paths = '.', date?: string) => {
 	expect(r.stderr).toBe('')
 }
 
-// A clean root, with a section, a cloned repo and a layer, each page listed once and every
-// link and code reference resolving. `ken` and `ken-lint` are on PATH as a user installs them,
-// so `ken lint` goes through dispatch.
+// A clean root, with a section and a cloned repo, each page listed once and every link and code
+// reference resolving. `ken`, which bundles `ken lint`, is on PATH as a user installs it, so
+// `ken lint` goes through dispatch.
 beforeEach(() => {
 	dir = realpathSync.native(mkdtempSync(join(tmpdir(), 'ken-lint-')))
 	root = join(dir, 'my ken')
-	src = join(dir, 'src')
-	LAYER = join(src, 'example.com/acme/atlas')
+	clone = join(root, '.repos/example.com/acme/web')
 	const bin = join(dir, 'bin')
 	mkdirSync(bin)
-	symlinkSync(join(import.meta.dirname, '../../../ken'), join(bin, 'ken'))
-	symlinkSync(join(import.meta.dirname, 'cli.ts'), join(bin, 'ken-lint'))
+	writeFileSync(
+		join(bin, 'ken'),
+		`#!/bin/sh\nexec '${process.execPath}' '${join(import.meta.dirname, '../../ken/src/cli.ts')}' "$@"\n`,
+		{ mode: 0o755 }
+	)
 	const git = execFileSync('sh', ['-c', 'command -v git'], { encoding: 'utf8' }).trim()
 	env = {
 		HOME: join(dir, 'home'),
 		XDG_CONFIG_HOME: join(dir, 'config'),
-		KEN_ROOT: root,
-		KEN_SRC: src,
 		PATH: [bin, dirname(process.execPath), dirname(git), '/usr/bin', '/bin'].join(':')
 	}
 	mkdirSync(root)
@@ -77,61 +75,54 @@ beforeEach(() => {
 		'systems/join.md':
 			'The form is `example.com/acme/web:src/app.ts#start`, [started](example.com/acme/web:src/app.ts) ' +
 			'by a page (example.com/acme/web:src/app/[id]/page.ts), [example.com/acme/web:src/app.ts](design(v2).md), ' +
-			'**example.com/acme/web:src/app.ts** in bold, [encoded](example.com/acme/web:src/app/%5Bid%5D/page.ts), [spaced](example.com/acme/web:src/my%20file.ts); the team is in [the atlas](../atlas/teams/sales.md).\n',
-		[join(src, 'example.com/acme/web/src/app.ts')]: 'export const start = 1\n',
-		[join(src, 'example.com/acme/web/src/my file.ts')]: 'export default 1\n',
-		[join(src, 'example.com/acme/web/src/app/[id]/page.ts')]: 'export default 1\n',
-		[join(src, 'example.com/acme/web/src/app/(auth)/page.ts')]: 'export default 1\n',
+			'**example.com/acme/web:src/app.ts** in bold, [encoded](example.com/acme/web:src/app/%5Bid%5D/page.ts), [spaced](example.com/acme/web:src/my%20file.ts).\n',
+		[join(clone, 'src/app.ts')]: 'export const start = 1\n',
+		[join(clone, 'src/my file.ts')]: 'export default 1\n',
+		[join(clone, 'src/app/[id]/page.ts')]: 'export default 1\n',
+		[join(clone, 'src/app/(auth)/page.ts')]: 'export default 1\n',
+		// the clone's own pages, listed by no section here
+		[join(clone, 'README.md')]: '# Web\n',
+		[join(clone, 'docs/stray.md')]: '# Stray\n',
 		// tasks, not pages, in a task folder below a section
 		'work/README.md': '# Work\n',
-		'work/tasks/fix-join.md': 'Fix the join form.\n',
-		[`${LAYER}/README.md`]: '# Atlas\n\n- [teams](teams/README.md)\n',
-		[`${LAYER}/teams/README.md`]: '# Teams\n\n- [sales](sales.md): who sells.\n',
-		[`${LAYER}/teams/sales.md`]: '# Sales\n',
-		// a root itself, with its own tasks in its default task folder
-		[`${LAYER}/.ken`]: "# the layer's settings\n",
-		[`${LAYER}/tasks/hire.md`]: 'Hire a seller.\n'
+		'work/tasks/fix-join.md': 'Fix the join form.\n'
 	})
 	// a link back into a section walks nothing twice
 	symlinkSync('.', join(root, 'systems/again'))
 	symlinkSync('pages', join(root, 'systems/alias'))
 	// the task folder, first reached through a link to the section above it
 	symlinkSync('work', join(root, 'a-work'))
-	run(`git init -q '${LAYER}'`)
-	commit(LAYER)
-	symlinkSync(LAYER, join(root, 'atlas'))
-	appendFileSync(join(root, '.ken'), 'task.folder=work/tasks\nlayer.atlas=example.com/acme/atlas\n')
+	// the checkouts, never walked, even through a link
+	symlinkSync('.repos/example.com/acme/web', join(root, 'web'))
+	appendFileSync(join(root, '.ken'), 'task.folder=work/tasks\n')
 }, 30_000)
 
 describe('ken lint', { timeout: 30_000 }, () => {
-	it('passes a clean root with a layer', () => {
+	it('passes a clean root', () => {
 		const r = run('ken lint')
 		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe('ken lint: no errors in 4 pages.\n')
+		expect(r.stdout).toBe('ken lint: no errors in 3 pages.\n')
 		expect(r.status).toBe(0)
 	})
 
-	it('reports each problem once, with its file, in the root and through the layer link', () => {
+	it('reports each problem once, with its file', () => {
 		const pad = (n: number) => 'line\n'.repeat(n)
 		write({
 			'systems/lost.md': 'See `example.com/acme/api:src/x.ts`, not cloned here.\n',
 			'flows/README.md':
 				'# Flows\n\n- [join](../systems/join.md): listed twice.\n\ngit/acme/web:src/gone.ts\n\n[lost]: ../systems/lost.md\n',
-			[join(src, 'git/acme/web/src/app.ts')]: 'export const start = 1\n',
+			[join(root, '.repos/git/acme/web/src/app.ts')]: 'export const start = 1\n',
 			'systems/old notes.md': '# Old\n',
 			'overview.md': '# Overview\n'
 		})
 		appendFileSync(join(root, 'systems/README.md'), '- [old](old%20notes.md): settled long ago.\n')
 		commit(root, "'systems/old notes.md'", '2020-01-01T00:00:00')
-		write({ [`${LAYER}/teams/old.md`]: '# Old team\n' })
-		appendFileSync(join(LAYER, 'teams/README.md'), '- [old](old.md): disbanded.\n')
-		commit(LAYER, 'teams/old.md', '2020-01-01T00:00:00')
 		appendFileSync(join(root, 'README.md'), pad(60))
 		appendFileSync(join(root, 'AGENTS.md'), pad(40))
+		appendFileSync(join(root, 'flows/README.md'), pad(150))
 		appendFileSync(join(root, 'systems/join.md'), 'example.com/acme/web:src/app/(auth)/gone.ts\n')
-		appendFileSync(join(LAYER, 'teams/README.md'), pad(150))
 		appendFileSync(
-			join(LAYER, 'teams/sales.md'),
+			join(root, 'systems/design(v2).md'),
 			'[the old team](gone.md)\n\n[new]: <new team.md>\n'
 		)
 
@@ -145,117 +136,30 @@ describe('ken lint', { timeout: 30_000 }, () => {
 			[
 				'error AGENTS.md', // over 40 lines
 				'error README.md', // the front page over 60
-				'error atlas/teams/README.md', // a section README over 150, in the layer
-				'error atlas/teams/sales.md:2', // a link to a file that does not exist
-				'error atlas/teams/sales.md:4', // and a reference-style one
+				'error flows/README.md', // a section README over 150
+				'error systems/design(v2).md:8', // a link to a file that does not exist
+				'error systems/design(v2).md:10', // and a reference-style one
 				'error overview.md', // a page at the top, in no section
 				'error flows/README.md:5', // a reference to a file not in the clone, a host with no dot
 				'error systems/join.md', // listed in two section READMEs
 				'error systems/join.md:2', // a reference to a missing file under (auth)/, on its line
 				'error systems/lost.md', // listed in none: a definition no link uses renders nothing
-				'note systems/old notes.md', // nobody links to it, untouched since 2020
-				'note atlas/teams/old.md' // and in the layer
+				'note systems/old notes.md' // nobody links to it, untouched since 2020
 			].sort()
 		)
 		// the archive command keeps a name with a space one word
-		expect(r.stdout).toContain("git mv -- 'systems/old notes.md' '.archive/systems/old notes.md'")
-		// a layer's page moves in the layer's clone, reached through its link
 		expect(r.stdout).toContain(
-			`cd "$(ken path root)"/'atlas' && mkdir -p -- '.archive/teams' && git mv -- 'teams/old.md' '.archive/teams/old.md'`
+			`cd "$(ken path root)" && mkdir -p -- '.archive/systems' && git mv -- 'systems/old notes.md' '.archive/systems/old notes.md'`
 		)
 		// the uncloned repo is counted, not an error
 		expect(r.stdout).toMatch(/^note: .*1 code reference.*example\.com\/acme\/api/m)
 	})
 
-	it("walks a layer's own layer as a layer, and skips an offline one", () => {
-		const HANDBOOK = join(src, 'example.com/acme/handbook')
-		write({
-			[`${HANDBOOK}/.ken`]: 'task.folder=todo\n',
-			[`${HANDBOOK}/README.md`]: '# Handbook\n',
-			[`${HANDBOOK}/guide/README.md`]: '# Guide\n\n- [start](start.md): day one.\n',
-			[`${HANDBOOK}/guide/start.md`]: '# Start\n',
-			// its tasks, in the folder its own .ken names, are not pages
-			[`${HANDBOOK}/todo/write.md`]: 'Write the guide.\n'
-		})
-		run(`git init -q '${HANDBOOK}'`)
-		appendFileSync(join(LAYER, '.ken'), 'layer.handbook=example.com/acme/handbook\n')
-		// links atlas/handbook to its clone, as installing a layer does
-		expect(run('ken init').status).toBe(0)
-		// offline: listed, its link dangling, no clone here; after init, which would try to clone it
-		appendFileSync(join(root, '.ken'), 'layer.gone=example.com/acme/gone\n')
-		symlinkSync(join(src, 'example.com/acme/gone'), join(root, 'gone'))
-		// links into it have nothing to check against: a note, not an error
-		write({
-			'systems/pages/intro.md':
-				'# Intro\n\nSee [gone](../../gone/x.md), [its page](../../gone/README.md).\n'
-		})
-		const r = run('ken lint')
-		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe(
-			`note: not checked: 2 links into the layer gone, which has no clone here: it may not be pushed yet, or be private. Run \`ken init '${root}'\` to clone it, then \`ken lint\` again.\nken lint: no errors in 5 pages.\n`
-		)
-		expect(r.status).toBe(0)
-	})
-
-	it('a layer with no link, as in a root fresh from git clone, is clean with a note to ken init', () => {
-		rmSync(join(root, 'atlas'))
-		write({ 'README.md': '# My ken\n\n## Layers\n\n- [atlas](atlas/README.md): the team atlas.\n' })
-		const r = run('ken lint')
-		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe(
-			`note: not checked: 2 links into the layer atlas, which is not linked here yet, as in a fresh clone of the root. Run \`ken init '${root}'\` to link it, cloning it if missing, then \`ken lint\` again.\nken lint: no errors in 3 pages.\n`
-		)
-		expect(r.status).toBe(0)
-	})
-
-	it("stops when a layer's .ken cannot be read, rather than guess its task folder", () => {
-		// a layer named . would be the layer itself, walked again as its own layer
-		writeFileSync(join(LAYER, '.ken'), 'layer..=example.com/acme/up\n')
+	it('stops when the task folder is set to nothing, rather than guess it', () => {
+		appendFileSync(join(root, '.ken'), 'task.folder= \n')
 		const r = run('ken lint')
 		expect(r.status).toBe(1)
 		expect(r.stdout).toBe('')
-		expect(r.stderr).toMatch(
-			/\.ken line 1, "layer\.\.=example\.com\/acme\/up", is not a layer line, at the layer atlas, so its task folder and its layers are unknown/
-		)
-	})
-})
-
-describe('ken lint under the new kernel', { timeout: 30_000 }, () => {
-	it('resolves references into .repos/, which it never walks, even through a link', () => {
-		const at = join(dir, 'new root')
-		const bin = join(dir, 'new-bin')
-		mkdirSync(at)
-		mkdirSync(bin)
-		writeFileSync(
-			join(bin, 'ken'),
-			`#!/bin/sh\nexec '${process.execPath}' '${join(import.meta.dirname, '../../ken/src/cli.ts')}' "$@"\n`,
-			{ mode: 0o755 }
-		)
-		env = { ...env, PATH: `${bin}:${env.PATH}` }
-		delete env.KEN_ROOT
-		delete env.KEN_SRC
-		expect(run('git init -q && ken init', at).status).toBe(0)
-		const clone = join(at, '.repos/example.com/acme/web')
-		write({
-			[join(at, 'README.md')]: '# New\n',
-			[join(at, 'systems/README.md')]: '# Systems\n\n- [join](join.md): the join flow.\n',
-			[join(at, 'systems/join.md')]: 'The form is `example.com/acme/web:src/app.ts`.\n',
-			[join(clone, 'src/app.ts')]: 'export const start = 1\n',
-			// the clone's own pages, listed by no section here
-			[join(clone, 'README.md')]: '# Web\n',
-			[join(clone, 'docs/stray.md')]: '# Stray\n'
-		})
-		symlinkSync('.repos/example.com/acme/web', join(at, 'web'))
-		let r = run('ken lint', at)
-		expect(r.stderr).toBe('')
-		expect(r.stdout).toBe('ken lint: no errors in 1 pages.\n')
-		expect(r.status).toBe(0)
-
-		appendFileSync(join(at, 'systems/join.md'), '\nAnd `example.com/acme/web:src/gone.ts`.\n')
-		r = run('ken lint', at)
-		expect(r.stdout).toContain(
-			'error: systems/join.md:3: example.com/acme/web:src/gone.ts names a file not in the clone.'
-		)
-		expect(r.status).toBe(1)
+		expect(r.stderr).toMatch(/\.ken line \d+, "task\.folder= ", sets task\.folder to nothing/)
 	})
 })

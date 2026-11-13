@@ -1,4 +1,0 @@
-# Secrets and machine-local files, which leave the machine through no git push.
-.env
-CLAUDE.local.md
-node_modules

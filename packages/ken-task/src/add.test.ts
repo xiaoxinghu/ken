@@ -2,7 +2,7 @@ import { execFileSync, spawn } from 'node:child_process'
 import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync } from 'node:fs'
 import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
-import { day, env, harness, KERNELS, kenTask, newRoot, write } from './testing.ts'
+import { clonePath, day, env, kenTask, newRoot, write } from './testing.ts'
 
 const canonical = (heading: string, ...fields: string[]) =>
 	['---', 'status: todo', `created: ${day(0)}`, ...fields, '---', '', `# ${heading}`, ''].join('\n')
@@ -121,9 +121,7 @@ describe('ken task add', () => {
 	})
 })
 
-describe.each(KERNELS)('ken task add, in a clone, under the %s kernel', (kernel) => {
-	const { clonePath, kenTask, newRoot } = harness(kernel)
-
+describe('ken task add, in a clone', () => {
 	it("writes the repo of the clone it runs in, saying so, and -r's over it", () => {
 		const root = newRoot()
 		const clone = clonePath(root, 'github.com/acme/portal')

@@ -119,7 +119,7 @@ describe('init', () => {
 	})
 
 	it('leaves a root from before the rewrite alone, naming the migration', () => {
-		const at = rootWith('template.name=agents\nlayer.nib=github.com/acme/atlas\n')
+		const at = rootWith('template.name=agents\n')
 		const r = ken(['init'], at)
 		expect(r.status).toBe(1)
 		expect(r.stderr).toContain('is a root from before the rewrite of ken')

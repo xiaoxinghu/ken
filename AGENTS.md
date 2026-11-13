@@ -10,15 +10,6 @@ the request, no speculative features or abstractions. Every message the CLIs pri
 next step for an agent that sees nothing else: what is the case, why it matters, what to
 run.
 
-## Built beside the old ken
-
-ken is being rewritten in TypeScript, and the owner's root still runs the old one from
-this repo's main checkout, through links: `~/.local/bin/ken` to the file `ken`, `ken-task`
-and `ken-lint` to their `src/cli.ts`. So the new ken is built beside the old one: nothing
-moves or deletes `ken`, `templates/`, `test/`, or the entry files of `packages/ken-task`
-and `packages/ken-lint`, and those two keep working under the old kernel, until the root
-is migrated and the old ken removed in a change of its own.
-
 ## Layout
 
 - `packages/ken-core`, `@unclex/ken-core`: the primitives and the dispatch. Small, meant to
@@ -29,10 +20,6 @@ is migrated and the old ken removed in a change of its own.
 - `packages/ken-task`, `packages/ken-lint`: `ken task` and `ken lint`, bundled by `ken`.
 - `packages/create-ken`, `create-ken`: the files of a root for an agent harness
   (`docs/templates.md`).
-- The old ken, until removed: `ken`, the POSIX `sh` kernel, `templates/agents`, published
-  as the branch `template/agents` by `.github/workflows/templates.yml`, and their tests in
-  `test/`. Fix them only to keep the owner's root working, by their own rules: the hazards
-  comment at the top of `ken`, `shellcheck -s sh` clean, tests run under `sh` and `dash`.
 
 ## TypeScript
 
@@ -50,6 +37,6 @@ is migrated and the old ken removed in a change of its own.
 
 ## Checks
 
-- `pnpm test` (vitest), `pnpm typecheck`, `pnpm lint` (biome and shellcheck): run all
-  three from the root before finishing a change.
+- `pnpm test` (vitest), `pnpm typecheck`, `pnpm lint` (biome): run all three from the root
+  before finishing a change.
 - Add meaningful tests: ask "what does this test guard?" before writing one.

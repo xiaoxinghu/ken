@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { git } from './git.ts'
 import { localDate } from './list.ts'
-import { dir, harness, KERNELS, write } from './testing.ts'
+import { dir, kenGet, kenTask, newRoot, write } from './testing.ts'
 
 const KEY = 'example.com/acme/web'
 const NAME = 'web/fix-login'
@@ -21,9 +21,7 @@ beforeAll(() => {
 	git(remote, 'update-ref', 'refs/heads/main', git(remote, 'commit-tree', '-m', 'init', tree))
 })
 
-describe.each(KERNELS)('%s kernel', (kernel) => {
-	const { kenGet, kenTask, newRoot } = harness(kernel)
-
+describe('repo tasks', () => {
 	/** A root with the clone of KEY, and the task TASK in it holding `front` as front matter. */
 	function setup(front = 'status: todo') {
 		const root = newRoot()

@@ -21,6 +21,12 @@ importers:
         specifier: ^4.0.18
         version: 4.1.12(@types/node@25.9.9)(vite@8.3.5(@types/node@25.9.9)(yaml@2.9.1))
 
+  packages/create-ken:
+    dependencies:
+      '@unclex/ken':
+        specifier: workspace:*
+        version: link:../ken
+
   packages/ken:
     dependencies:
       '@unclex/ken-core':

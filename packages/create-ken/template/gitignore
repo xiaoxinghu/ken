@@ -1,0 +1,4 @@
+.env
+.repos/
+CLAUDE.local.md
+node_modules

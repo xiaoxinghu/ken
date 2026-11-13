@@ -21,10 +21,12 @@ const fresh = () => {
 }
 
 type Run = { root?: string; path?: string; input?: string; runtime?: string }
-/** `ken <args>` run from `cwd`, KEN_ROOT unset unless `root` is given, PATH `path` then BASE. */
+/** `ken <args>` run from `cwd`, KEN_ROOT unset unless `root` is given, no session, PATH `path`
+ * then BASE. */
 const ken = (args: string[], cwd: string, { root, path, input, runtime }: Run = {}) => {
 	const env: NodeJS.ProcessEnv = { ...process.env, PATH: path ? `${path}:${BASE}` : BASE }
-	delete env.KEN_ROOT
+	for (const key of ['KEN_ROOT', 'KEN_SESSION', 'KEN_SESSION_TRANSCRIPT', 'CLAUDE_ENV_FILE'])
+		delete env[key]
 	if (root !== undefined) env.KEN_ROOT = root
 	const r = spawnSync(runtime ?? process.execPath, [CLI, ...args], {
 		cwd,
@@ -87,13 +89,17 @@ describe('dispatch', () => {
 		expect(ken(['lint'], root, { path }).stdout).toBe('ken lint: no errors in 0 pages.\n')
 		let help = ken(['help'], root, { path }).stdout
 		expect(help).toContain(`  the root's .bin/, ${root}/.bin\n    path, shadowed by the core`)
-		expect(help).toContain('\n  bundled\n    lint\n    task\n')
+		expect(help).toContain(
+			'\n  bundled\n    digest\n    lint\n    log\n    session\n    status\n    task\n'
+		)
 		expect(help).toContain(`\n  PATH, ${path}\n    lint, shadowed by the bundled one\n    onpath\n`)
 
 		script(join(root, '.bin'), 'lint', 'echo lint from .bin')
 		expect(ken(['lint'], root, { path }).stdout).toBe('lint from .bin\n')
 		help = ken(['help'], root, { path }).stdout
-		expect(help).toContain(`\n  bundled\n    lint, shadowed by ${root}/.bin/ken-lint\n    task\n`)
+		expect(help).toContain(
+			`\n  bundled\n    digest\n    lint, shadowed by ${root}/.bin/ken-lint\n    log\n`
+		)
 	})
 
 	it('outside any root, runs a bundled or PATH command with KEN_ROOT unset, skipping .bin/', () => {
@@ -118,7 +124,7 @@ describe('dispatch', () => {
 			`ken: nope is not a ken command, and no executable ken-nope was found. Looked in, in order:
   the core commands: init, path, which, get, repos, index, help, version
   ${root}/.bin, the root's .bin/
-  the bundled commands: task, lint
+  the bundled commands: status, log, digest, session, task, lint
   PATH, each folder in order, as \`echo "$PATH"\` prints them
 Add an executable ken-nope to ${root}/.bin, or run \`ken help\` for every command found.\n`
 		)
@@ -141,7 +147,7 @@ Add an executable ken-nope to ${root}/.bin, or run \`ken help\` for every comman
 		expect(ken(['lint'], root).stderr).toContain(`ken: ${lint} would run as`)
 		const help = ken(['help'], root).stdout
 		expect(help).toContain(`\n    plain, not executable: run \`chmod +x ${file}\`\n`)
-		expect(help).toContain(`\n  bundled\n    lint, shadowed by ${lint}\n    task\n`)
+		expect(help).toContain(`\n  bundled\n    digest\n    lint, shadowed by ${lint}\n    log\n`)
 	})
 
 	it('says it is this package, in version', () => {

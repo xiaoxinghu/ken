@@ -9,9 +9,15 @@ const { name, version } = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 )
 
-/** The bundled commands, name to file: each package's own entry, never an import of it. */
+/** The bundled commands, name to file: this package's own, src/ken-<name>.ts, and each other
+ * package's entry, never an import of it. */
+const own = (name: string) => fileURLToPath(new URL(`./ken-${name}.ts`, import.meta.url))
 const entry = (pkg: string) => fileURLToPath(import.meta.resolve(`${pkg}/src/cli.ts`))
 const bundled = {
+	status: own('status'),
+	log: own('log'),
+	digest: own('digest'),
+	session: own('session'),
 	task: entry('@unclex/ken-task'),
 	lint: entry('@unclex/ken-lint')
 }

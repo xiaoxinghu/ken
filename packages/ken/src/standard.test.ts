@@ -429,57 +429,60 @@ describe('session digests', { timeout: 30_000 }, () => {
 		rmSync(join(root, '.sessions/long.jsonl'))
 	})
 
-	it('ken session grep names the session, entry and kind of each match, exit 1 for none and 2 for a bad pattern; a digest from before is still read', () => {
-		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe(
-			'abc-123:3:assistant Rayleigh scattering.\n'
-		)
-		expect(run({}, 'session', 'grep', 'WebFetch').stdout).toMatch(
-			/^abc-123:2:assistant Looking\. Bash \{"command".*…\n$/
-		)
-		const none = run({}, 'session', 'grep', 'no such words')
-		expect([none.status, none.stdout]).toEqual([1, ''])
-		expect(run({}, 'session', 'grep', '[').status).toBe(2)
-		// the patterns jq read: its flags at the start, POSIX classes in a bracket
-		for (const p of [
-			'(?i)RAYLEIGH',
-			'[[:upper:]]ayleigh',
-			'(?im)rayleigh.scat',
-			'^[^[:digit:]]ayl',
-			'[]R]ayleigh',
-			'R[^]]yleigh'
-		])
-			expect(run({}, 'session', 'grep', p).stdout).toBe(
-				'abc-123:3:assistant Rayleigh scattering.\n'
-			)
-		expect(run({}, 'session', 'grep', '[[:digit:]]ayleigh').status).toBe(1)
-		// as in jq, Unicode-aware: an accented letter is lower
-		expect(run({}, 'session', 'grep', 'in [[:lower:]]$').stdout).toBe(
-			'abc-123:1:user Why is the "sky" blue? Answer with C:\\path in é\n'
-		)
-		// ^ and $ anchor at what an entry says, whole, as in jq, not at each line of it
-		expect(run({}, 'session', 'grep', '^Read ').status).toBe(1)
-		expect(run({}, 'session', 'grep', '^Looking\\. Bash').status).toBe(1)
-		expect(run({}, 'session', 'grep', '^Looking\\.\n').stdout).toMatch(/^abc-123:2:assistant /)
-		expect(run({}, 'session', 'grep', '"prompt":"p"}$').stdout).toMatch(/^abc-123:2:assistant /)
-		expect(run({}, 'session', 'grep').status).toBe(2)
+	it('ken session all prints every entry of every digest on one line, uncut, for grep; a digest from before a line at a time', () => {
 		const old = '---\nsession: old\n---\n\n## you 2026-11-06T01:00:01Z\n\nRayleigh, before\n'
 		writeFileSync(join(root, '.sessions/old.md'), old)
+		const long = `a${' word'.repeat(60)} end`
+		writeFileSync(
+			join(root, '.sessions/z.jsonl'),
+			`{"kind":"session","session":"z"}\n{"id":1,"at":"","kind":"user","text":"${long}"}\n`
+		)
 		expect(run({}, 'session', 'old').stdout).toBe(old)
-		expect(run({}, 'session', 'grep', 'Rayleigh').stdout).toBe(
+		expect(run({}, 'session', 'all').stdout).toBe(
+			[
+				'abc-123:1:user Why is the "sky" blue? Answer with C:\\path in é',
+				`abc-123:2:assistant Looking. Bash ${head(bash)} Read {"file_path":"/w/a.md"} WebFetch {"url":"https://e.x","prompt":"p"}`,
+				'abc-123:3:assistant Rayleigh scattering.',
+				'abc-123:4:compaction (compacted here)',
+				'abc-123:5:user And this?',
+				'abc-123:6:assistant A cat.',
+				'abc-123:7:assistant API Error: offline',
+				`z:1:user ${long}`,
+				...old
+					.replace(/\n$/, '')
+					.split('\n')
+					.map((line, i) => `old:${i + 1}:${line}`),
+				''
+			].join('\n')
+		)
+		// searched as the usage says, with grep's own expressions and flags
+		const grep = (pattern: string) =>
+			spawnSync(
+				'sh',
+				['-c', `"${process.execPath}" "${CLI}" session all | grep -i -e "$1"`, 'sh', pattern],
+				{
+					cwd: root,
+					encoding: 'utf8',
+					env: { PATH: '/usr/bin:/bin', HOME: dir }
+				}
+			)
+		expect(grep('rayleigh').stdout).toBe(
 			'abc-123:3:assistant Rayleigh scattering.\nold:7:Rayleigh, before\n'
 		)
-		// searched by grep, as before: a basic regular expression, where + ( ) ? are literal
-		writeFileSync(join(root, '.sessions/old.md'), 'a+b (x)? here\naaab\n')
-		expect(run({}, 'session', 'grep', 'a+b (x)?').stdout).toBe('old:1:a+b (x)? here\n')
-		expect(run({}, 'session', 'grep', 'a\\{3\\}b').stdout).toBe('old:2:aaab\n')
+		expect(grep('no such words').status).toBe(1)
+		expect(run({}, 'session', 'all', 'x').status).toBe(2)
 		rmSync(join(root, '.sessions/old.md'))
+		rmSync(join(root, '.sessions/z.jsonl'))
 	})
 
-	it('ken session grep with no digest yet says what writes one, exit 1', () => {
+	it('ken session all with no digest yet says what writes one, exit 1; grep, gone, says what replaced it', () => {
 		const empty = newRoot()
-		const r = ken(['session', 'grep', 'x'], { cwd: empty })
+		const r = ken(['session', 'all'], { cwd: empty })
 		expect(r.status).toBe(1)
 		expect(r.stderr).toContain('holds no digest yet: `ken log` writes one')
+		const grep = ken(['session', 'grep', 'x'], { cwd: empty })
+		expect(grep.status).toBe(2)
+		expect(grep.stderr).toContain('Run `ken session all | grep <pattern>`')
 	})
 
 	it('ken digest reads pi from the leaf back, dropping the branch left, and Codex without its injected context', () => {

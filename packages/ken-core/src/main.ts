@@ -62,7 +62,7 @@ ken help init`,
 		run: (args) => {
 			if (args.length > 1) die('ken help takes one command. Run e.g. `ken help init`.')
 			if (!args[0]) return help()
-			const command = COMMANDS[args[0]]
+			const command = commandOf(args[0])
 			if (!command)
 				die(
 					`${q(args[0])} is not a ken command, so ken help has no page for it.`,
@@ -81,6 +81,9 @@ ken help init`,
 		}
 	}
 }
+
+/** The core command `name`, never a property every object inherits, such as constructor. */
+const commandOf = (name: string) => (Object.hasOwn(COMMANDS, name) ? COMMANDS[name] : undefined)
 
 const indent = (prefix: string, text: string) => text.replace(/^/gm, prefix)
 
@@ -116,7 +119,7 @@ Run \`ken <command> --help\` for one command in full.
 export const main = (args: string[]) => {
 	try {
 		const [name = 'help', ...rest] = args
-		const command = COMMANDS[name === '-h' || name === '--help' ? 'help' : name]
+		const command = commandOf(name === '-h' || name === '--help' ? 'help' : name)
 		if (!command)
 			die(
 				`${q(name)} is not a ken command: this ken knows ${Object.keys(COMMANDS).join(', ')}.`,

@@ -95,7 +95,9 @@ Claude Code's alone. Hooks and skills reach commands as `ken <name>`.
 **Sessions start at the root**, or in a checkout under it. At the root are the hooks, skills
 and deny rules, and it is the only layout a harness that walks down from the git root
 understands. A session in a checkout loads the root's `AGENTS.md` by the path, the root
-being above it (PRD, decision 6); its hooks and deny rules come from a launcher that starts
+being above it (PRD, decision 6), in Claude Code and pi; Codex reads `AGENTS.md` only from
+the checkout's own git root down, so there the root's rules come from the user-level
+`~/.codex/AGENTS.md` or not at all. Its hooks and deny rules come from a launcher that starts
 it with the root's settings named, `claude --settings <root>/.claude/settings.json` or `pi
 -e <root>/.pi/extensions/ken-hooks.ts`, since a harness reads those only from the folder a
 session starts in. Two documented traps: Claude Code reads `AGENTS.md` natively only while

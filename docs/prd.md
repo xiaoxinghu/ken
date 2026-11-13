@@ -101,8 +101,10 @@ root is a section.
    a real path, a harness walking the ancestors of the physical working directory, so a
    session in a checkout loads the root's `AGENTS.md`, then the checkout's own; and the
    root is found from a checkout as from anywhere in it, the nearest `.ken` above (9).
-   Nothing outside the root carries its rules, and nothing exports `KEN_ROOT` to reach a
-   checkout. The cost: two roots that use one repo clone it twice. `.repos/` is ignored by
+   Codex is the exception: it reads `AGENTS.md` from the git root down, never above it, and
+   a checkout is its own git root; its user-level `~/.codex/AGENTS.md` is where to point it
+   at a root's rules, which with two roots can name only one. Nothing outside the root
+   carries its rules, and nothing exports `KEN_ROOT` to reach a checkout. The cost: two roots that use one repo clone it twice. `.repos/` is ignored by
    the root's git, which `get` checks. A file sync that indexes the root must leave
    `.repos` alone, by name; a root under a sync that cannot skip a folder is its owner's
    problem. The root's `CLAUDE.md` is above every checkout, and Claude Code reads a

@@ -219,3 +219,43 @@ describe('ken lint', { timeout: 30_000 }, () => {
 		)
 	})
 })
+
+describe('ken lint under the new kernel', { timeout: 30_000 }, () => {
+	it('resolves references into .repos/, which it never walks, even through a link', () => {
+		const at = join(dir, 'new root')
+		const bin = join(dir, 'new-bin')
+		mkdirSync(at)
+		mkdirSync(bin)
+		writeFileSync(
+			join(bin, 'ken'),
+			`#!/bin/sh\nexec '${process.execPath}' '${join(import.meta.dirname, '../../ken/src/cli.ts')}' "$@"\n`,
+			{ mode: 0o755 }
+		)
+		env = { ...env, PATH: `${bin}:${env.PATH}` }
+		delete env.KEN_ROOT
+		delete env.KEN_SRC
+		expect(run('git init -q && ken init', at).status).toBe(0)
+		const clone = join(at, '.repos/example.com/acme/web')
+		write({
+			[join(at, 'README.md')]: '# New\n',
+			[join(at, 'systems/README.md')]: '# Systems\n\n- [join](join.md): the join flow.\n',
+			[join(at, 'systems/join.md')]: 'The form is `example.com/acme/web:src/app.ts`.\n',
+			[join(clone, 'src/app.ts')]: 'export const start = 1\n',
+			// the clone's own pages, listed by no section here
+			[join(clone, 'README.md')]: '# Web\n',
+			[join(clone, 'docs/stray.md')]: '# Stray\n'
+		})
+		symlinkSync('.repos/example.com/acme/web', join(at, 'web'))
+		let r = run('ken lint', at)
+		expect(r.stderr).toBe('')
+		expect(r.stdout).toBe('ken lint: no errors in 1 pages.\n')
+		expect(r.status).toBe(0)
+
+		appendFileSync(join(at, 'systems/join.md'), '\nAnd `example.com/acme/web:src/gone.ts`.\n')
+		r = run('ken lint', at)
+		expect(r.stdout).toContain(
+			'error: systems/join.md:3: example.com/acme/web:src/gone.ts names a file not in the clone.'
+		)
+		expect(r.status).toBe(1)
+	})
+})

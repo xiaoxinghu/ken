@@ -1,0 +1,24 @@
+{
+	"name": "@unclex/ken-core",
+	"version": "0.0.0",
+	"description": "The core of ken: a root's two files, finding the root, and the primitives every ken command builds on. Installed as part of @unclex/ken.",
+	"type": "module",
+	"license": "MIT",
+	"repository": {
+		"type": "git",
+		"url": "git+https://github.com/xiaoxinghu/ken.git",
+		"directory": "packages/ken-core"
+	},
+	"homepage": "https://unclex.net",
+	"exports": "./src/main.ts",
+	"files": [
+		"src",
+		"!src/**/*.test.ts"
+	],
+	"engines": {
+		"node": ">=24"
+	},
+	"publishConfig": {
+		"access": "public"
+	}
+}

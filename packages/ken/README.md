@@ -12,5 +12,5 @@ node packages/ken/src/cli.ts help
 bun packages/ken/src/cli.ts version
 ```
 
-The map in `src/cli.ts` holds only `fixture`, which the tests run, until the standard
-commands come.
+The map in `src/cli.ts` holds `task` (`@unclex/ken-task`) and `lint` (`@unclex/ken-lint`),
+each by its `src/cli.ts`.

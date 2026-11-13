@@ -9,10 +9,11 @@ const { name, version } = JSON.parse(
 	readFileSync(new URL('../package.json', import.meta.url), 'utf8')
 )
 
-/** The bundled commands, name to file. `fixture` stands in for the standard ones until they
- * come, so the tests can reach the bundled place. */
+/** The bundled commands, name to file: each package's own entry, never an import of it. */
+const entry = (pkg: string) => fileURLToPath(import.meta.resolve(`${pkg}/src/cli.ts`))
 const bundled = {
-	fixture: fileURLToPath(new URL('./ken-fixture.ts', import.meta.url))
+	task: entry('@unclex/ken-task'),
+	lint: entry('@unclex/ken-lint')
 }
 
 process.exitCode = main(process.argv.slice(2), { bundled, version: `${name} ${version}` })

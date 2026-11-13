@@ -452,6 +452,10 @@ describe('session digests', { timeout: 30_000 }, () => {
 				'abc-123:3:assistant Rayleigh scattering.\n'
 			)
 		expect(run({}, 'session', 'grep', '[[:digit:]]ayleigh').status).toBe(1)
+		// as in jq, Unicode-aware: an accented letter is lower
+		expect(run({}, 'session', 'grep', 'in [[:lower:]]$').stdout).toBe(
+			'abc-123:1:user Why is the "sky" blue? Answer with C:\\path in é\n'
+		)
 		// ^ and $ anchor at what an entry says, whole, as in jq, not at each line of it
 		expect(run({}, 'session', 'grep', '^Read ').status).toBe(1)
 		expect(run({}, 'session', 'grep', '^Looking\\. Bash').status).toBe(1)

@@ -41,20 +41,21 @@ const read = (file: string) => {
 		return undefined
 	}
 }
-/** POSIX bracket classes, which jq's regular expressions read and JavaScript's do not. */
+/** POSIX bracket classes, which jq's regular expressions read, Unicode-aware, and JavaScript's
+ * do not: their Unicode properties, which need the u flag. */
 const POSIX: Record<string, string> = {
-	alnum: 'a-zA-Z0-9',
-	alpha: 'a-zA-Z',
-	blank: ' \\t',
-	cntrl: '\\x00-\\x1f\\x7f',
-	digit: '0-9',
-	graph: '\\x21-\\x7e',
-	lower: 'a-z',
-	print: '\\x20-\\x7e',
-	punct: '!-\\/:-@\\[-`{-~',
+	alnum: '\\p{Alphabetic}\\p{Nd}',
+	alpha: '\\p{Alphabetic}',
+	blank: '\\p{Zs}\\t',
+	cntrl: '\\p{Cc}',
+	digit: '\\p{Nd}',
+	graph: '\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Co}\\p{Cf}',
+	lower: '\\p{Lowercase}',
+	print: '\\p{L}\\p{M}\\p{N}\\p{P}\\p{S}\\p{Co}\\p{Cf}\\p{Zs}',
+	punct: '\\p{P}\\p{S}',
 	space: '\\s',
-	upper: 'A-Z',
-	word: '\\w',
+	upper: '\\p{Uppercase}',
+	word: '\\p{Alphabetic}\\p{M}\\p{Nd}\\p{Pc}',
 	xdigit: '0-9A-Fa-f'
 }
 /** A pattern as jq read it, Oniguruma's syntax, where JavaScript's differs: flags at its start,
@@ -66,11 +67,13 @@ const regex = (pattern: string) => {
 	let source = ''
 	let inClass = false
 	let opened = 0
+	let unicode = false
 	const rest = pattern.slice(lead?.[0].length ?? 0)
 	for (let i = 0; i < rest.length; i++) {
 		const posix = inClass && rest.slice(i).match(/^\[:(\w+):\]/)
 		if (posix && POSIX[posix[1] ?? '']) {
 			source += POSIX[posix[1] ?? '']
+			unicode = true
 			i += posix[0].length - 1
 			continue
 		}
@@ -91,7 +94,7 @@ const regex = (pattern: string) => {
 		} else if (c === ']' && inClass) inClass = false
 		source += c
 	}
-	return new RegExp(source, flags)
+	return new RegExp(source, unicode ? `${flags}u` : flags)
 }
 const entries = (text: string) => objects(text).filter((e) => typeof e.id === 'number')
 

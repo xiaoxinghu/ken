@@ -114,6 +114,18 @@ Run \`ken <command> --help\` for one command in full.
 `
 }
 
+/** What a refusal says: its own message, or for a file ken could not reach, such as a folder
+ * it may not enter, which path and how to look; any other error is a bug, thrown on. */
+const refusal = (e: unknown) => {
+	if (e instanceof KenError) return e.message
+	const { code, path, syscall } = e as NodeJS.ErrnoException
+	if (!code || !path) throw e
+	return (
+		`could not ${syscall ?? 'reach'} ${path}: ${code}, so ken cannot go on. Check who may read and` +
+		` enter it and the folders above it, e.g. \`ls -ld ${q(path)}\`, then rerun.`
+	)
+}
+
 /** Run ken with `args`, the command line after `ken`; print what it says and return the exit
  * status, 1 when a command refuses, its message on stderr. */
 export const main = (args: string[]) => {
@@ -129,8 +141,7 @@ export const main = (args: string[]) => {
 		process.stdout.write(out)
 		return 0
 	} catch (e) {
-		if (!(e instanceof KenError)) throw e
-		process.stderr.write(`ken: ${e.message}\n`)
+		process.stderr.write(`ken: ${refusal(e)}\n`)
 		return 1
 	}
 }

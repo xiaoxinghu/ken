@@ -216,6 +216,17 @@ describe('path root', () => {
 		}
 	)
 
+	it.skipIf(process.getuid?.() === 0)('stops on a folder it may not enter, naming it', () => {
+		const shut = fresh()
+		chmodSync(shut, 0)
+		const r = ken(['path', 'root'], fresh(), join(shut, 'root'))
+		chmodSync(shut, 0o755)
+		expect(r.status).toBe(1)
+		expect(r.stderr).toBe(
+			`ken: could not stat ${shut}/root: EACCES, so ken cannot go on. Check who may read and enter it and the folders above it, e.g. \`ls -ld ${shut}/root\`, then rerun.\n`
+		)
+	})
+
 	it('refuses any other form of path', () => {
 		const r = ken(['path', 'code', 'github.com/acme/api'], rootWith(KEN))
 		expect(r.status).toBe(1)

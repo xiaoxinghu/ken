@@ -122,7 +122,7 @@ describe('dispatch', () => {
 		expect(r.status).toBe(1)
 		expect(r.stderr).toBe(
 			`ken: nope is not a ken command, and no executable ken-nope was found. Looked in, in order:
-  the core commands: init, path, help, version
+  the core commands: init, path, which, get, repos, index, help, version
   ${root}/.bin, the root's .bin/
   the bundled commands: fixture
   PATH, each folder in order, as \`echo "$PATH"\` prints them

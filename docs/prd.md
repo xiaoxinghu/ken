@@ -214,8 +214,9 @@ root is a section.
 ## The core
 
 Output is for a shell: a listing prints one record per line, tab-separated under
-`--porcelain`. Everything is offline except `get` when the clone is missing. Every command
-but `help` and `version` needs a root (9).
+`--porcelain`. Everything is offline except `get` when the clone is missing. Every core
+command but `init`, `help` and `version` needs a root (9); `init` makes one, and dispatch
+runs outside a root too, without the root's `.bin/`.
 
 - **`init [<dir>]`.** Make `<dir>`, default the current folder, a root with only what ken
   owns: `.ken` with a comment and `ken.format=1`, `.repos.index` holding only its comment,
@@ -440,9 +441,9 @@ session of the root closed:
 5. Run `npm create ken` in the root: it adds what is missing and names what differs; bring
    each hook to the one line of [templates](templates.md), and `AGENTS.md` to the
    template's wording, keeping the root's own lines.
-6. Move the checkouts: `mv "$KEN_SRC/<host>" .repos/`, whole host or owner folders so
-   relative worktree paths hold, then `ken get <key>` for each listed repo, which repairs
-   what the move broke, and `ken repos` to compare with before. A clone two roots used goes
+6. Move the checkouts: `mkdir .repos`, then `mv "$KEN_SRC/<host>" .repos/`, whole host or
+   owner folders so relative worktree paths hold, then `ken get <key>` for each listed repo,
+   which repairs what the move broke, and `ken repos` to compare with before. A clone two roots used goes
    to one of them; the other clones it again.
 7. Remove `$KEN_SRC/AGENTS.md`, `$KEN_SRC/CLAUDE.md` and `$KEN_SRC/.envrc`, and every
    export of `KEN_ROOT` or `KEN_SRC` in shells and launchers.

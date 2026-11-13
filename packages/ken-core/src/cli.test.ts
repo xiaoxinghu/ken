@@ -262,7 +262,7 @@ describe('help, version and the rest', () => {
 		expect(ken(['init', '--help'], away).stdout).toBe(page)
 		expect(readdirSync(away)).toEqual([])
 		expect(ken(['help', 'nope'], away).stderr).toContain(
-			'nope is not a ken command, so ken help has no page'
+			'nope is not a ken command, and no executable ken-nope was found'
 		)
 	})
 
@@ -272,19 +272,29 @@ describe('help, version and the rest', () => {
 		)
 	})
 
-	it('refuses a name every object has, as any command it does not know', () => {
+	it('looks for a name every object has as any other, never running the object’s', () => {
 		for (const name of ['constructor', 'toString', '__proto__']) {
-			expect(ken([name], fresh()).stderr).toContain(`${name} is not a ken command:`)
-			expect(ken(['help', name], fresh()).stderr).toContain(`${name} is not a ken command, so`)
+			for (const args of [[name], ['help', name]]) {
+				const r = ken(args, fresh())
+				expect(r.status).toBe(1)
+				expect(r.stderr).toContain(`${name} is not a ken command`)
+			}
 		}
 	})
 
-	it('stops on a command it does not know', () => {
-		const r = ken(['repos'], rootWith(KEN))
+	it('runs a command it does not have as an extension, saying where it looked when none', () => {
+		const root = rootWith(KEN)
+		const r = ken(['repos'], root)
 		expect(r.status).toBe(1)
-		expect(r.stderr).toBe(
-			'ken: repos is not a ken command: this ken knows init, path, help, version. Run `ken help` for what each does.\n'
+		expect(r.stderr).toContain(
+			'ken: repos is not a ken command, and no executable ken-repos was found. Looked in, in order:\n  the core commands: init, path, help, version\n'
 		)
+		expect(r.stderr).toContain('\n  the bundled commands: none\n')
+		mkdirSync(join(root, '.bin'))
+		writeFileSync(join(root, '.bin/ken-repos'), '#!/bin/sh\necho "repos of $KEN_ROOT"\n', {
+			mode: 0o755
+		})
+		expect(ken(['repos'], root).stdout).toBe(`repos of ${root}\n`)
 	})
 })
 

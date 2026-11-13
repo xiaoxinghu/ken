@@ -5,7 +5,9 @@ primitives every other command builds on. A person installs `@unclex/ken`, which
 with the standard commands; this package knows none of them.
 
 It exports `main`, which runs ken with the arguments after `ken` and returns the exit
-status. `src/cli.ts` runs it with only the core commands, from a clone, with no build:
+status: a core command, or the first `ken-<name>` found in the root's `.bin/`, the bundled
+commands its caller passes, then `PATH`. `src/cli.ts` runs it with no bundled commands, from a
+clone, with no build:
 
 ```sh
 node packages/ken-core/src/cli.ts init

@@ -2,6 +2,7 @@
 // core"). The `ken` package calls `main` with its arguments.
 import { readFileSync } from 'node:fs'
 import { die, KenError, q } from './die.ts'
+import { type Bundled, dispatch, extensions } from './dispatch.ts'
 import { init } from './init.ts'
 import { FORMAT, findRoot, locateRoot } from './root.ts'
 
@@ -14,8 +15,12 @@ type Command = {
 	summary: string
 	details?: string
 	examples: string
-	run: (args: string[]) => string
+	run: (args: string[], options: Required<Options>) => string
 }
+
+/** What the package that runs ken adds to the core: its bundled commands, and its name and
+ * version, which `ken version` prints. */
+export type Options = { bundled?: Bundled; version?: string }
 
 const none = (name: string, args: string[]) => {
 	if (args.length)
@@ -59,9 +64,9 @@ KEN_ROOT=~/work ken path root`,
 		summary: 'Print every command with examples, or one in full as `ken <command> --help` does.',
 		examples: `ken help
 ken help init`,
-		run: (args) => {
+		run: (args, options) => {
 			if (args.length > 1) die('ken help takes one command. Run e.g. `ken help init`.')
-			if (!args[0]) return help()
+			if (!args[0]) return help(options.bundled)
 			const command = commandOf(args[0])
 			if (!command)
 				die(
@@ -75,9 +80,9 @@ ken help init`,
 		usage: 'version',
 		summary: 'Print the version of this ken and the newest root format it reads.',
 		examples: 'ken version',
-		run: (args) => {
+		run: (args, options) => {
 			none('version', args)
-			return `@unclex/ken-core ${VERSION}, reads ken.format ${FORMAT} and older\n`
+			return `${options.version}, reads ken.format ${FORMAT} and older\n`
 		}
 	}
 }
@@ -92,13 +97,15 @@ const page = (command: Command) =>
 	(command.details ? `\n${command.details}\n` : '') +
 	`\nExamples:\n${indent('  ', command.examples)}\n`
 
-const help = () => {
-	let here: string
+const help = (bundled: Bundled) => {
+	let root: string | undefined
 	try {
-		here = `Here the root is ${locateRoot()}.`
-	} catch {
-		here = 'Here there is no root: cd into one, set KEN_ROOT, or run `ken init <dir>`.'
-	}
+		root = locateRoot()
+	} catch {}
+	const here = root
+		? `Here the root is ${root}.`
+		: 'Here there is no root: cd into one, set KEN_ROOT, or run `ken init <dir>`.'
+
 	return `ken: the CLI of a ken root, a folder that is a knowledge base, every git checkout it
 uses inside it in .repos/.
 
@@ -108,8 +115,11 @@ Commands:
 ${Object.values(COMMANDS)
 	.map((c) => `  ${c.usage}\n${indent('      ', `${c.summary}\n${c.examples}`)}\n`)
 	.join('')}
+${extensions(root, bundled, Object.keys(COMMANDS))}
 The root is KEN_ROOT when set, else the nearest folder holding .ken at or above the current
-one; outside one, every command but init, help and version stops, saying so. ${here}
+one; outside one, every core command but init, help and version stops, saying so, and an
+extension runs with KEN_ROOT unset and without the root's .bin/.
+${here}
 Run \`ken <command> --help\` for one command in full.
 `
 }
@@ -127,17 +137,23 @@ const refusal = (e: unknown) => {
 }
 
 /** Run ken with `args`, the command line after `ken`; print what it says and return the exit
- * status, 1 when a command refuses, its message on stderr. */
-export const main = (args: string[]) => {
+ * status: a core command's, 1 when it refuses, its message on stderr, or the extension's. */
+export const main = (
+	args: string[],
+	{ bundled = {}, version = `@unclex/ken-core ${VERSION}` }: Options = {}
+) => {
+	const core = Object.keys(COMMANDS)
 	try {
 		const [name = 'help', ...rest] = args
 		const command = commandOf(name === '-h' || name === '--help' ? 'help' : name)
-		if (!command)
-			die(
-				`${q(name)} is not a ken command: this ken knows ${Object.keys(COMMANDS).join(', ')}.`,
-				'Run `ken help` for what each does.'
-			)
-		const out = rest.some((a) => a === '-h' || a === '--help') ? page(command) : command.run(rest)
+		if (!command) return dispatch(name, rest, bundled, core)
+		// `ken help <name>`, <name> no core command, is the extension's own --help
+		const [of = ''] = rest
+		if (command === COMMANDS.help && rest.length === 1 && /^[^-]/.test(of) && !commandOf(of))
+			return dispatch(of, ['--help'], bundled, core)
+		const out = rest.some((a) => a === '-h' || a === '--help')
+			? page(command)
+			: command.run(rest, { bundled, version })
 		process.stdout.write(out)
 		return 0
 	} catch (e) {

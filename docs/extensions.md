@@ -9,7 +9,7 @@ is written as any extension is, and a root can replace one.
 ## What an extension is
 
 An executable named `ken-<name>`, in any language, run as `ken <name> [<args>]`. `<name>` is
-letters, digits and `-`. A bundled one is a TypeScript file in `@unclex/ken`'s map of
+letters, digits and `-`, starting with a letter or digit. A bundled one is a TypeScript file in `@unclex/ken`'s map of
 bundled commands, run by the runtime that runs `ken`, so it needs no executable bit and no
 link of its own.
 

@@ -26,6 +26,12 @@ importers:
       '@unclex/ken-core':
         specifier: workspace:*
         version: link:../ken-core
+      '@unclex/ken-lint':
+        specifier: workspace:*
+        version: link:../ken-lint
+      '@unclex/ken-task':
+        specifier: workspace:*
+        version: link:../ken-task
 
   packages/ken-core: {}
 

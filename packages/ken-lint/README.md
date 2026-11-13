@@ -1,7 +1,7 @@
 # @unclex/ken-lint
 
-The knowledge-base lint of a ken root. Install it beside `ken` with whatever installs
-commands on your machine; `ken` finds it on `PATH` as `ken-lint`, so it reads as `ken lint`.
+The knowledge-base lint of a ken root. Bundled in `@unclex/ken`, which runs it as `ken
+lint`, with `KEN_ROOT` set to the root.
 
 It walks the root's sections and each layer's and reports, each with its file and what to
 do: a page in no section README or in two, a page at the top outside any section, a link to

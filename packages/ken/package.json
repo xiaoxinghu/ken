@@ -24,6 +24,8 @@
 		"access": "public"
 	},
 	"dependencies": {
-		"@unclex/ken-core": "workspace:*"
+		"@unclex/ken-core": "workspace:*",
+		"@unclex/ken-lint": "workspace:*",
+		"@unclex/ken-task": "workspace:*"
 	}
 }

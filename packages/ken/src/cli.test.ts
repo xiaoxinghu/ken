@@ -72,32 +72,28 @@ describe('dispatch', () => {
 		const r = ken(['echo'], root, { input: 'from stdin\n' })
 		expect(r.stdout).toBe('from stdin\n')
 		expect(r.status).toBe(7)
-		expect(ken(['fixture', '3'], root).status).toBe(3)
+		expect(ken(['lint', 'x'], root).status).toBe(1)
 	})
 
 	it("looks in the core, the root's .bin/, the bundled, then PATH, the first winning", () => {
 		const root = newRoot()
 		const path = fresh()
-		script(path, 'fixture', 'echo fixture from PATH')
+		script(path, 'lint', 'echo lint from PATH')
 		script(path, 'onpath', 'echo onpath from PATH, KEN_ROOT=$KEN_ROOT')
 		script(join(root, '.bin'), 'path', 'echo path from .bin')
 
 		expect(ken(['path', 'root'], root, { path }).stdout).toBe(`${root}\n`)
 		expect(ken(['onpath'], root, { path }).stdout).toBe(`onpath from PATH, KEN_ROOT=${root}\n`)
-		expect(ken(['fixture', 'x'], root, { path }).stdout).toBe(
-			`bundled fixture under node, KEN_ROOT=${root}, args: x|\n`
-		)
+		expect(ken(['lint'], root, { path }).stdout).toBe('ken lint: no errors in 0 pages.\n')
 		let help = ken(['help'], root, { path }).stdout
 		expect(help).toContain(`  the root's .bin/, ${root}/.bin\n    path, shadowed by the core`)
-		expect(help).toContain('\n  bundled\n    fixture\n')
-		expect(help).toContain(
-			`\n  PATH, ${path}\n    fixture, shadowed by the bundled one\n    onpath\n`
-		)
+		expect(help).toContain('\n  bundled\n    lint\n    task\n')
+		expect(help).toContain(`\n  PATH, ${path}\n    lint, shadowed by the bundled one\n    onpath\n`)
 
-		script(join(root, '.bin'), 'fixture', 'echo fixture from .bin')
-		expect(ken(['fixture'], root, { path }).stdout).toBe('fixture from .bin\n')
+		script(join(root, '.bin'), 'lint', 'echo lint from .bin')
+		expect(ken(['lint'], root, { path }).stdout).toBe('lint from .bin\n')
 		help = ken(['help'], root, { path }).stdout
-		expect(help).toContain(`\n  bundled\n    fixture, shadowed by ${root}/.bin/ken-fixture\n`)
+		expect(help).toContain(`\n  bundled\n    lint, shadowed by ${root}/.bin/ken-lint\n    task\n`)
 	})
 
 	it('outside any root, runs a bundled or PATH command with KEN_ROOT unset, skipping .bin/', () => {
@@ -105,13 +101,11 @@ describe('dispatch', () => {
 		const path = fresh()
 		script(path, 'onpath', 'env | grep ^KEN_ROOT= || echo KEN_ROOT=unset')
 		expect(ken(['onpath'], away, { path }).stdout).toBe('KEN_ROOT=unset\n')
-		expect(ken(['fixture'], away).stdout).toBe(
-			'bundled fixture under node, KEN_ROOT=unset, args: \n'
-		)
+		expect(ken(['lint'], away).stderr).toContain('ken-lint: KEN_ROOT is not set')
 	})
 
 	it('runs `ken help <name>` as the extension’s own --help', () => {
-		expect(ken(['help', 'fixture'], fresh()).stdout).toContain('args: --help|\n')
+		expect(ken(['help', 'lint'], fresh()).stdout).toContain('ken lint\n\nCheck the knowledge base')
 	})
 
 	it('says where it looked, in order, and what to add, when nothing is found', () => {
@@ -124,7 +118,7 @@ describe('dispatch', () => {
 			`ken: nope is not a ken command, and no executable ken-nope was found. Looked in, in order:
   the core commands: init, path, which, get, repos, index, help, version
   ${root}/.bin, the root's .bin/
-  the bundled commands: fixture
+  the bundled commands: task, lint
   PATH, each folder in order, as \`echo "$PATH"\` prints them
 Add an executable ken-nope to ${root}/.bin, or run \`ken help\` for every command found.\n`
 		)
@@ -143,11 +137,11 @@ Add an executable ken-nope to ${root}/.bin, or run \`ken help\` for every comman
 			`ken: ${file} would run as \`ken plain\`, but it is not executable. Run \`chmod +x ${file}\`, then \`ken plain\` again.\n`
 		)
 
-		const fixture = script(join(root, '.bin'), 'fixture', 'echo never', true)
-		expect(ken(['fixture'], root).stderr).toContain(`ken: ${fixture} would run as`)
+		const lint = script(join(root, '.bin'), 'lint', 'echo never', true)
+		expect(ken(['lint'], root).stderr).toContain(`ken: ${lint} would run as`)
 		const help = ken(['help'], root).stdout
 		expect(help).toContain(`\n    plain, not executable: run \`chmod +x ${file}\`\n`)
-		expect(help).toContain(`\n  bundled\n    fixture, shadowed by ${fixture}\n`)
+		expect(help).toContain(`\n  bundled\n    lint, shadowed by ${lint}\n    task\n`)
 	})
 
 	it('says it is this package, in version', () => {
@@ -163,9 +157,10 @@ if (!bun) console.warn('bun is not on PATH, so the dispatch tests under bun are 
 describe.skipIf(!bun)('under bun', () => {
 	it("runs a root's ken-<name>, whose ken and bundled command are run by bun too", () => {
 		const root = newRoot()
-		script(join(root, '.bin'), 'hello', 'ken path root; ken fixture "$@"')
-		const r = ken(['hello', 'x'], root, { runtime: bun })
-		expect(r.stdout).toBe(`${root}\nbundled fixture under bun, KEN_ROOT=${root}, args: x|\n`)
+		// no node is on PATH, so the bundled lint runs only under the runtime that runs ken
+		script(join(root, '.bin'), 'hello', 'ken path root; ken lint')
+		const r = ken(['hello'], root, { runtime: bun })
+		expect(r.stdout).toBe(`${root}\nken lint: no errors in 0 pages.\n`)
 		expect(r.status).toBe(0)
 	})
 })

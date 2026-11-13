@@ -14,8 +14,16 @@ export const SECTION_README_MAX = 150
 export const AGENTS_MAX = 40
 export const STALE_DAYS = 365
 
-// the files at the top of a root or layer that are not pages
-const RESERVED = new Set(['README.md', 'AGENTS.md', 'CLAUDE.md', 'log.md'])
+// the names at the top of a root or layer that are not pages: the front page, the reserved
+// files, and the index and the checkouts, which are hidden too
+const RESERVED = new Set([
+	'README.md',
+	'AGENTS.md',
+	'CLAUDE.md',
+	'log.md',
+	'.repos.index',
+	'.repos'
+])
 // `<host>/<owner>/<repo>:<path>`, each part as `ken path` takes it, in prose or a code span
 const REFERENCE = /(?<![\w./:-])([\w-][\w.-]*\/[\w.-]+\/[\w.-]+):([^\s'"<>#,;*]+)/gi
 const IS_REFERENCE = /^[\w-][\w.-]*\/[\w.-]+\/[\w.-]+:/
@@ -102,6 +110,8 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	const offline = new Map<string, number>() // an offline layer's link -> links into it, not checked
 	const unlinked = new Set<string>() // the offline layers with no link at all
 	const seen = new Set([realpathSync(root)]) // folders walked, or to be walked as a top
+	// the checkouts, never walked, whatever link reaches into them
+	const repos = existsSync(join(root, '.repos')) ? realpathSync(join(root, '.repos')) : undefined
 	for (const top of tops) {
 		const own = readKen(
 			top,
@@ -142,8 +152,10 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	const readmes: string[] = []
 	const topOf = new Map<string, string>() // file -> the root or layer it is in
 	const walk = (dir: string, top: string) => {
-		if (taskFolders.has(realpathSync(dir)) || seen.has(realpathSync(dir))) return
-		seen.add(realpathSync(dir))
+		const real = realpathSync(dir)
+		if (taskFolders.has(real) || seen.has(real)) return
+		if (repos && (real === repos || real.startsWith(repos + sep))) return
+		seen.add(real)
 		for (const name of readdirSync(dir).sort()) {
 			const path = join(dir, name)
 			const stat = statSync(path, { throwIfNoEntry: false })
@@ -157,11 +169,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	for (const top of tops) {
 		for (const name of readdirSync(top).sort()) {
 			const path = join(top, name)
-			if (name.startsWith('.')) continue
+			if (name.startsWith('.') || RESERVED.has(name)) continue
 			const stat = statSync(path, { throwIfNoEntry: false })
 			if (stat?.isDirectory()) walk(path, top)
 			// a page at the top is in no section: reported below
-			else if (stat && name.endsWith('.md') && !RESERVED.has(name)) {
+			else if (stat && name.endsWith('.md')) {
 				pages.set(realpathSync(path), { path, listedBy: [] })
 				topOf.set(path, top)
 			}

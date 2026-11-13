@@ -5,7 +5,8 @@ import { AGENTS_MAX, FRONT_PAGE_MAX, lint, SECTION_README_MAX, STALE_DAYS } from
 const HELP = `ken lint
 
 Check the knowledge base of the ken root, and each layer's, so it stays safe to read top
-down: front page, section README, page. Hidden entries and the task folder are skipped.
+down: front page, section README, page. Hidden entries, the checkouts in .repos/ and the
+task folder are skipped.
 
 Errors, exit 1:
   a page in no section README.md, or in more than one; a page at the top, outside a section

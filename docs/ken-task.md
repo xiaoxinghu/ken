@@ -1,11 +1,11 @@
 # ken-task — PRD
 
 Plain-text tasks in one folder of a ken root, tied to code by repo key and branch name.
-Published as `@unclex/ken-task`, installed by the user beside `ken`; its binary `ken-task`
-is found on `PATH` by `ken` dispatch, so it reads as `ken task <command>`. A root or layer
-that relies on it says so in its `AGENTS.md`. It depends on `ken` for `which`, `path code`
-and `get -b`, reads `task.folder` from `.ken`, and runs git itself for the rest. `ken` never
-depends on it ([PRD](prd.md), decision 17). This document says what is true; git is its
+Published as `@unclex/ken-task` and bundled in `@unclex/ken`, which runs its `src/cli.ts` as
+`ken task <command>`, an extension like any other ([extensions](extensions.md)). It depends on
+`ken` for `which`, `path code` and `get -b`, called as commands, so a checkout is wherever the
+kernel puts it; reads `task.folder` from `.ken`, and runs git itself for the rest. The core
+never depends on it ([PRD](prd.md), decision 17). This document says what is true; git is its
 history.
 
 ## Problem

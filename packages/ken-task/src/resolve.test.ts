@@ -97,9 +97,8 @@ describe('ken task path --readmes', () => {
 	})
 
 	it('goes up to a task folder outside the root, then the root', () => {
-		const root = newRoot()
 		const folder = join(newRoot(), 'tasks')
-		write(join(root, '.ken'), `task.folder=${folder}\n`)
+		const root = newRoot(`task.folder=${folder}\n`)
 		write(join(root, 'README.md'), '# R\n')
 		write(join(folder, 'README.md'), '# T\n')
 		write(join(folder, 'a.md'), '# A\n')

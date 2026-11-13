@@ -218,6 +218,9 @@ describe('which', () => {
 		git(join(dir, 'away'), 'worktree', 'add', '-q', '--detach', s('github.com/acme/stray'))
 		mkdirSync(s('github.com/acme/web/src'), { recursive: true })
 		symlinkSync(s('github.com/acme/app/src'), join(root(), 'code'))
+		write(s('github.com/acme/app/a.ts'), '')
+		symlinkSync(s('github.com/acme/app/a.ts'), join(root(), 'a.ts'))
+		symlinkSync('loop', join(root(), 'loop'))
 	})
 
 	it('a clone and a worktree beside it, at their tops and deep inside, from git', () => {
@@ -231,6 +234,8 @@ describe('which', () => {
 			ok('github.com/acme/app worktree feat/x')
 		)
 		expect(which('code/deep')).toEqual(ok('github.com/acme/app clone main'))
+		// a link to a file is followed to the checkout the file is in
+		expect(which('a.ts')).toEqual(ok('github.com/acme/app clone main'))
 	})
 
 	it('a worktree is keyed by its clone wherever its folder is, detached with no branch', () => {
@@ -263,6 +268,8 @@ describe('which', () => {
 		const out = which('notes')
 		expect(out.status).toBe(1)
 		expect(out.stderr).toContain(`${root()}/notes is outside ${root()}/.repos`)
+		// a link cycle ends, as a path outside
+		expect(which('loop').stderr).toContain(`${root()}/loop is outside ${root()}/.repos`)
 	})
 
 	it('a worktree of a clone outside .repos is refused, with the git worktree move', () => {
@@ -557,6 +564,14 @@ describe('get', () => {
 		expect(both.filter((r) => r.stderr.includes('ken: registered')).length).toBe(1)
 		expect(readdirSync(cloneOf(at, 'example.com/acme'))).toEqual(['lib'])
 		expect(readFileSync(join(at, '.repos.index'), 'utf8')).toBe(`repo: ${KEY}\n`)
+	}, 20_000)
+
+	it('two gets at once of a repo made with git init both set it up and print the path', async () => {
+		const at = fresh()
+		repo(cloneOf(at))
+		const both = await Promise.all([kenAsync(['get', KEY], at), kenAsync(['get', KEY], at)])
+		for (const r of both) expect([r.status, r.stdout]).toEqual([0, `${cloneOf(at)}\n`])
+		expect(config(cloneOf(at), 'worktree.useRelativePaths')).toBe('true\n')
 	}, 20_000)
 
 	it('refuses a git older than 2.48 before touching anything', () => {

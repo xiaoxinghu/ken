@@ -51,9 +51,8 @@ Keys `ken` owns:
   new key: unknown keys are ignored.
 - `clone.blobless`, `true` or `false`, default `true`.
 
-A `.ken` from before the rewrite may hold `layer.<name>` and `org.<name>` lines; they are
-unknown keys now, and ignored. No other file is configuration: a `.ken` is only ever at the
-top of a root, so finding one while walking up from a folder finds the root.
+No other file is configuration: a `.ken` is only ever at the top of a root, so finding one
+while walking up from a folder finds the root.
 
 ## Stanzas
 

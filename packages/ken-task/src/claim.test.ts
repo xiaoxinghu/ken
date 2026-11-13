@@ -4,7 +4,7 @@ import { mkdirSync, symlinkSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { beforeAll, describe, expect, it } from 'vitest'
 import { git } from './git.ts'
-import { dir, harness, KERNELS, write } from './testing.ts'
+import { clonePath, dir, env, kenGet, kenTask, newRoot, write } from './testing.ts'
 
 const KEY = 'example.com/acme/portal'
 const TASK = 'tasks/portal/fix-login.md'
@@ -19,9 +19,7 @@ beforeAll(() => {
 	git(remote, '-c', 'user.name=T', '-c', 'user.email=t@example.com', 'commit', '-q', '-m', 'init')
 })
 
-describe.each(KERNELS)('%s kernel', (kernel) => {
-	const { clonePath, env, kenGet, kenTask, newRoot } = harness(kernel)
-
+describe('ken task claim', () => {
 	/** A root with the clone of KEY and a task file for each of `tasks`. */
 	function setup(tasks: Record<string, string>) {
 		const root = newRoot()

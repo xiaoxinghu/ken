@@ -344,7 +344,7 @@ describe('ken task list: no tasks', () => {
 
 	it("reads task.folder as .ken's grammar has it: its last line, trimmed, past comments and other keys", () => {
 		const root = newRoot(
-			'# settings\n#task.folder=commented\nlayer.handbook=github.com/acme/handbook\ntask.folder=old\ntask.folder= work \n'
+			'# settings\n#task.folder=commented\nclone.blobless=false\ntask.folder=old\ntask.folder= work \n'
 		)
 		write(join(root, 'work/a.md'), '# A\n')
 		const r = kenTask(root, ['list'])

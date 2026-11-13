@@ -76,7 +76,7 @@ describe('ken log', { timeout: 30_000 }, () => {
 		const r = log(...args)
 		expect(r.status).toBe(2)
 		expect(r.stderr).toContain(rule)
-		expect(r.stderr).toContain('ingest query page task promote layer')
+		expect(r.stderr).toContain('ingest query page task promote')
 		expect(lines(root)).toHaveLength(before)
 	})
 })

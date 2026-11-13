@@ -2,7 +2,7 @@
 // docs/prd.md. Files are parsed as CommonMark, so a link, a code span and a label are what a
 // Markdown reader sees, never a guess at where one ends.
 import { type SpawnSyncReturns, spawnSync } from 'node:child_process'
-import { existsSync, lstatSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs'
 import { basename, dirname, join, relative, resolve, sep } from 'node:path'
 import type { Nodes } from 'mdast'
 import { fromMarkdown } from 'mdast-util-from-markdown'
@@ -14,7 +14,7 @@ export const SECTION_README_MAX = 150
 export const AGENTS_MAX = 40
 export const STALE_DAYS = 365
 
-// the names at the top of a root or layer that are not pages: the front page, the reserved
+// the names at the top of the root that are not pages: the front page, the reserved
 // files, and the index and the checkouts, which are hidden too
 const RESERVED = new Set([
 	'README.md',
@@ -36,44 +36,31 @@ const ken = (args: string[]) => spawnSync('ken', args, { encoding: 'utf8' })
 const quote = (word: string) => `'${word.replaceAll("'", `'\\''`)}'`
 
 /**
- * The task folder, absolute, and the layer names of the root or layer `top`, from its `.ken` as
- * docs/files.md reads it: a repeated key is its last line, a value is trimmed. The layer's key is
- * the kernel's business. One it cannot read stops the lint, saying what is unknown.
+ * The task folder of the root, absolute, from its `.ken` as docs/files.md reads it: a repeated
+ * key is its last line, a value is trimmed. One it cannot read stops the lint.
  */
-function readKen(top: string, unknown: string): { folder: string; layers: Set<string> } {
-	const file = join(top, '.ken')
+function taskFolder(root: string): string {
+	const file = join(root, '.ken')
+	const unknown = 'so the task folder is unknown'
 	let text: string
 	try {
 		text = readFileSync(file, 'utf8')
 	} catch (e) {
 		throw new Error(
-			`${file} could not be read (${(e as Error).message}), ${unknown}. Every root holds a .ken, a layer's clone too: make it with \`ken init ${quote(top)}\`, then run \`ken lint\` again.`
+			`${file} could not be read (${(e as Error).message}), ${unknown}. Every root holds a .ken: make it with \`ken init ${quote(root)}\`, then run \`ken lint\` again.`
 		)
 	}
 	let folder = 'tasks'
-	const layers = new Set<string>()
 	for (const [i, line] of text.split('\n').entries()) {
-		const at = `${file} line ${i + 1}, ${JSON.stringify(line)},`
-		if (line.startsWith('task.folder=')) {
-			folder = line.slice('task.folder='.length).trim()
-			if (!folder) {
-				throw new Error(
-					`${at} sets task.folder to nothing, ${unknown}. It is a folder, relative to the root or absolute, like task.folder=tasks: fix the line, or delete it for the default, tasks.`
-				)
-			}
-		} else if (line.startsWith('layer.')) {
-			const eq = line.indexOf('=')
-			const name = line.slice('layer.'.length, eq)
-			// the name is a folder at the top, so one that climbs out of it is refused
-			if (eq < 0 || !/^[A-Za-z0-9_.-]+$/.test(name) || /^\.\.?$/.test(name)) {
-				throw new Error(
-					`${at} is not a layer line, ${unknown}. It expects layer.<name>=<host>/<owner>/<repo>, lowercase, the name a folder at ${top}, such as layer.sales-atlas=github.com/acme/sales-atlas: fix or delete that line, then run \`ken lint\` again.`
-				)
-			}
-			layers.add(name)
+		if (!line.startsWith('task.folder=')) continue
+		folder = line.slice('task.folder='.length).trim()
+		if (!folder) {
+			throw new Error(
+				`${file} line ${i + 1}, ${JSON.stringify(line)}, sets task.folder to nothing, ${unknown}. It is a folder, relative to the root or absolute, like task.folder=tasks: fix the line, or delete it for the default, tasks.`
+			)
 		}
 	}
-	return { folder: resolve(top, folder), layers }
+	return resolve(root, folder)
 }
 
 /** A path keeps its brackets, `src/app/[id]/page.ts`, not the prose's punctuation after it. */
@@ -100,38 +87,12 @@ function visit(node: Nodes, fn: (node: Nodes) => void): void {
 
 /** Lint the root at `root`: one line per problem, then the summary; `errors` decides the exit. */
 export function lint(root: string): { lines: string[]; errors: number } {
-	// The root and every layer reachable from it, each layer at its link, `<top>/<name>`, and the
-	// task folders, which hold tasks, not pages: each one's from its own .ken, compared by real
-	// path, so a link to a folder above one does not reach it either. An offline layer, its link
-	// dangling or not made yet, as in a fresh clone of the root, has nothing to read; a layer
-	// reached twice is read once.
-	const tops = [root]
-	const taskFolders = new Set<string>()
-	const offline = new Map<string, number>() // an offline layer's link -> links into it, not checked
-	const unlinked = new Set<string>() // the offline layers with no link at all
-	const seen = new Set([realpathSync(root)]) // folders walked, or to be walked as a top
-	// the checkouts, never walked, whatever link reaches into them
+	// The task folder holds tasks, not pages: compared by real path, so a link to a folder above
+	// it does not reach it either. The checkouts are never walked, whatever link reaches into them.
+	const folder = taskFolder(root)
+	const tasks = existsSync(folder) ? realpathSync(folder) : folder
+	const seen = new Set([realpathSync(root)]) // folders walked
 	const repos = existsSync(join(root, '.repos')) ? realpathSync(join(root, '.repos')) : undefined
-	for (const top of tops) {
-		const own = readKen(
-			top,
-			top === root
-				? 'so the task folder and the layers are unknown'
-				: `at the layer ${relative(root, top)}, so its task folder and its layers are unknown`
-		)
-		taskFolders.add(existsSync(own.folder) ? realpathSync(own.folder) : own.folder)
-		for (const name of own.layers) {
-			const layer = join(top, name)
-			if (!statSync(layer, { throwIfNoEntry: false })?.isDirectory()) {
-				offline.set(layer, 0)
-				if (!lstatSync(layer, { throwIfNoEntry: false })) unlinked.add(layer)
-				continue
-			}
-			if (seen.has(realpathSync(layer))) continue
-			seen.add(realpathSync(layer))
-			tops.push(layer)
-		}
-	}
 
 	const problems: string[] = []
 	const report = (kind: 'error' | 'note', file: string, text: string, line?: number) =>
@@ -146,45 +107,37 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		}
 	}
 
-	// The walk, as `find -L`: links followed, each folder read once, a layer as a top only. A page
-	// is keyed by its real path, so a link that reaches it by another path still finds it.
+	// The walk, as `find -L`: links followed, each folder read once. A page is keyed by its real
+	// path, so a link that reaches it by another path still finds it.
 	const pages = new Map<string, Page>()
 	const readmes: string[] = []
-	const topOf = new Map<string, string>() // file -> the root or layer it is in
-	const walk = (dir: string, top: string) => {
+	const walk = (dir: string) => {
 		const real = realpathSync(dir)
-		if (taskFolders.has(real) || seen.has(real)) return
+		if (real === tasks || seen.has(real)) return
 		if (repos && (real === repos || real.startsWith(repos + sep))) return
 		seen.add(real)
 		for (const name of readdirSync(dir).sort()) {
 			const path = join(dir, name)
 			const stat = statSync(path, { throwIfNoEntry: false })
 			if (name.startsWith('.') || !stat) continue
-			if (stat.isDirectory()) walk(path, top)
+			if (stat.isDirectory()) walk(path)
 			else if (name === 'README.md') readmes.push(path)
 			else if (name.endsWith('.md')) pages.set(realpathSync(path), { path, listedBy: [] })
-			topOf.set(path, top)
 		}
 	}
-	for (const top of tops) {
-		for (const name of readdirSync(top).sort()) {
-			const path = join(top, name)
-			if (name.startsWith('.') || RESERVED.has(name)) continue
-			const stat = statSync(path, { throwIfNoEntry: false })
-			if (stat?.isDirectory()) walk(path, top)
-			// a page at the top is in no section: reported below
-			else if (stat && name.endsWith('.md')) {
-				pages.set(realpathSync(path), { path, listedBy: [] })
-				topOf.set(path, top)
-			}
-		}
-		topOf.set(join(top, 'README.md'), top)
-		cap(
-			join(top, 'README.md'),
-			FRONT_PAGE_MAX,
-			'The front page is read first for every question: keep one line per section and layer and the few evergreen pages, and move the rest into pages.'
-		)
+	for (const name of readdirSync(root).sort()) {
+		const path = join(root, name)
+		if (name.startsWith('.') || RESERVED.has(name)) continue
+		const stat = statSync(path, { throwIfNoEntry: false })
+		if (stat?.isDirectory()) walk(path)
+		// a page at the top is in no section: reported below
+		else if (stat && name.endsWith('.md')) pages.set(realpathSync(path), { path, listedBy: [] })
 	}
+	cap(
+		join(root, 'README.md'),
+		FRONT_PAGE_MAX,
+		'The front page is read first for every question: keep one line per section and the few evergreen pages, and move the rest into pages.'
+	)
 	cap(
 		join(root, 'AGENTS.md'),
 		AGENTS_MAX,
@@ -227,7 +180,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 			checkReference(file, m[1] ?? '', trimPath(m[2] ?? ''), at)
 		}
 	}
-	const front = tops.map((t) => join(t, 'README.md')).filter((f) => existsSync(f))
+	const front = [join(root, 'README.md')].filter((f) => existsSync(f))
 	for (const file of [...front, ...readmes, ...[...pages.values()].map((p) => p.path)]) {
 		const tree = fromMarkdown(readFileSync(file, 'utf8'))
 		// a reference link renders through its definition; a definition alone renders nothing
@@ -264,14 +217,7 @@ export function lint(root: string): { lines: string[]; errors: number } {
 			// a URL or an anchor
 			if (/^[a-z][a-z0-9+.-]*:|^#|^\/\//i.test(url)) return
 			const path = decode(url.replace(/[#?].*$/, ''))
-			const top = topOf.get(file) ?? root
-			const to = path.startsWith('/') ? join(top, path) : resolve(dirname(file), path)
-			// into an offline layer: nothing to check against, counted in a note, never an error
-			const off = [...offline.keys()].find((l) => to === l || to.startsWith(l + sep))
-			if (off) {
-				if (checks) offline.set(off, (offline.get(off) ?? 0) + 1)
-				return
-			}
+			const to = path.startsWith('/') ? join(root, path) : resolve(dirname(file), path)
 			if (!existsSync(to)) {
 				if (checks) {
 					report(
@@ -292,12 +238,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 	}
 
 	for (const [real, { path: page, listedBy }] of pages) {
-		const top = topOf.get(page) ?? root
-		if (dirname(page) === top) {
+		if (dirname(page) === root) {
 			report(
 				'error',
 				page,
-				`a page at the top of ${top === root ? 'the root' : 'a layer'}, where only the front page and the reserved files live, so it is in no section. Move it into the section it belongs to with \`git mv\`, and add its line to that section's README.md.`
+				`a page at the top of the root, where only the front page and the reserved files live, so it is in no section. Move it into the section it belongs to with \`git mv\`, and add its line to that section's README.md.`
 			)
 		} else if (listedBy.length === 0) {
 			report(
@@ -319,12 +264,11 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		})
 		const changed = Number(log.stdout.trim()) * 1000
 		if (!changed || Date.now() - changed < STALE_DAYS * 86_400_000) continue
-		const cd = `"$(ken path root)"${top === root ? '' : `/${quote(relative(root, top))}`}`
-		const rel = relative(top, page)
+		const rel = relative(root, page)
 		report(
 			'note',
 			page,
-			`nobody links to it and nobody has changed it since ${new Date(changed).toISOString().slice(0, 10)}. If it is settled, propose archiving it: \`cd ${cd} && mkdir -p -- ${quote(join('.archive', dirname(rel)))} && git mv -- ${quote(rel)} ${quote(join('.archive', rel))}\`, then drop its line from its README.md.`
+			`nobody links to it and nobody has changed it since ${new Date(changed).toISOString().slice(0, 10)}. If it is settled, propose archiving it: \`cd "$(ken path root)" && mkdir -p -- ${quote(join('.archive', dirname(rel)))} && git mv -- ${quote(rel)} ${quote(join('.archive', rel))}\`, then drop its line from its README.md.`
 		)
 	}
 
@@ -334,17 +278,6 @@ export function lint(root: string): { lines: string[]; errors: number } {
 		problems.push(
 			`note: not checked: ${count} code references into ${keys.join(', ')}, not cloned here. To check them, run ${keys.map((k) => `\`ken get ${k}\``).join(' and ')}, then \`ken lint\` again.`
 		)
-	}
-	for (const [layer, count] of offline) {
-		if (unlinked.has(layer)) {
-			problems.push(
-				`note: not checked: ${count} links into the layer ${relative(root, layer)}, which is not linked here yet, as in a fresh clone of the root. Run \`ken init ${quote(root)}\` to link it, cloning it if missing, then \`ken lint\` again.`
-			)
-		} else if (count) {
-			problems.push(
-				`note: not checked: ${count} links into the layer ${relative(root, layer)}, which has no clone here: it may not be pushed yet, or be private. Run \`ken init ${quote(root)}\` to clone it, then \`ken lint\` again.`
-			)
-		}
 	}
 	const errors = problems.filter((p) => p.startsWith('error:')).length
 	problems.push(

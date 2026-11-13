@@ -177,9 +177,8 @@ describe('create-ken', { timeout: 30_000 }, () => {
 })
 
 describe('the template', () => {
-	it('has a front page with sections and no layers', () => {
+	it('has a front page with sections', () => {
 		expect(tread('README.md')).toMatch(/\n## Sections\n/)
-		expect(tread('README.md')).not.toContain('Layers')
 	})
 
 	it('has an AGENTS.md under 40 lines whose first paragraph says where the CLI is and how to install it', () => {
@@ -189,7 +188,6 @@ describe('the template', () => {
 		expect(first).toContain('ken root')
 		expect(first).toContain('`ken help`')
 		expect(first).toContain('`npm install -g @unclex/ken`')
-		for (const gone of ['.bin/ken', 'KEN_SRC', 'layer']) expect(agents).not.toContain(gone)
 		expect(agents).toContain("this root's `CLAUDE.md` hides a checkout's AGENTS.md")
 	})
 

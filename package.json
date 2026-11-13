@@ -6,7 +6,7 @@
 	"scripts": {
 		"test": "vitest run --passWithNoTests",
 		"typecheck": "tsc --noEmit",
-		"lint": "biome ci . && shellcheck -s sh ken templates/*/.bin/ken-*",
+		"lint": "biome ci .",
 		"format": "biome format --write ."
 	},
 	"engines": {

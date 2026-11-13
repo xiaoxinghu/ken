@@ -9,11 +9,11 @@ import { appendFileSync, readFileSync } from 'node:fs'
 import { join } from 'node:path'
 import { now, pointerOf, rootOf, wantsHelp } from './shared.ts'
 
-const KINDS = ['ingest', 'query', 'page', 'task', 'promote', 'layer']
+const KINDS = ['ingest', 'query', 'page', 'task', 'promote']
 const USAGE = `Usage: ken log <kind> <subject> <what...>, e.g. \`ken log query flow/README.md answered X\`.
 <kind> is one of: ${KINDS.join(' ')}. <subject> is one word grep finds the entry by: a repo key, a path
 from the root, a task path, or <key>:<path>#<symbol>. <what> is one short clause. Log right
-after an ingest, an answered question, a page, task, promote or layer change, before its commit.`
+after an ingest, an answered question, a page, a task or a promote, before its commit.`
 
 const refuse = (message: string) => {
 	process.stderr.write(`ken log: ${message}\n${USAGE}\n`)

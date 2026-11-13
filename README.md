@@ -3,28 +3,25 @@
 Your ken: the range of what you know and can reach.
 
 One workspace root that is a knowledge base, plain files, in git by default. Every git
-checkout on the machine lives beside it, in one folder, `$KEN_SRC` (default `~/src`), at
-`<host>/<owner>/<repo>`, with a worktree per branch beside the clone, and that folder carries
-the root's rules, so a session in any checkout loads them. Shared knowledge arrives as
-layers: other roots of the same shape, cloned there and linked into the root as sections. A
-kernel CLI enforces the few fixed rules; everything else is scripts and skills built on it.
+checkout the root uses lives inside it, in `.repos/`, at `<host>/<owner>/<repo>`, with a
+worktree per branch beside the clone, so a session in any checkout is under the root's
+rules. One CLI, installed once per machine, enforces the few fixed rules; everything else is
+commands and skills built on it.
 
-| What                              | Command    | Does                                                |
-| --------------------------------- | ---------- | --------------------------------------------------- |
-| [`ken`](ken), one POSIX `sh` file | `ken`      | the kernel: layout, index, layers, dispatch         |
-| `@unclex/ken-task`, `packages/`   | `ken task` | plain-text tasks in one folder, a worktree per task |
-| `@unclex/ken-lint`, `packages/`   | `ken lint` | the knowledge-base lint: indexes, links, references |
+| What                                    | Command          | Does                                                       |
+| --------------------------------------- | ---------------- | ---------------------------------------------------------- |
+| `@unclex/ken-core`, `packages/ken-core` |                  | the core: layout, index, dispatch                          |
+| `@unclex/ken`, `packages/ken`           | `ken`            | the core and the standard commands, what a person installs |
+| `@unclex/ken-task`, `packages/ken-task` | `ken task`       | plain-text tasks in one folder, a worktree per task        |
+| `@unclex/ken-lint`, `packages/ken-lint` | `ken lint`       | the knowledge-base lint: indexes, links, references        |
+| `create-ken`, `packages/create-ken`     | `npm create ken` | a root for an agent harness                                |
 
-Install: `sh ken init ~/ken` makes a root holding a copy at `~/ken/.bin/ken`, and
-`ln -s "$PWD/ken" ~/.local/bin/ken` puts the kernel on `PATH`. Or start from a template, a
-root with an `AGENTS.md` that tells an agent where the CLI is: `git clone -b template/agents
---single-branch https://github.com/xiaoxinghu/ken ~/ken && ~/ken/.bin/ken init`. The
-template is [`templates/agents`](templates/agents), the branch `template/agents`. Its only
-dependency is git 2.48 or newer. Its tests are `test/ken.test.ts`, one command at a time, `test/workspace.test.ts`, a layer that
-has a layer walked end to end, and `test/templates.test.ts`; the first two run it under `sh`
-and `dash`.
+Install: `npm install -g @unclex/ken`, then `npm create ken ~/ken` for a root with the files
+an agent harness needs, or `ken init ~/ken` for a bare one. It runs on Node 24 or newer or
+Bun, from the source, and needs git 2.48 or newer. Each package holds its tests: `pnpm test`.
 
 The design is [`docs/prd.md`](docs/prd.md), with [`docs/files.md`](docs/files.md) for the
-two files the kernel reads and writes, and [`docs/templates.md`](docs/templates.md) for the
-roots to start from. What is built on it: [`docs/ken-task.md`](docs/ken-task.md),
+two files ken reads and writes, [`docs/extensions.md`](docs/extensions.md) for the contract
+of every command outside the core, and [`docs/templates.md`](docs/templates.md) for what
+`create-ken` writes. What is built on it: [`docs/ken-task.md`](docs/ken-task.md),
 [`docs/ken-lint.md`](docs/ken-lint.md), [`docs/built-on-top.md`](docs/built-on-top.md).

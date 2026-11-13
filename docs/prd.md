@@ -5,10 +5,9 @@ checkout it uses inside it under `.repos/`, and one CLI installed once per machi
 enforces the few rules which never change. This document is ken's: what it does and why. It
 changes in the same PR as the behaviour; git is its history.
 
-It describes the rewrite, TypeScript in `packages/`. While the rewrite is built, the shell
-kernel `ken` at the repo's root and `templates/agents` stay beside it, unchanged, because a
-root still runs them (`AGENTS.md`); their design is this file's history in git, up to the
-commit that replaced it.
+It describes the rewrite, TypeScript in `packages/`. The shell kernel it replaced, and its
+template, were removed once the last root that ran them was migrated; their design is this
+file's history in git, up to the commit that replaced it.
 
 The pieces have their own documents: [extensions](extensions.md), the contract every command
 outside the core keeps; [`files.md`](files.md), the two files ken reads and writes;

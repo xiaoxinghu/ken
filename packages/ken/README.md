@@ -12,5 +12,6 @@ node packages/ken/src/cli.ts help
 bun packages/ken/src/cli.ts version
 ```
 
-The map in `src/cli.ts` holds `task` (`@unclex/ken-task`) and `lint` (`@unclex/ken-lint`),
-each by its `src/cli.ts`.
+The map in `src/cli.ts` holds `status`, `log`, `digest` and `session`, a file each,
+`src/ken-<name>.ts`, and `task` (`@unclex/ken-task`) and `lint` (`@unclex/ken-lint`), each by
+its `src/cli.ts`.

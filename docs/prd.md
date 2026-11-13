@@ -321,14 +321,14 @@ promote, ingest.
 `@unclex/ken` bundles six commands, each in the form of an extension, run by the runtime
 that runs ken ([extensions](extensions.md)). A root's `.bin/` can replace any of them.
 
-| Command                                 | Does                                                                                                                      |
-| --------------------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `status`                                | the session-start overview, and the session's `PATH` and pointers where the harness has a way ([templates](templates.md)) |
-| `log <kind> <subject> <what>`           | one line on `log.md`, the session's digest first (The knowledge base, below)                                              |
-| `digest [<transcript>]`                 | a harness's transcript to `.sessions/<id>.jsonl` ([templates](templates.md))                                              |
-| `session <id> [<range>]`, `session all` | the entries of a digest, or every entry of every digest one per line, for `grep`                                          |
-| `task <command>`                        | plain-text tasks in one folder, a worktree per task ([`ken-task`](ken-task.md))                                           |
-| `lint`                                  | the knowledge-base lint: indexes, links, references ([`ken-lint`](ken-lint.md))                                           |
+| Command                       | Does                                                                                                                      |
+| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
+| `status`                      | the session-start overview, and the session's `PATH` and pointers where the harness has a way ([templates](templates.md)) |
+| `log <kind> <subject> <what>` | one line on `log.md`, the session's digest first (The knowledge base, below)                                              |
+| `digest [<transcript>]`       | a harness's transcript to `.sessions/<id>.jsonl` ([templates](templates.md))                                              |
+| `session <id> [<range>]`      | the entries of a digest                                                                                                   |
+| `task <command>`              | plain-text tasks in one folder, a worktree per task ([`ken-task`](ken-task.md))                                           |
+| `lint`                        | the knowledge-base lint: indexes, links, references ([`ken-lint`](ken-lint.md))                                           |
 
 ## The index: `.repos.index`
 
@@ -387,8 +387,8 @@ gets a README PR. A page on how we use a third-party repo and where it bites bel
   replies with their tool calls, a name and the head of the input, taken from the harness's
   transcript, never tool results, thinking or attachments. The transcript is deleted on the
   harness's schedule; the digest is the root's copy, committed with the line, read through
-  `ken session <id>`, its last entries or a range of them, and searched as `ken session all |
-  grep <pattern>`: ken holds no regular expressions, so grep's own apply. It is
+  `ken session <id>`, its last entries or a range of them, and searched with grep over
+  `.sessions/*.jsonl`, one entry per line: ken holds no search of its own. It is
   a record of what happened, not knowledge: where it and a page disagree, the page wins.
   Hidden, so `ken lint` and `rg` skip it.
 - **Sections** are folders at the top with a README, made when a topic needs one; none up

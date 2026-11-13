@@ -137,12 +137,10 @@ ghost's in github.com/justfiles/justfiles, `justfiles:packages/ghost/mirror.ts#M
 whose mirror took this content policy, and `ken session` renders it as the ghost's
 transcript tool shows it: a header line, then the last 20 entries, or a `<range>`, `12`,
 `12-30` or `1-`, as `#n HH:MM user: …`, `#n HH:MM assistant: …` and one `#n HH:MM → <name>
-<input>` per tool call, in local time with a day line where the day changes; `ken session
-all` prints every entry of every digest as one line, `<id>:<n>:<kind> <text>`, for `grep`
-to search: ken holds no regular expressions, so a search is `ken session all | grep -i
-<pattern>`, with grep's own syntax and flags. One format for two tools; a shared library
-waits for a third writer. A `.sessions/<id>.md` from before is printed whole, and by `all`
-a line at a time.
+<input>` per tool call, in local time with a day line where the day changes. A search of
+every digest is grep's, over the files, `grep -il <pattern> .sessions/*.jsonl`: one entry per
+line, its text JSON-escaped, so ken holds no search of its own. One format for two tools; a
+shared library waits for a third writer. A `.sessions/<id>.md` from before is printed whole.
 
 The transcripts are JSON lines, read with `JSON.parse`, so nothing beyond ken is needed. A
 line that is not JSON, one still being written, is skipped. Size and retention are decided

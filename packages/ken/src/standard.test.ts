@@ -429,60 +429,49 @@ describe('session digests', { timeout: 30_000 }, () => {
 		rmSync(join(root, '.sessions/long.jsonl'))
 	})
 
-	it('ken session all prints every entry of every digest on one line, uncut, for grep; a digest from before a line at a time', () => {
-		const old = '---\nsession: old\n---\n\n## you 2026-11-06T01:00:01Z\n\nRayleigh, before\n'
-		writeFileSync(join(root, '.sessions/old.md'), old)
-		const long = `a${' word'.repeat(60)} end`
-		writeFileSync(
-			join(root, '.sessions/z.jsonl'),
-			`{"kind":"session","session":"z"}\n{"id":1,"at":"","kind":"user","text":"${long}"}\n`
+	it('ken session leaves search to grep over the files, one entry per line, and says where they are', () => {
+		const grep = spawnSync('grep', ['-il', 'rayleigh', ...readdirSync(join(root, '.sessions'))], {
+			cwd: join(root, '.sessions'),
+			encoding: 'utf8'
+		})
+		expect(grep.stdout).toBe('abc-123.jsonl\n')
+		const entry = readFileSync(join(root, '.sessions/abc-123.jsonl'), 'utf8')
+			.split('\n')
+			.filter((line) => line.includes('Rayleigh'))
+		expect(entry.map((line) => JSON.parse(line).id)).toEqual([3])
+		expect(run({}, 'session', '--help').stdout).toContain('To search every digest,\ngrep the files')
+		expect(run({}, 'session', 'nope').stderr).toContain(
+			`search every digest with \`grep -l <pattern> ${root}/.sessions/*.jsonl\``
 		)
-		expect(run({}, 'session', 'old').stdout).toBe(old)
-		expect(run({}, 'session', 'all').stdout).toBe(
-			[
-				'abc-123:1:user Why is the "sky" blue? Answer with C:\\path in é',
-				`abc-123:2:assistant Looking. Bash ${head(bash)} Read {"file_path":"/w/a.md"} WebFetch {"url":"https://e.x","prompt":"p"}`,
-				'abc-123:3:assistant Rayleigh scattering.',
-				'abc-123:4:compaction (compacted here)',
-				'abc-123:5:user And this?',
-				'abc-123:6:assistant A cat.',
-				'abc-123:7:assistant API Error: offline',
-				`z:1:user ${long}`,
-				...old
-					.replace(/\n$/, '')
-					.split('\n')
-					.map((line, i) => `old:${i + 1}:${line}`),
-				''
-			].join('\n')
-		)
-		// searched as the usage says, with grep's own expressions and flags
-		const grep = (pattern: string) =>
-			spawnSync(
-				'sh',
-				['-c', `"${process.execPath}" "${CLI}" session all | grep -i -e "$1"`, 'sh', pattern],
-				{
-					cwd: root,
-					encoding: 'utf8',
-					env: { PATH: '/usr/bin:/bin', HOME: dir }
-				}
-			)
-		expect(grep('rayleigh').stdout).toBe(
-			'abc-123:3:assistant Rayleigh scattering.\nold:7:Rayleigh, before\n'
-		)
-		expect(grep('no such words').status).toBe(1)
-		expect(run({}, 'session', 'all', 'x').status).toBe(2)
-		rmSync(join(root, '.sessions/old.md'))
-		rmSync(join(root, '.sessions/z.jsonl'))
 	})
 
-	it('ken session all with no digest yet says what writes one, exit 1; grep, gone, says what replaced it', () => {
-		const empty = newRoot()
-		const r = ken(['session', 'all'], { cwd: empty })
-		expect(r.status).toBe(1)
-		expect(r.stderr).toContain('holds no digest yet: `ken log` writes one')
-		const grep = ken(['session', 'grep', 'x'], { cwd: empty })
-		expect(grep.status).toBe(2)
-		expect(grep.stderr).toContain('Run `ken session all | grep <pattern>`')
+	it('ken session writes a digest larger than a pipe holds whole, to a reader slower than it', () => {
+		const text = 'x'.repeat(100)
+		writeFileSync(
+			join(root, '.sessions/big.jsonl'),
+			`{"kind":"session","session":"big"}\n${Array.from(
+				{ length: 3000 },
+				(_, i) => `{"id":${i + 1},"at":"","kind":"user","text":"${text}"}\n`
+			).join('')}`
+		)
+		writeFileSync(join(root, '.sessions/old.md'), `${text}\n`.repeat(3000))
+		const slow = (...args: string[]) =>
+			spawnSync(
+				'sh',
+				['-c', `"${process.execPath}" "${CLI}" session "$@" | (sleep 1; wc -l)`, 'sh', ...args],
+				{ cwd: root, encoding: 'utf8', env: { PATH: '/usr/bin:/bin', HOME: dir } }
+			).stdout.trim()
+		expect(slow('big', '1-')).toBe(String(1 + 1 + 3000))
+		expect(slow('old')).toBe('3000')
+		rmSync(join(root, '.sessions/big.jsonl'))
+		rmSync(join(root, '.sessions/old.md'))
+	})
+
+	it('ken session prints a digest from before whole', () => {
+		const old = '---\nsession: old\n---\n\n## you 2026-11-06T01:00:01Z\n\nRayleigh, before\n'
+		writeFileSync(join(root, '.sessions/old.md'), old)
+		expect(run({}, 'session', 'old').stdout).toBe(old)
+		rmSync(join(root, '.sessions/old.md'))
 	})
 
 	it('ken digest reads pi from the leaf back, dropping the branch left, and Codex without its injected context', () => {

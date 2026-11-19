@@ -16,5 +16,5 @@
 		"noUncheckedIndexedAccess": true,
 		"types": ["node"]
 	},
-	"include": ["packages/*/src", "scripts", ".agents/skills"]
+	"include": ["packages/*/src", ".agents/skills"]
 }

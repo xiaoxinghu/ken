@@ -64,14 +64,7 @@ jobs:
         run: sh .agents/skills/release/release.sh check "$GITHUB_REF_NAME"
       - name: The tag's version in the five manifests, which say 0.0.0 in git
         if: env.RELEASE == 'true'
-        run: |
-          node -e '
-            const fs = require("node:fs")
-            for (const file of process.argv.slice(1)) {
-              const manifest = JSON.parse(fs.readFileSync(file, "utf8"))
-              manifest.version = process.env.GITHUB_REF_NAME.slice(1)
-              fs.writeFileSync(file, JSON.stringify(manifest, null, "\t") + "\n")
-            }' packages/*/package.json
+        run: pnpm -r --filter './packages/*' version "${GITHUB_REF_NAME#v}" --no-git-checks
       # pnpm, never npm: only pnpm replaces workspace:* with the version. A rerun publishes what
       # is missing and passes over what npm has.
       - name: Publish

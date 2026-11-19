@@ -15,7 +15,7 @@
 		"dist"
 	],
 	"scripts": {
-		"prepack": "node ../../scripts/build.ts"
+		"prepack": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../LICENSE ."
 	},
 	"engines": {
 		"node": ">=24"

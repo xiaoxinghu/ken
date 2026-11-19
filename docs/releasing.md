@@ -11,8 +11,8 @@ from the tags, `git tag -l --format='%(contents)' vX.Y.Z` or `gh release view vX
 ## What a package holds
 
 A clone runs the TypeScript source with no build. Node refuses to strip types from a file
-under `node_modules`, so a package carries JavaScript: each package's `prepack` runs
-`scripts/build.ts`, which writes `dist/`, every `src/*.ts` but the tests with its types
+under `node_modules`, so a package carries JavaScript: each package's `prepack` runs `tsc -p
+tsconfig.build.json`, which writes `dist/`, every `src/*.ts` but the tests with its types
 erased and its imports named `.js`, and copies the repository's `LICENSE` in. `publishConfig`
 points `bin` and `exports` at `dist/` in the packed manifest only; the manifest in git names
 `src/`. What finds a file at run time works in both: the bundled commands are found beside

@@ -32,7 +32,7 @@ runs, which nothing in a clone can show.
    `pnpm typecheck`, `pnpm lint`, `pnpm test` and the packed check.
 2. **Refuse**, before publishing anything, a tag that is not `vX.Y.Z`, not above every
    other version tag, not on `main`, or not annotated with notes:
-   `release.sh check vX.Y.Z`, the same check the release command makes before it pushes.
+   `check.sh vX.Y.Z`, the same check the agent makes before it makes the tag.
 3. **Publish** the five at the tag's version, with provenance, `pnpm -r publish`. It can stop
    halfway; a rerun of the run publishes what is missing and passes over what npm has.
 4. **Release** on GitHub, its notes the tag's message, `gh release create --notes-from-tag`.
@@ -47,21 +47,18 @@ second release on the token can give way to it.
 ## Making a release
 
 An agent makes it, with the [release skill](../.agents/skills/release/SKILL.md): ask it to
-release ken. Its script does the mechanical parts, against `origin` as fetched each time:
+release ken. It works with git against `origin` as fetched:
 
-```sh
-sh .agents/skills/release/release.sh notes
-sh .agents/skills/release/release.sh publish vX.Y.Z NOTES COMMIT
-```
-
-- `notes` prints the last release's tag, the commit of `main` on GitHub, and what landed
-  since, `git log --first-parent`, one line per merge with the files it changed; before the
-  first release, everything.
-- The agent writes the notes from that, proposes the version, and shows both to the owner.
-  The owner may name another version. Without a yes the release ends; nothing was pushed.
-- `publish` refuses what the workflow would, then makes the tag at COMMIT, annotated with
-  the file NOTES, and pushes that tag alone. The workflow does the rest; the agent watches
-  the run and reports the release's URL.
+- It reads the last release's tag, the commit of `main` on GitHub, and what landed since,
+  `git log --first-parent`, one line per merge with the files it changed; before the first
+  release, everything.
+- It writes the notes from that, proposes the version, and shows both to the owner. The
+  owner may name another version. Without a yes the release ends; nothing was pushed.
+- It runs `sh .agents/skills/release/check.sh vX.Y.Z COMMIT`, which refuses what the workflow
+  would, then makes the tag at COMMIT, annotated with the notes, `git tag -a
+  --cleanup=whitespace -F NOTES` (by default git drops the lines starting with `#`, the
+  headings), and pushes that tag alone. The workflow does the rest; the agent watches the run
+  and reports the release's URL.
 
 ## The notes
 
@@ -102,5 +99,5 @@ proposes; the owner decides.
 ## What cannot be undone
 
 npm never gives a version number back, even after an unpublish. So a tag is never moved,
-deleted or made again, and a bad release is followed by the next PATCH. `release.sh` makes
-the tag once and refuses one that exists.
+deleted or made again, and a bad release is followed by the next PATCH. `check.sh` refuses a
+version that exists at another commit, or that is not above the last.

@@ -37,8 +37,8 @@ runs, which nothing in a clone can show.
    halfway; a rerun of the run publishes what is missing and passes over what npm has.
 4. **Release** on GitHub, its notes the tag's message, `gh release create --notes-from-tag`.
 
-On a push to a branch, or run by hand, it does everything but steps 2 to 4, and publishes
-with `--dry-run`: the dry run of a release.
+On a push to a branch, or run by hand even on a tag, it does everything but steps 2 to 4,
+and publishes with `--dry-run`: the dry run of a release.
 
 It publishes with the repository's secret `NPM_TOKEN`, an npm token that may publish the
 five. npm's trusted publishing is set per package once the package exists, so from the

@@ -12,13 +12,16 @@
 	"homepage": "https://unclex.net",
 	"exports": "./src/main.ts",
 	"files": [
-		"src",
-		"!src/**/*.test.ts"
+		"dist"
 	],
+	"scripts": {
+		"prepack": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../LICENSE ."
+	},
 	"engines": {
 		"node": ">=24"
 	},
 	"publishConfig": {
-		"access": "public"
+		"access": "public",
+		"exports": "./dist/main.js"
 	}
 }

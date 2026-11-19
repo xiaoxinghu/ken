@@ -14,15 +14,20 @@
 		"ken-task": "./src/cli.ts"
 	},
 	"files": [
-		"src",
-		"!src/**/*.test.ts",
-		"!src/testing.ts"
+		"dist",
+		"!dist/testing.js"
 	],
+	"scripts": {
+		"prepack": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../LICENSE ."
+	},
 	"engines": {
 		"node": ">=24"
 	},
 	"publishConfig": {
-		"access": "public"
+		"access": "public",
+		"bin": {
+			"ken-task": "./dist/cli.js"
+		}
 	},
 	"dependencies": {
 		"yaml": "^2.9.1"

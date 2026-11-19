@@ -1,0 +1,86 @@
+# The release of ken (docs/releasing.md). On a tag vX.Y.Z pushed: test on Linux and macOS under
+# Node and Bun, then publish the five packages at the tag's version and make the GitHub release
+# with the tag's message as its notes. On a push to a branch, or run by hand even on a tag:
+# everything but publishing, the dry run of a release.
+name: Release
+
+on:
+  push:
+    branches: [ "**" ]
+    tags: [ "v*" ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # ubuntu-24.04-arm for the aarch64 Linux machine
+        os: [ ubuntu-latest, ubuntu-24.04-arm, macos-latest ]
+        node: [ 24, 26 ]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: ${{ matrix.node }}
+      - uses: oven-sh/setup-bun@v2
+      - run: git --version && node --version && bun --version
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm test
+      - name: The packed packages install and run, under Node and Bun
+        run: sh scripts/check-packed.sh
+
+  publish:
+    needs: test
+    runs-on: ubuntu-latest
+    env:
+      # only a pushed tag publishes: a branch, or a run by hand even on a tag, is a dry run
+      RELEASE: ${{ github.event_name == 'push' && github.ref_type == 'tag' }}
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 12.5.1
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+      - run: pnpm install --frozen-lockfile
+      - name: Refuse what the release skill refuses, before publishing anything
+        if: env.RELEASE == 'true'
+        run: sh .agents/skills/release/check.sh "$GITHUB_REF_NAME"
+      - name: The tag's version in the five manifests, which say 0.0.0 in git
+        if: env.RELEASE == 'true'
+        run: pnpm -r --filter './packages/*' version "${GITHUB_REF_NAME#v}" --no-git-checks
+      # pnpm, never npm: only pnpm replaces workspace:* with the version. A rerun publishes what
+      # is missing and passes over what npm has.
+      - name: Publish
+        if: env.RELEASE == 'true'
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >~/.npmrc
+          pnpm -r --filter './packages/*' publish --no-git-checks --provenance
+      - name: Publish, dry run
+        if: env.RELEASE != 'true'
+        run: pnpm -r --filter './packages/*' publish --no-git-checks --dry-run
+      - name: The GitHub release, its notes the tag's message
+        if: env.RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1 ||
+            gh release create "$GITHUB_REF_NAME" --verify-tag --notes-from-tag --title "$GITHUB_REF_NAME"

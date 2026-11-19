@@ -14,15 +14,20 @@
 		"create-ken": "./src/cli.ts"
 	},
 	"files": [
-		"src",
-		"!src/**/*.test.ts",
+		"dist",
 		"template"
 	],
+	"scripts": {
+		"prepack": "rm -rf dist && tsc -p tsconfig.build.json && cp ../../LICENSE ."
+	},
 	"engines": {
 		"node": ">=24"
 	},
 	"publishConfig": {
-		"access": "public"
+		"access": "public",
+		"bin": {
+			"create-ken": "./dist/cli.js"
+		}
 	},
 	"dependencies": {
 		"@unclex/ken": "workspace:*"

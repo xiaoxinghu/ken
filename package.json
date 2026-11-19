@@ -4,7 +4,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"test": "vitest run --passWithNoTests",
+		"test": "vitest run --passWithNoTests --exclude '.claude/**'",
 		"typecheck": "tsc --noEmit",
 		"lint": "biome ci .",
 		"format": "biome format --write ."

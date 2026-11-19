@@ -196,8 +196,11 @@ root is a section.
     are mostly `git` and `mkdir`, when the kernel had to be a file a root could carry.
     Installed once, that reason is gone, the runtime is paid once per machine, and `ken
     lint` and `ken task` already needed it. Node refuses to strip types from a file under
-    `node_modules`, so what the published package holds is decided with its first release;
-    a clone, and a link to it, run the source.
+    `node_modules`, so a package is compiled when it is packed: its tarball holds `dist/`,
+    the source with its types erased, and a clone, and a link to it, run the source. Bun
+    alone for an installed ken was rejected: a Node user would have had to link a clone. A
+    release is a tag `vX.Y.Z` on `main`, the version of all five packages, whose manifests
+    in git say `0.0.0` ([releasing](releasing.md)).
 21. **Blobless, never shallow.** `get` clones with `--filter=blob:none`, which works with
     worktrees and costs first-touch latency only. A shallow clone breaks the second worktree
     and every fetch.

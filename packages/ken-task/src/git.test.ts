@@ -18,7 +18,18 @@ beforeAll(() => {
 	mkdirSync(remote, { recursive: true })
 	git(remote, 'init', '-q', '--bare', '-b', 'main')
 	const tree = git(remote, 'hash-object', '-t', 'tree', '-w', '/dev/null')
-	git(remote, 'update-ref', 'refs/heads/main', git(remote, 'commit-tree', '-m', 'init', tree))
+	const init = git(
+		remote,
+		'-c',
+		'user.name=T',
+		'-c',
+		'user.email=t@example.com',
+		'commit-tree',
+		'-m',
+		'init',
+		tree
+	)
+	git(remote, 'update-ref', 'refs/heads/main', init)
 })
 
 describe('repo tasks', () => {

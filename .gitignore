@@ -1,2 +1,4 @@
 node_modules/
 .flow/
+packages/*/dist/
+packages/*/LICENSE

@@ -18,7 +18,9 @@ import { dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const TEMPLATE = fileURLToPath(new URL('../template', import.meta.url))
-const KEN = fileURLToPath(import.meta.resolve('@unclex/ken/src/cli.ts'))
+// ken's bin as its manifest names it: src/cli.ts in a clone, dist/cli.js in a package
+const MANIFEST = fileURLToPath(import.meta.resolve('@unclex/ken/package.json'))
+const KEN = resolve(dirname(MANIFEST), JSON.parse(readFileSync(MANIFEST, 'utf8')).bin.ken)
 const INSTALL = 'npm install -g @unclex/ken'
 // npm leaves a file named .gitignore out of a package, so the template keeps it as gitignore
 const IGNORE = 'gitignore'

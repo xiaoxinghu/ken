@@ -28,7 +28,12 @@ a red run.
    change, PATCH otherwise. The owner may name another.
 5. **Approval.** Show the owner the notes and the version. Without a yes the release ends,
    and nothing was pushed.
-6. **Publish.** `sh .agents/skills/release/check.sh vX.Y.Z COMMIT`; when it passes,
+6. **Publish.** The workflow publishes only through npm's trusted publishing, set on each
+   package. A package npm does not have yet, the first release among them, is the owner's
+   to publish by hand first, and one with no trusted publishing yet, or one saved more than 2
+   days ago that no publish has used, is the owner's to set now: "The first release, and a new package" in
+   `docs/releasing.md`. Ask, and wait for the owner's word that it is done.
+   Then `sh .agents/skills/release/check.sh vX.Y.Z COMMIT`; when it passes,
    `git tag -a --cleanup=whitespace -F NOTES vX.Y.Z COMMIT` (without `--cleanup=whitespace`
    git drops every line starting with `#`, the headings) and `git push origin refs/tags/vX.Y.Z`,
    the tag alone. A push that fails published nothing: `git tag -d vX.Y.Z` and try again.

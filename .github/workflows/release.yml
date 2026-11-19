@@ -65,15 +65,12 @@ jobs:
       - name: The tag's version in the five manifests, which say 0.0.0 in git
         if: env.RELEASE == 'true'
         run: pnpm -r --filter './packages/*' version "${GITHUB_REF_NAME#v}" --no-git-checks
-      # pnpm, never npm: only pnpm replaces workspace:* with the version. A rerun publishes what
-      # is missing and passes over what npm has.
+      # pnpm, never npm: only pnpm replaces workspace:* with the version. No token: npm's trusted
+      # publishing, set on each package for this file, trades the run's id-token for the right
+      # to publish. A rerun publishes what is missing and passes over what npm has.
       - name: Publish
         if: env.RELEASE == 'true'
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
-        run: |
-          echo "//registry.npmjs.org/:_authToken=${NPM_TOKEN}" >~/.npmrc
-          pnpm -r --filter './packages/*' publish --no-git-checks --provenance
+        run: pnpm -r --filter './packages/*' publish --no-git-checks --provenance
       - name: Publish, dry run
         if: env.RELEASE != 'true'
         run: pnpm -r --filter './packages/*' publish --no-git-checks --dry-run

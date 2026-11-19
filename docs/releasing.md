@@ -40,9 +40,24 @@ runs, which nothing in a clone can show.
 On a push to a branch, or run by hand even on a tag, it does everything but steps 2 to 4,
 and publishes with `--dry-run`: the dry run of a release.
 
-It publishes with the repository's secret `NPM_TOKEN`, an npm token that may publish the
-five. npm's trusted publishing is set per package once the package exists, so from the
-second release on the token can give way to it.
+It publishes with no token: npm's trusted publishing, set on each of the five on npmjs.com
+(Settings, Trusted publishing: GitHub Actions, `xiaoxinghu`, `ken`, `release.yml`), trades
+the run's GitHub id-token for the right to publish. npm sets it only on a package that
+exists, and drops a setting no publish has used within 2 days of saving it.
+
+## The first release, and a new package
+
+A package npm does not have yet is published by hand, once, from the owner's machine:
+`npm login`, then, in a clean checkout of the release's commit, `pnpm install`, `pnpm -r
+--filter './packages/*' version X.Y.Z --no-git-checks` and `pnpm -r --filter './packages/*'
+publish --no-git-checks`, which asks for the 2FA code. That publish has no provenance. The
+tag `vX.Y.Z` is then made and pushed as for any release: the workflow finds the version on
+npm, publishes nothing, and makes the GitHub release.
+
+Trusted publishing is set on the new package within the 2 days before the next release's tag
+is pushed, never earlier: a setting unused for 2 days is gone. Once a release has published
+through it, the package's Publishing access is "Require two-factor authentication and
+disallow tokens".
 
 ## Making a release
 

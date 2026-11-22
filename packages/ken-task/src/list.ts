@@ -18,8 +18,12 @@ export type State =
 /** A blocker that holds a task back: `path` is where it was found, absent when `missing`. */
 export type Unmet = { ref: string; path?: string; reason: 'open' | 'landing' | 'missing' }
 
-/** One row of `ken task list`: the file, its fields, its state and what a human needs to know. */
-export type Row = { path: string; title: string } & Fields & {
+/**
+ * One row of `ken task list`: the file, by absolute path and as `rel`, its path in the
+ * folder, its fields, its state and what a human needs to know. `created` is resolved as
+ * `since` does on every row but a problem.
+ */
+export type Row = { path: string; rel: string; title: string } & Fields & {
 		state: State
 		unmet: Unmet[]
 		notes: string[]
@@ -145,9 +149,8 @@ export function resolveRef(
  * then earliest created, then path, so two runs agree.
  */
 export function readyTasks(root: string, configured: string, today: string): Row[] {
-	const created = since(root, real(configured))
-	const key = (row: Row) => [row.due ?? '~', created(row.path, row.created)[0], row.path]
-	return listTasks(root, configured, today, { created })
+	const key = (row: Row) => [row.due ?? '~', row.created ?? '~', row.path]
+	return listTasks(root, configured, today)
 		.filter((row) => row.state === 'ready')
 		.map((row) => ({ row, key: key(row) }))
 		.sort((a, b) => (a.key.join('\0') < b.key.join('\0') ? -1 : 1))
@@ -164,13 +167,11 @@ export function listTasks(
 	root: string,
 	configured: string,
 	today: string,
-	{
-		created = since(root, real(configured)),
-		quiet = false
-	}: { created?: Since; quiet?: boolean } = {}
+	{ quiet = false }: { quiet?: boolean } = {}
 ): Row[] {
 	// the real path, as the root is, so that every path compares as the disk names it
 	const folder = real(configured)
+	const created = since(root, folder)
 	const tasks = new Map(walk(folder).map((path) => [path, load(path)]))
 	const repo = repos(quiet)
 	return [...tasks.entries()]
@@ -238,12 +239,22 @@ export function listTasks(
 		if (b) notes.push(...branchNotes(path, state, b.repo, b.name))
 		if (open && fields.due && fields.due < today) notes.push(`overdue: due ${fields.due}`)
 		// a problem row's note is its fix; it is never asked its age, so it cannot fail again
-		if (open && !problems.length) {
-			const [from, by] = created(path, fields.created)
+		const born = problems.length ? undefined : created(path, fields.created)
+		if (open && born) {
+			const [from, by] = born
 			const age = days(from, today)
 			if (age > 90) notes.push(`open ${age} days, since ${from} by ${by}: finish it, or close it`)
 		}
-		return { path, title, ...fields, state, unmet: open ? unmet : [], notes }
+		return {
+			path,
+			rel: relative(folder, path),
+			title,
+			...fields,
+			...(born && { created: born[0] }),
+			state,
+			unmet: open ? unmet : [],
+			notes
+		}
 	}
 }
 

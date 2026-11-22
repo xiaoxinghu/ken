@@ -82,8 +82,11 @@ worktree is missing or holds another branch; uncommitted changes in its worktree
 problem with its fix; a deviation from the canonical shape, read anyway, with the
 upgrade.
 
-  --json    one array of objects: path, title, every field read, other (the fields
-            ken-task does not know), state, unmet blockers and notes
+  --json    one array of objects: path, rel (the path in the folder, extension kept),
+            title, every field read, other (the fields ken-task does not know), state,
+            unmet blockers and notes; created as the 90-day note reads it, on every row
+            but a problem, so sorting ready rows by due, created, path is
+            \`ken task ready\`'s order
 
 Examples:
   ken task list

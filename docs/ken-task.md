@@ -175,7 +175,10 @@ the shell's directory, to the root, or to the folder, tried in that order, with 
 the extension when exactly one file has that stem, live or else archived. The file must be
 in the folder or its `.archive/`; any other path is refused, naming the folder. Output paths are absolute, so
 output feeds the next command unchanged. `--json` on `list` is one array of objects, by path: `path`,
-`title`, every known field as read (`status` is `todo` when absent), `other` with the
+`rel` (the path in the folder, extension kept, the task's name), `title`, every known field as
+read (`status` is `todo` when absent; `created` the date open-more-than-90-days counts from,
+on every row but a `problem`, so sorting the ready rows by `due`, `created`, path is `ready`'s
+order), `other` with the
 unknown fields as YAML reads them, `state`, `unmet` (each `{ ref, path, reason }`, `reason` `open`, `landing` or
 `missing`, only on an open task) and `notes`. Without `--json` a row is the state, the path
 and the unmet blockers, each note indented under it. A missing or empty folder lists

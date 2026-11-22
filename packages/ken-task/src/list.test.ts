@@ -6,7 +6,9 @@ import { day, dir, kenTask, newRoot, write } from './testing.ts'
 
 type Row = {
 	path: string
+	rel: string
 	title: string
+	created?: string
 	status: string
 	'blocked-by': string[]
 	state: string
@@ -242,11 +244,33 @@ describe('ken task list', () => {
 				'linked-pipe',
 				'unsearchable/inside.md'
 			]) {
-				expect(row(rel).state).toBe('problem')
+				// rel, but no created: a file it cannot even stat must not throw for a date
+				expect(row(rel)).toMatchObject({ rel, state: 'problem' })
+				expect(row(rel)).not.toHaveProperty('created')
 				expect(row(rel).notes.join()).toContain(`\`ls -ld ${join(folder, rel)}\``)
 			}
 		}
 	)
+
+	it('names each row by its path in the folder, extension kept, a problem too', () => {
+		for (const rel of [
+			'remember-the-milk.md',
+			'portal/on-archived.md',
+			'notes.txt',
+			'bad-date.md'
+		]) {
+			expect(row(rel).rel).toBe(rel)
+		}
+	})
+
+	it('resolves created on every row but a problem, which it never asks', () => {
+		expect(row('all.md').created).toBe(day(-3))
+		// no git here, so the mtime stands in, on a closed task too
+		expect(row('remember-the-milk.md').created).toBe(day(0))
+		expect(row('finished.md').created).toBe(day(0))
+		expect(row('bad-date.md')).toMatchObject({ rel: 'bad-date.md', state: 'problem' })
+		expect(row('bad-date.md')).not.toHaveProperty('created')
+	})
 
 	it('gives a file that is not Markdown every default', () => {
 		expect(row('notes.txt')).toMatchObject({ title: 'notes', status: 'todo', state: 'ready' })
@@ -255,6 +279,7 @@ describe('ken task list', () => {
 	it('carries every field in --json', () => {
 		expect(row('all.md')).toEqual({
 			path: join(folder, 'all.md'),
+			rel: 'all.md',
 			title: 'All the fields',
 			status: 'todo',
 			created: day(-3),
@@ -313,6 +338,14 @@ describe('ken task list: age', () => {
 		expect(notes['committed.md']?.join()).toContain('since 2020-01-01 by the date git added it')
 		expect(notes['touched.md']?.join()).toContain(`open 200 days, since ${day(-200)} by its mtime`)
 		expect(notes['closed.md']).toEqual([])
+		const created = Object.fromEntries(rows.map((r) => [r.rel, r.created]))
+		expect(created).toEqual({
+			'created.md': day(-100),
+			'young.md': day(-10),
+			'committed.md': '2020-01-01',
+			'touched.md': day(-200),
+			'closed.md': day(-200)
+		})
 	})
 })
 

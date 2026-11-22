@@ -3,6 +3,8 @@ import { join } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { day, kenTask, newRoot, write } from './testing.ts'
 
+type Row = { path: string; state: string; due?: string; created?: string }
+
 const front = (text: string) => `---\n${text}\n---\n`
 
 describe('ken task ready', () => {
@@ -34,6 +36,13 @@ describe('ken task ready', () => {
 			'tie-b'
 		].map((name) => join(folder, `${name}.md`))
 		expect(r).toEqual({ status: 0, stdout: `${order.join('\n')}\n`, stderr: '' })
+		// list --json carries what it takes to sort the ready rows in the same order
+		const rows = JSON.parse(kenTask(root, ['list', '--json']).stdout) as Row[]
+		const key = (row: Row) => [row.due ?? '~', row.created ?? '~', row.path].join('\0')
+		const sorted = rows
+			.filter((row) => row.state === 'ready')
+			.sort((a, b) => (key(a) < key(b) ? -1 : 1))
+		expect(sorted.map((row) => row.path)).toEqual(order)
 	})
 
 	it('prints nothing and exits 0 when nothing is ready, pointing at ken task list', () => {

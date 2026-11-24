@@ -7,11 +7,11 @@ import { dirname, join } from 'node:path'
 import { now, type Obj, pointerOf, wantsHelp } from './shared.ts'
 
 if (wantsHelp(process.argv.slice(2))) {
-	process.stdout.write(`Usage: ken status: the session-start hook's screen, the repos, the settings, the ready
+	process.stdout.write(`Usage: ken status [--verbose]: the session-start hook's screen, the repos, the settings, the ready
 tasks and the last lines of log.md. Run by the hook with its JSON on stdin, it also gives
 the session's shell the root's .bin/ on PATH and the session for \`ken log\`, through
 CLAUDE_ENV_FILE where the harness sets it, else a pointer under ~/.local/state/ken.
-  ken status
+  ken status --verbose    also report task repos not cloned here
 `)
 	process.exit(0)
 }
@@ -83,7 +83,9 @@ try {
 }
 // The ready tasks: `ken task` is bundled, or the root's .bin/ replaces it.
 say()
-out.push(ken('task', 'ready'))
+out.push(
+	ken('task', 'ready', ...(process.argv.slice(2).includes('--verbose') ? ['--verbose'] : []))
+)
 // The last entries of the timeline the agents write with `ken log`, never the whole file. A
 // union merge can leave lines out of order; sorting puts back those that share an offset.
 let log = ''

@@ -24,8 +24,10 @@ from the root or from the folder, with or without its extension when one file ha
 stem.
 
 Commands:
-  list [--json]   every task with its state, what it waits on, and what needs you
-  ready           the paths of the ready tasks, in the order to take them
+  list [--json] [--verbose]
+                  every task with its state, what it waits on, and what needs you
+  ready [--verbose]
+                  the paths of the ready tasks, in the order to take them
   path <task> [--readmes]
                   the absolute path of a task, live or archived; with --readmes, then
                   the README.md of each folder up to the root
@@ -57,7 +59,7 @@ Examples:
 
 Run \`ken task <command> --help\` for one command.`
 
-const LIST_HELP = `ken task list [--json]
+const LIST_HELP = `ken task list [--json] [--verbose]
 
 Every task in the folder, by path: its state, the blockers it waits on, and what needs
 you. Always exits 0: a file that cannot be fully read is a row, never an abort.
@@ -74,7 +76,7 @@ the clone of its repo that \`ken path code <repo>\` prints:
   later     scheduled is after today
   ready     none of the above
 
-A repo not cloned here has no branches, said once on stderr.
+A repo not cloned here has no branches. --verbose reports each such repo once on stderr.
 
 Notes under a row: overdue; open more than 90 days, by created, else the date git added
 the file, else its mtime; landing; closed but its branch remains; claimed but its
@@ -93,12 +95,13 @@ Examples:
   ken task list --json | jq -r '.[] | select(.state == "blocked") | .path'
   ken task list --json | jq '.[] | select(.notes | length > 0) | {path, notes}'`
 
-const READY_HELP = `ken task ready
+const READY_HELP = `ken task ready [--verbose]
 
 The absolute paths of the ready tasks, one per line, in the order to take them: earliest
 due (none last), then earliest created (else the date git added the file, else its
 mtime), then path. A task is ready when it is open, no blocker is open or missing, and
 it is not scheduled after today. Nothing ready prints nothing and exits 0.
+--verbose reports each task repo not cloned here once on stderr.
 
 Examples:
   ken task ready
@@ -223,15 +226,16 @@ function isFolder(folder: string): boolean {
 }
 
 function list(args: string[]): void {
-	const json = args[0] === '--json'
-	if (args.length > (json ? 1 : 0)) {
+	const json = args.includes('--json')
+	const verbose = args.includes('--verbose')
+	if (args.length !== Number(json) + Number(verbose)) {
 		throw new Error(
-			`ken task list takes only --json, got ${JSON.stringify(args.join(' '))}. Run \`ken task list\` or \`ken task list --json\`.`
+			`ken task list takes only --json and --verbose, got ${JSON.stringify(args.join(' '))}. Run \`ken task list\` or \`ken task list --json\`.`
 		)
 	}
 	const { root, folder } = settings()
 	const found = isFolder(folder)
-	const rows = found ? listTasks(root, folder, localDate(new Date())) : []
+	const rows = found ? listTasks(root, folder, localDate(new Date()), { verbose }) : []
 	if (!rows.length) {
 		process.stderr.write(
 			`${found ? `No tasks in ${folder}` : `${folder} is not a folder, so there are no tasks`}. ` +
@@ -244,13 +248,14 @@ function list(args: string[]): void {
 }
 
 function ready(args: string[]): void {
-	if (args.length) {
+	const verbose = args.includes('--verbose')
+	if (args.length !== Number(verbose)) {
 		throw new Error(
-			`ken task ready takes no arguments, got ${JSON.stringify(args.join(' '))}. Run \`ken task ready\`.`
+			`ken task ready takes only --verbose, got ${JSON.stringify(args.join(' '))}. Run \`ken task ready\`.`
 		)
 	}
 	const { root, folder } = settings()
-	const paths = readyTasks(root, folder, localDate(new Date())).map((row) => row.path)
+	const paths = readyTasks(root, folder, localDate(new Date()), verbose).map((row) => row.path)
 	if (paths.length) process.stdout.write(`${paths.join('\n')}\n`)
 	else {
 		process.stderr.write(

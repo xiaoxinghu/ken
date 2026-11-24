@@ -126,8 +126,8 @@ Decided in this order, derived on every run:
 
 `<name>` is the task's path in the folder without extension, and its repo is the clone
 `ken path code <repo>` prints; each repo is asked of git once per run. A repo not cloned
-on this machine has no branch, so its tasks take the state their status gives, said once
-per repo on stderr.
+on this machine has no branch, so its tasks take the state their status gives, reported once
+per repo on stderr by `list` and `ready` only with `--verbose`.
 
 A blocker holds a task back until it is landed, not merely done. **Resolution** of a
 reference is a stat of two paths: live in the folder, its state applies; in the archive,

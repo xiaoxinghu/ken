@@ -323,14 +323,14 @@ promote, ingest.
 `@unclex/ken` bundles six commands, each in the form of an extension, run by the runtime
 that runs ken ([extensions](extensions.md)). A root's `.bin/` can replace any of them.
 
-| Command                       | Does                                                                                                                      |
-| ----------------------------- | ------------------------------------------------------------------------------------------------------------------------- |
-| `status`                      | the session-start overview, and the session's `PATH` and pointers where the harness has a way ([templates](templates.md)) |
-| `log <kind> <subject> <what>` | one line on `log.md`, the session's digest first (The knowledge base, below)                                              |
-| `digest [<transcript>]`       | a harness's transcript to `.sessions/<id>.jsonl` ([templates](templates.md))                                              |
-| `session <id> [<range>]`      | the entries of a digest                                                                                                   |
-| `task <command>`              | plain-text tasks in one folder, a worktree per task ([`ken-task`](ken-task.md))                                           |
-| `lint`                        | the knowledge-base lint: indexes, links, references ([`ken-lint`](ken-lint.md))                                           |
+| Command                       | Does                                                                                                                                                                                          |
+| ----------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `status [--verbose]`          | the session-start overview (only `--verbose` includes missing-clone notices from `task ready`), and the session's `PATH` and pointers where the harness has a way ([templates](templates.md)) |
+| `log <kind> <subject> <what>` | one line on `log.md`, the session's digest first (The knowledge base, below)                                                                                                                  |
+| `digest [<transcript>]`       | a harness's transcript to `.sessions/<id>.jsonl` ([templates](templates.md))                                                                                                                  |
+| `session <id> [<range>]`      | the entries of a digest                                                                                                                                                                       |
+| `task <command>`              | plain-text tasks in one folder, a worktree per task ([`ken-task`](ken-task.md))                                                                                                               |
+| `lint`                        | the knowledge-base lint: indexes, links, references ([`ken-lint`](ken-lint.md))                                                                                                               |
 
 ## The index: `.repos.index`
 

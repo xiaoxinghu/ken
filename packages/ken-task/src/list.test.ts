@@ -102,10 +102,7 @@ describe('ken task list', () => {
 		chmodSync(join(folder, 'locked'), 0o755)
 		chmodSync(join(folder, 'unsearchable'), 0o755)
 		expect(r.status).toBe(0)
-		// the repos the tasks name are not cloned here, which is all stderr says
-		expect(r.stderr.match(/^.* is not cloned on this machine .*$/gm)?.join('\n')).toBe(
-			r.stderr.trim()
-		)
+		expect(r.stderr).toBe('')
 		rows = new Map((JSON.parse(r.stdout) as Row[]).map((t) => [t.path, t]))
 	})
 

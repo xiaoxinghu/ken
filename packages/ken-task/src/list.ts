@@ -148,9 +148,14 @@ export function resolveRef(
  * The ready tasks in `configured` as of `today`, in the order to take them: earliest `due`,
  * then earliest created, then path, so two runs agree.
  */
-export function readyTasks(root: string, configured: string, today: string): Row[] {
+export function readyTasks(
+	root: string,
+	configured: string,
+	today: string,
+	verbose = false
+): Row[] {
 	const key = (row: Row) => [row.due ?? '~', row.created ?? '~', row.path]
-	return listTasks(root, configured, today)
+	return listTasks(root, configured, today, { verbose })
 		.filter((row) => row.state === 'ready')
 		.map((row) => ({ row, key: key(row) }))
 		.sort((a, b) => (a.key.join('\0') < b.key.join('\0') ? -1 : 1))
@@ -160,20 +165,19 @@ export function readyTasks(root: string, configured: string, today: string): Row
 /**
  * Every task in `folder`, a folder of the root `root`, by path, with its state as of
  * `today`. Each row is made on its own: whatever throws while making one makes that row a
- * problem, so no file can stop the listing. `quiet` leaves unsaid which repos are not
- * cloned here, for a caller that says it itself.
+ * problem, so no file can stop the listing. `verbose` reports repos not cloned here.
  */
 export function listTasks(
 	root: string,
 	configured: string,
 	today: string,
-	{ quiet = false }: { quiet?: boolean } = {}
+	{ verbose = false }: { verbose?: boolean } = {}
 ): Row[] {
 	// the real path, as the root is, so that every path compares as the disk names it
 	const folder = real(configured)
 	const created = since(root, folder)
 	const tasks = new Map(walk(folder).map((path) => [path, load(path)]))
-	const repo = repos(quiet)
+	const repo = repos(!verbose)
 	return [...tasks.entries()]
 		.sort(([a], [b]) => (a < b ? -1 : 1))
 		.map(([path, read]) => {

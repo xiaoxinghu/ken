@@ -209,9 +209,15 @@ describe('repo tasks', () => {
 			expect(r.stdout).toBe(
 				`ready  ${join(root, 'tasks/a.md')}\ndone   ${join(root, 'tasks/b.md')}\n`
 			)
-			expect(r.stderr.trim().split('\n')).toEqual([
-				expect.stringContaining('example.com/acme/gone is not cloned on this machine')
-			])
+			for (const args of [['list', '--json'], ['ready']]) {
+				const normal = kenTask(root, args)
+				const verbose = kenTask(root, [...args, '--verbose'])
+				expect(normal.stderr).toBe('')
+				expect(verbose.stdout).toBe(normal.stdout)
+				expect(verbose.stderr.trim().split('\n')).toEqual([
+					expect.stringContaining('example.com/acme/gone is not cloned on this machine')
+				])
+			}
 		})
 	})
 })

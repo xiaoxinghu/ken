@@ -29,8 +29,7 @@ export function claimTask(
 		)
 	}
 	const path = resolveTask(root, configured, cwd, arg)
-	// its refusal says it when the task's repo is not cloned, so the listing does not
-	const row = listTasks(root, configured, today, { quiet: true }).find((r) => r.path === path)
+	const row = listTasks(root, configured, today).find((r) => r.path === path)
 	const name = branchOf(folder, path)
 	const key = requireClaimable(path, name, row)
 	const worktree = claim(key, name)
